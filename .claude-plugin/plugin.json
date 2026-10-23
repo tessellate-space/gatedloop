@@ -1,0 +1,12 @@
+{
+  "name": "gatedloop",
+  "version": "0.7.0",
+  "description": "The enforcement and onboarding layer for OpenSpec: gated per-task TDD, convention review, and a blocking live self-check carry an approved OpenSpec change to verified-on-main. Bring your own schema, bring your own stack.",
+  "author": {
+    "name": "radub21"
+  },
+  "homepage": "https://github.com/tessellate-space/gatedloop",
+  "repository": "https://github.com/tessellate-space/gatedloop",
+  "license": "MIT",
+  "keywords": ["openspec", "spec-driven-development", "tdd", "workflow", "closed-loop"]
+}

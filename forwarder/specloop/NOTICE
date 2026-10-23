@@ -1,0 +1,1 @@
+Specloop is now gatedloop. Run `/plugin marketplace add tessellate-space/gatedloop`, then `/plugin install gatedloop@gatedloop`, then `/plugin uninstall specloop@specloop` and `/plugin marketplace remove specloop`. Then run `gates migrate-name` in each project. This plugin no longer runs the loop.

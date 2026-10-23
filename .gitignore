@@ -1,0 +1,16 @@
+# The test suite loads bin/harness by path, which byte-compiles it in place.
+__pycache__/
+*.pyc
+
+# .gatedloop/runs/<change>.jsonl is the durable gate-outcome ledger (design
+# D7/D8) — deliberately NOT ignored. It is committed with the change and
+# archives with it; only the ephemeral marker under .git/ is per-worktree.
+.claude/worktrees/
+
+# .gatedloop/out/ holds `gates run`'s captured gate output (design D3,
+# scale-gate-cost) -- ephemeral, rotated, and never the durable record
+# (that's .gatedloop/runs/, deliberately NOT ignored above).
+.gatedloop/out/
+
+# macOS Finder metadata.
+.DS_Store

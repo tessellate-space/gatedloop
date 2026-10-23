@@ -1,0 +1,72 @@
+name: Field report (it worked)
+description: gatedloop worked in your stack — a positive confirmation. This is field evidence too.
+title: "[field-report] "
+labels: ["field-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A confirmation that gatedloop worked in a stack we may not have anticipated is
+        first-class field evidence — thank you. This form mirrors what `/gatedloop:feedback`
+        collects; running that skill is the safe default route, and it shows you the exact
+        body before anything is posted.
+
+        **Privacy — please read.** Do **not** paste: diff content, your project's file
+        contents, gate **command bodies** (the real command a gate name maps to), environment
+        variables, or credentials. Include only the whitelisted fields below. Describe your
+        stack in general terms (language, framework, task runner, OS) — you do not need
+        to reveal anything proprietary to say it worked.
+  - type: textarea
+    id: what-worked
+    attributes:
+      label: What worked
+      description: Which journey(s) you ran and what went well — onboarding, the loop, the unattended agent, the session brief.
+      placeholder: |
+        Ran /gatedloop:gates-init then /gatedloop:tdd-apply on a small change; the gated loop
+        committed per task and stopped before the merge as documented.
+    validations:
+      required: true
+  - type: input
+    id: stack
+    attributes:
+      label: Stack (general terms)
+      description: Language / framework / task runner, described generally. No proprietary detail required.
+      placeholder: "your language + framework, your task runner, your OS"
+    validations:
+      required: false
+  - type: input
+    id: command-or-gate
+    attributes:
+      label: Command or gate exercised
+      description: The `/gatedloop:*` or `/opsx:*` command, or the abstract gate name. The gate NAME only — never the command it maps to.
+    validations:
+      required: false
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `plugin.json`'s `version` field.
+    validations:
+      required: false
+  - type: input
+    id: openspec-version
+    attributes:
+      label: OpenSpec CLI version
+      description: Output of `openspec --version`.
+    validations:
+      required: false
+  - type: input
+    id: os-platform
+    attributes:
+      label: OS / platform
+      description: Output of `uname -sm` (or your OS equivalent).
+    validations:
+      required: false
+  - type: textarea
+    id: gates-shape
+    attributes:
+      label: .gates.yaml shape (names + globs ONLY)
+      description: "The gate NAMES (keys under `gates:`) and each surface's name + `match` glob. NEVER the command a gate name maps to, and never a `live-check:` value."
+      render: text
+    validations:
+      required: false

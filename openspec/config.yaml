@@ -1,0 +1,26 @@
+schema: spec-driven
+
+context: |
+  gatedloop is a spec-driven, closed-loop development workflow packaged as a
+  Claude Code plugin. It carries a change idea → proposal → TDD-per-task →
+  convention review → verify → live self-check → squash-merge, driving every
+  project-specific command through the `gates` shim and a per-project
+  `.gates.yaml` (gates + surfaces). The plugin is stack-agnostic: it ships the
+  process, adopters supply the bindings.
+
+  Repo layout: `.claude-plugin/` (plugin + marketplace manifests), `commands/`
+  (flat user commands), `skills/<name>/SKILL.md`, `agents/`, `hooks/`,
+  `bin/gates` (the shim), `schema/gates.schema.json`, `templates/`.
+
+  Convention rule-id prose lives at `docs/conventions.md`, not here — this
+  repo's own `.gates.yaml` points `conventions.rules-doc` there, and the
+  `convention-review` gate resolves rule-ids against it directly. The `rules:`
+  block below is *generated* from that source by `gates conventions sync`,
+  keyed by artifact id as OpenSpec's `rules:` shape requires; `gates validate`
+  fails loudly if it drifts from the source. Do not hand-edit it.
+
+rules:
+  proposal:
+    - "Before proposing a new gatedloop capability, apply the rejection test — reject anything that only authors an artifact or only binds a stack command."
+  tasks:
+    - "A change that adds, removes or alters an adopter-facing surface updates README.md and SETUP.md in the same change (and AUTOMATION.md when it changes enforcement)."

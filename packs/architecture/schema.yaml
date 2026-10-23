@@ -1,0 +1,115 @@
+name: architecture
+version: 1
+description: "Architecture OpenSpec workflow - explore -> design -> adr, terminal at an accepted decision. No apply block - this schema ends at the decision, not at code (design D4)."
+artifacts:
+  - id: explore
+    generates: explore.md
+    description: Open-ended framing of the problem and the options, before any decision is made
+    template: explore.md
+    instruction: >
+      Frame the problem this change exists to decide, without deciding it
+      yet. This artifact is exploration, not a proposal — it should be
+      possible to read it and still not know which way the decision will
+      go.
+
+
+      Sections:
+
+      - **Problem**: what forces a decision now? What breaks, or stays
+      broken, if nothing changes?
+
+      - **Constraints**: what's fixed regardless of which option is chosen —
+      existing commitments, prior ADRs (list every file in `<repo>/adr/` and
+      note which are currently in force), non-negotiable requirements.
+
+      - **Options considered**: every option worth naming, including ones
+      you expect to reject — a design that only presents the option it
+      picks is not exploration, it's a proposal wearing this artifact's
+      name.
+
+      - **Open questions**: what would change the answer, and what would
+      answer it.
+
+
+      Keep judgment out of this artifact where you can. The design artifact
+      is where a position gets taken.
+    requires: []
+  - id: design
+    generates: design.md
+    description: The decision, with rationale, built on what explore.md framed
+    template: design.md
+    instruction: >
+      Take the position that explore.md deliberately withheld. This is
+      where the decision gets made and defended.
+
+
+      Sections:
+
+      - **Context**: summarize explore.md's problem framing — don't
+      re-litigate it here, reference it.
+
+      - **Goals / Non-Goals**: what this decision settles, and what it
+      explicitly leaves open for later.
+
+      - **Decision**: the choice, stated plainly, with the rationale for why
+      it beats the alternatives explore.md listed. Address every option
+      explore.md named — silently dropping one reads as not having
+      considered it.
+
+      - **Consequences**: what gets easier, what gets harder, what this
+      forecloses.
+
+      - **Open questions**: anything still unresolved, including whether any
+      currently-in-force ADR (from `<repo>/adr/`) needs to be revisited by
+      the adr step that follows.
+
+
+      This artifact is the one place in this schema where a durable
+      commitment is argued for. The adr step distills it into the record;
+      it does not re-argue it.
+    requires:
+      - explore
+  - id: adr
+    generates: adr.md
+    description: The durable decision record this change contributes, plus a completion manifest
+    template: adr.md
+    instruction: >
+      Distill design.md's decision into a repository-level Architecture
+      Decision Record at `<repo>/adr/NNNN-kebab-title.md` — the path means
+      the target repository's top-level `adr/` folder beside `openspec/`,
+      never a folder inside `openspec/`. Then write `adr.md` in THIS change
+      directory as the completion manifest; `adr.md` is what marks the
+      artifact done, and it must exist even when this change's decision
+      doesn't clear the bar for a durable record (see step 3).
+
+
+      1. Read every existing file in `<repo>/adr/`. Build the supersession
+      graph from each ADR's `Supersedes:` field — an ADR is no longer in
+      force once a later one's `Supersedes:` names it. Note the highest
+      sequence number in use.
+
+      2. This schema exists specifically for decisions that clear the bar —
+      a long-term commitment (pattern, technology, boundary, contract) that
+      will constrain future changes. If design.md's decision genuinely
+      doesn't (rare, given this schema was chosen for it), say so explicitly
+      in `adr.md` rather than inventing an ADR to fill the artifact.
+
+      3. Otherwise, write the new file at `<repo>/adr/NNNN-kebab-title.md`
+      (NNNN one greater than the highest existing, monotonic across the
+      whole repo, never reused). ADRs are immutable once accepted — do not
+      edit a prior file's status, body, or date under any circumstance. To
+      revise a previously accepted decision, record a NEW ADR whose Status
+      is "accepted, supersedes ADR-NNNN" and whose `Supersedes:` field names
+      the prior one; the prior file stays exactly as it was.
+
+      4. Use this structure for the ADR file itself: title, `Status:`
+      (proposed | accepted | accepted, supersedes ADR-XXXX), `Date:`,
+      optional `Supersedes:`, then `## Context`, `## Decision`, `##
+      Consequences`.
+
+      5. Write `adr.md` in this change directory referencing the ADR file(s)
+      just created (or explicitly recording that none were, per step 2) —
+      it should not duplicate their full Context/Decision/Consequences, only
+      point at them.
+    requires:
+      - design

@@ -1,0 +1,88 @@
+# gatedloop's own CI, adapted from the example in docs/running-at-scale.md
+# (design D6 of merge-pull-request). This repository follows its own example:
+# it declares `integration: { mode: pull-request, requireApproval: true }`.
+#
+#   pull_request  ->  `gates run ci`, then `gates marker publish ci` and
+#                     `gates marker publish tests`: the `gatedloop/ci` and
+#                     `gatedloop/tests` statuses branch protection requires,
+#                     posted from GitHub Actions on the PR's head sha.
+#   push to main  ->  `gates record-merged $GITHUB_SHA`: the merge row and the
+#                     archive for a change merged in the forge, landed through
+#                     a follow-up PR from a `gatedloop/record-merged-*` branch.
+#                     That branch names no change, so when the follow-up PR
+#                     merges, this job runs again and skips it.
+#
+# Differences from the example: the shim is this checkout's own ./bin/gates
+# (no clone), and `ci` here also needs the Claude Code CLI (`claude plugin
+# validate .`) and the OpenSpec CLI (the tests that use it, and the archive).
+#
+# Repository settings this relies on (the maintainer sets them by hand):
+# branch protection on main requiring `gatedloop/ci` (and, once this
+# workflow has published it, `gatedloop/tests`) from GitHub Actions;
+# "Allow GitHub Actions to create and approve pull requests". No required
+# approving review: this repo has one maintainer, and GitHub does not let an
+# account approve its own pull request. `requireApproval: true` still withholds
+# auto-merge, so every merge stays the maintainer's click.
+name: gatedloop
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write       # record: push the follow-up branch
+  pull-requests: write  # record: open the follow-up PR
+  statuses: write       # both: post gatedloop/* statuses
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  ci:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}   # the head, not the merge preview
+          fetch-depth: 0                                   # scripts/release check reads v* tags
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @fission-ai/openspec@1.14.3 @anthropic-ai/claude-code
+      - run: ./bin/gates run ci
+      - run: ./bin/gates marker publish ci
+      - run: ./bin/gates marker publish tests
+
+  record:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @fission-ai/openspec@1.14.3 @anthropic-ai/claude-code
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - run: ./bin/gates record-merged "$GITHUB_SHA"
+      - name: Land the record through a follow-up PR
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]; then
+            echo "nothing recorded for $GITHUB_SHA"
+            exit 0
+          fi
+          ./bin/gates run ci
+          branch="gatedloop/record-merged-${GITHUB_SHA::7}"
+          git push origin "HEAD:refs/heads/$branch"
+          # Publish only once the forge has the commit: a status on an
+          # unpushed sha is refused (HTTP 422, cross-worktree-evidence D5).
+          ./bin/gates marker publish ci --sha "$(git rev-parse HEAD)"
+          ./bin/gates marker publish tests --sha "$(git rev-parse HEAD)"
+          gh pr create --head "$branch" --base main \
+            --title "$(git log -1 --format=%s)" \
+            --body "Recorded by \`gates record-merged $GITHUB_SHA\`: the merge row and the archive of the change that commit merged."

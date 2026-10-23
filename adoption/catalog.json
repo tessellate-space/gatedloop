@@ -1,0 +1,164 @@
+{
+  "items": [
+    {
+      "id": "approval.acceptance",
+      "since": "0.5.0",
+      "what": "An optional human acceptance of each change's working behaviour, recorded against the exact tree that merges (`approval.acceptance` in .gates.yaml).",
+      "question": "Should a human accept each change's working behaviour before it merges?",
+      "options": [
+        {"answer": "adopted", "value": "self", "label": "Yes, I accept my own changes: `acceptance: self` (Recommended)"},
+        {"answer": "adopted", "value": "review", "label": "Yes, a reviewer accepts on the pull request: `acceptance: review` (needs `integration.mode: pull-request`)"},
+        {"answer": "declined", "label": "No acceptance step: a change merges once its gates are green, as today"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "approval.acceptance"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "approval.acceptance"}
+    },
+    {
+      "id": "loop.test-author",
+      "since": "0.5.0",
+      "what": "Who writes a change's failing tests: a separate test-author agent, once per change before the first task, or the implementer itself under the same lock (`loop.test-author` in .gates.yaml).",
+      "question": "Who should write each change's tests?",
+      "options": [
+        {"answer": "adopted", "value": "separate", "label": "A separate test author, before implementation starts: `test-author: separate` (Recommended)"},
+        {"answer": "adopted", "value": "inline", "label": "The implementer writes them itself, bound by the same lock: `test-author: inline`"},
+        {"answer": "declined", "label": "Leave it unset: the default, `separate`, applies"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.test-author"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.test-author"}
+    },
+    {
+      "id": "test-conventions",
+      "since": "0.5.0",
+      "what": "Your project's own test rules (`Applies to: tests` in the rules-doc), which the test author writes to and the reviewer checks. Without them, new tests follow only the built-in rule and can read as foreign to the project.",
+      "question": "Capture this project's test conventions now, from the material it already has?",
+      "options": [
+        {"answer": "adopted", "label": "Capture them now; I confirm each rule before it is written (Recommended)"},
+        {"answer": "declined", "label": "No: the test author follows the built-in rule only"}
+      ],
+      "detector": {"kind": "rules-target", "target": "tests"},
+      "applies_when": null,
+      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 6, the test-conventions pass"}
+    },
+    {
+      "id": "runner-strictness",
+      "since": "0.5.0",
+      "what": "The runner behind a blocking gate must fail on an undefined test and must not retry a failure to green; only its own configuration can guarantee that.",
+      "question": "Have you checked that the runners behind your blocking gates fail on an undefined or skipped test and never retry a failure to green?",
+      "options": [
+        {"answer": "adopted", "label": "Yes, I have checked them (Recommended)"},
+        {"answer": "declined", "label": "No, and don't ask again: I accept that a gate may pass on an undefined or retried test"}
+      ],
+      "detector": {"kind": "decision-only"},
+      "applies_when": {"kind": "any", "of": [
+        {"kind": "manifest-key", "key": "gates.verify"},
+        {"kind": "manifest-key", "key": "gates.integration"},
+        {"kind": "surface-key", "key": "live-check"}
+      ]},
+      "action": {
+        "kind": "confirm",
+        "detail": "gatedloop cannot read runner flags out of a command string without naming a stack, so this is yours to honour in each bound runner's own configuration. A blocking gate's runner must: (1) fail on an undefined test, or on one skipped because its implementation is missing; (2) not retry a failure until it passes, because a retry that passes hides a flaky test on a blocking path; (3) keep checks whose verdict depends on a model's reply under the advisory `eval` gate. Check the commands bound to `verify`, `integration` and each surface's `live-check`."
+      }
+    },
+    {
+      "id": "schema-flow",
+      "since": "0.5.0",
+      "what": "A project-local schema can declare `gatedloop: { flow: regression-first }`, so the loop runs a failing reproduction red before any fix instead of the default per-task loop.",
+      "question": "Review this project's local schemas for the regression-first flow now?",
+      "options": [
+        {"answer": "adopted", "label": "Review them now (Recommended)"},
+        {"answer": "declined", "label": "No: every local schema keeps the default per-task flow"}
+      ],
+      "detector": {"kind": "schema-key", "key": "gatedloop"},
+      "applies_when": {"kind": "path-exists", "glob": "openspec/schemas/*/schema.yaml"},
+      "action": {
+        "kind": "confirm",
+        "detail": "/gatedloop:tdd-apply routes a schema by its structure and what it declares, never by its name (`gates schema dispatch <name>`). A schema with an `apply:` block that has `tracks` runs the per-task loop unless it declares a top-level `gatedloop:` key with `flow: regression-first`; then the failing reproduction must run red before any fix, as in the bundled bugfix pack. Name each schema under openspec/schemas/ and the route `gates schema dispatch` gives it; declaring the key in a schema is the adopter's own edit to that schema."
+      }
+    },
+    {
+      "id": "confirm-gate",
+      "since": "0.5.0",
+      "what": "An optional `confirm` gate that brings the merged tree up on your own environment and smoke-checks it, which `gates merge` runs before anything is pushed (`gates.confirm` in .gates.yaml).",
+      "question": "This project binds a live-check. Should `gates merge` also smoke-check the merged tree with a `confirm` gate before it pushes?",
+      "options": [
+        {"answer": "adopted", "label": "Yes, bind a confirm gate now through onboarding's confirm offer (Recommended)"},
+        {"answer": "declined", "label": "No: the merge skips its confirm step with a note, as today"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "gates.confirm"},
+      "applies_when": {"kind": "surface-key", "key": "live-check"},
+      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 5, the `confirm` offer"}
+    },
+    {
+      "id": "git-hook-refresh",
+      "since": "0.5.0",
+      "recurs": true,
+      "what": "The git pre-commit hook in this repository is a direct copy of an earlier (or locally edited) gatedloop template, so it does not run the shipped check. A refresh replaces the copy and keeps the old body in `pre-commit.gatedloop-prev` beside it.",
+      "question": "Refresh the git pre-commit hook to the template this gatedloop version ships?",
+      "options": [
+        {"answer": "adopted", "label": "Refresh it now; the old body is kept in `pre-commit.gatedloop-prev` (Recommended)"},
+        {"answer": "declined", "label": "Not at this version: keep the installed copy, which does not run the shipped check"}
+      ],
+      "detector": {"kind": "git-hook-current"},
+      "applies_when": {"kind": "git-hook-copy"},
+      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 10, the git-layer commit hook install"}
+    },
+    {
+      "id": "approval-keys",
+      "since": "0.5.1",
+      "recurs": true,
+      "what": "An active change's `.openspec.yaml` still carries gatedloop's approval keys in the earlier spelling (`approved_by`, `approved_at`, `approved_sha`). OpenSpec 1.14 reports them as unrecognized and `openspec validate --strict` fails on them; it ignores keys starting with `x-`, which is where gatedloop 0.5.1 writes them.",
+      "question": "Rename the approval keys in this project's active changes to the `x-gatedloop-approved-*` spelling?",
+      "options": [
+        {"answer": "adopted", "label": "Rename them now with `gates approval migrate`, then commit the result (Recommended)"},
+        {"answer": "declined", "label": "Not at this version: keep the earlier spelling, which gatedloop still reads but `openspec validate --strict` fails on"}
+      ],
+      "detector": {"kind": "old-approval-keys"},
+      "applies_when": null,
+      "action": {"kind": "confirm", "detail": "Run `gates approval migrate`. It renames `approved_by`, `approved_at` and `approved_sha` to `x-gatedloop-approved-by`, `x-gatedloop-approved-at` and `x-gatedloop-approved-sha` in each active change's `.openspec.yaml`, keeping the values, and prints each file it changed. The approval sha covers no `.openspec.yaml`, so every approval still checks. It does not commit: commit the files it names (a planning-grade commit). Archived changes are left alone."}
+    },
+    {
+      "id": "retry-budget",
+      "since": "0.6.0",
+      "what": "The loop's stopping rule is now enforced from the ledger: after a task's RED run it gets `loop.attempts` failed `unit` or `ci` runs (default 2), then `gates run` refuses that task's next run. One fresh restart per task (`loop.fresh-restarts`, default 1) is allowed first, in a new agent context that reads only the task's attempt notes, before a human gets it.",
+      "question": "How many failed attempts should a task get before the loop stops, with one fresh restart before a human?",
+      "options": [
+        {"answer": "adopted", "value": 2, "label": "Keep the defaults, 2 failed attempts then 1 fresh restart: `attempts: 2` (Recommended)"},
+        {"answer": "adopted", "value": 3, "label": "A larger budget: `attempts: 3`; edit it afterwards to set your own"},
+        {"answer": "declined", "label": "Leave it unset: the defaults apply; to disable restarts, set `loop.fresh-restarts: 0` by hand"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.attempts"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.attempts"}
+    },
+    {
+      "id": "merge-checkpoint",
+      "since": "0.6.0",
+      "recurs": true,
+      "what": "Your `.claude/settings.local.json` asks on `Bash(git merge *)`, the rule earlier permission scaffolding wrote. Every `git merge` an agent issues then prompts, including a lane's routine sync of the target into its own change branch, and an unattended lane stalls on a prompt nobody answers. Integration now goes through `gates merge` (or the forge), so the human checkpoint belongs there.",
+      "question": "Move the permission checkpoint from every `git merge` to `gates merge`?",
+      "options": [
+        {"answer": "adopted", "label": "Yes: I replace `Bash(git merge *)` with `Bash(gates merge *)` in `permissions.ask` (Recommended)"},
+        {"answer": "declined", "label": "Not at this version: keep asking on every `git merge`, and accept that unattended lanes stall on a sync"}
+      ],
+      "detector": {"kind": "file-contains", "path": ".claude/settings.local.json", "text": "Bash(git merge *)"},
+      "applies_when": {"kind": "path-exists", "glob": ".claude/settings.local.json"},
+      "action": {"kind": "confirm", "detail": "In `.claude/settings.local.json`, under `permissions.ask`, replace `\"Bash(git merge *)\"` with `\"Bash(gates merge *)\"`, leaving every other rule as it is. This is the adopter's own one-line edit; gatedloop never changes a permission file without an explicit yes. The merge hook still gates a raw integration `git merge` into the target, and `gates merge`, the command that integrates, still always asks. The change takes effect in a new session."}
+    },
+    {
+      "id": "rename",
+      "since": "0.7.0",
+      "recurs": true,
+      "what": "This project still uses the plugin's earlier name, Specloop: a `.specloop/` state directory, `x-specloop-*` keys in an active change, or `specloop` markers in its git pre-commit hook. They are read, with a warning, until 0.8.0.",
+      "question": "Move this project onto the gatedloop names now?",
+      "options": [
+        {"answer": "adopted", "label": "Yes: I run `gates migrate-name`, commit what it changed, and make the edits it prints (Recommended)"},
+        {"answer": "declined", "label": "Not at this version: keep the earlier names, which stop working in 0.8.0"}
+      ],
+      "detector": {"kind": "earlier-name"},
+      "applies_when": null,
+      "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which can wait because both contexts are posted until 0.8.0."}
+    }
+  ]
+}

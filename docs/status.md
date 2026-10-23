@@ -1,0 +1,157 @@
+# gatedloop status
+
+**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3.** Nobody
+else has reported running the loop end to end. This page says what has been
+exercised, where the plugin is fragile, and what depends on OpenSpec staying the way
+it is. It is kept current with each release; [`README.md`](../README.md) has the
+status paragraph and the quickstart, and [`SETUP.md`](../SETUP.md) the `.gates.yaml`
+contract.
+
+## Tested by
+
+One maintainer. Two people were invited to try it from 2026-08-21, and neither filed
+anything. So every claim below comes from one person's projects, one stack at a time, and
+mostly one host: Claude Code, locally and on the web.
+
+## What has been exercised
+
+| Surface | Exercised | How |
+|---|---|---|
+| The `gates` shim and the hook scripts | yes | the `unittest` suite in `tests/`, run by this repository's own `ci`, against real git repositories and worktrees |
+| Onboarding (`/gatedloop:gates-init`, `gates doctor`) | yes, by one person | on the maintainer's projects; never on a stack the maintainer didn't pick |
+| The gated loop (`/gatedloop:tdd-apply`, the `tdd-implementer` and `test-author` agents) | yes, by one person | every change in this repository since it began gating itself, plus the maintainer's other projects |
+| Plan PRs, attestation and `gates handoff` | yes, by one person | the setup in [`topology.md`](./topology.md) |
+| The merge lane (`gates merge` in both modes, `gates record-merged`, `gatedloop/*` statuses) | yes, by one person | this repository runs in pull-request mode with branch protection |
+| The SessionStart brief and `/gatedloop:start` | yes, by one person | in the maintainer's repositories only |
+| Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
+| `/gatedloop:feedback` | barely | built for reports that never came |
+
+The prompts (commands, skills, agents) have no automated oracle. `ci` here says the
+shim still parses, the version fields agree and the plugin still loads. It says
+nothing about whether a prompt is right; running it is the only test the prompt
+surface has.
+
+## Sharp edges
+
+Each one is labeled. **Shipped** means it is how the current release behaves.
+**Shipped limitation** means it is known and accepted, with no fix planned.
+**Planned** means a change exists to fix it and hasn't landed. Hitting one of these
+is not a new bug; hitting something not listed here may be.
+
+### A gate longer than the host's tool-call cap — *shipped limitation*
+
+The shipped skill and the `tdd-implementer` agent run every gate in the foreground
+and read its exit code in the same turn. The host caps a tool call at 600 seconds,
+so a `ci` that takes longer than that can't finish in one call. Where it does, the
+pattern in use is to start the gate in the background with its exit code appended to
+a file, end the turn, and read the file when the completion notice arrives;
+[`topology.md`](./topology.md), "Implementing", has it. Nothing in the plugin does
+this for you.
+
+### The invisible install — *shipped limitation*
+
+Claude Code supports several config profiles through `CLAUDE_CONFIG_DIR`. A plugin
+installed under one profile is invisible under another: no commands, no skills, no
+session brief, and no error. Nothing inside a session can diagnose its own absence,
+so check from a plain shell:
+
+```bash
+echo $CLAUDE_CONFIG_DIR
+```
+
+Then confirm the plugin is registered under that profile. `gates doctor` reports the
+partly visible states, such as `gates` not on PATH, but by construction it can't see
+a fully invisible install.
+
+### Hook changes need a new session — *shipped*
+
+The enforcement hooks load at session start. Install or update the plugin, then start
+a new session; until then the old hooks, or none, are in force.
+
+### The git layer only enforces inside Claude Code — *planned*
+
+The optional git `pre-commit` hook (`gates hook install`) is a no-op unless
+`CLAUDECODE` is set, so an agent on another host commits ungated. There is no
+git-layer check on a push to the merge target at all. `git-layer-enforcement` makes
+the agent environment declarable and adds a `pre-push` gate.
+
+### The authored-test lock is checked at commit time only — *planned*
+
+The commit hooks refuse an edited locked test in the staged index. Nothing re-checks
+the lock at the merge head or in CI, so a test edited through a path the hooks didn't
+see (a `--no-verify`, a hand edit) reaches the merge with the lock broken.
+`test-lock-remote-check` adds the check at any commit.
+
+### Statuses posted from a laptop are self-reported — *shipped, by design*
+
+The merge hook covers `git merge`. A merge made in the forge never passes through it.
+Pull-request mode closes that path at the forge instead: `gates merge` publishes the
+`ci` and `live-check` markers as `gatedloop/<gate>` commit statuses naming the tree
+they proved, and `gates record-merged <sha>` writes the merge row and the archive
+afterwards. A status posted from a laptop proves only that the laptop said so; it is
+evidence only where branch protection requires `gatedloop/ci` from your CI provider.
+That protection is a repository setting only you can apply;
+[`running-at-scale.md`](./running-at-scale.md), §5, lists it.
+
+### Propose on the merge target, one branch per change — *shipped, by design*
+
+Plans are authored on `main`, or on a `plan/*` branch based on it, in its own
+worktree. From any other branch OpenSpec loses sight of other in-flight changes, so
+the scaffold step is hook-denied there. Implementation uses one branch per change
+(branch name = change name), and cutting it is hook-gated on the plan being merged and
+its approval attested.
+
+### Re-running onboarding over an existing manifest — *shipped*
+
+`/gatedloop:gates-init` validates an existing `.gates.yaml` and asks before
+regenerating it, and stops to confirm before `openspec init` regenerates
+locally edited `/opsx:*` command files. Both are prompt rules, not code: back up a
+hand-tuned manifest before re-running it.
+
+### Installed workflow packs don't update — *shipped limitation*
+
+A pack installed into a project is a snapshot. There is no registry, no version pin
+and no `openspec schema update`; a later improvement reaches the project only by
+reinstalling it. [`AGENT_INSTALL.md`](../AGENT_INSTALL.md) says the same.
+
+### The earlier plugin name still reads for one release — *shipped*
+
+The plugin was renamed in 0.7.0. Through 0.7.x the earlier names are read with a
+one-line warning, and they stop working in 0.8.0; `gates migrate-name` does the
+migration. README's migration section has the steps.
+
+## Upstream coupling
+
+gatedloop does not author anything; OpenSpec does, and the shim reads what OpenSpec
+prints. Tested against **OpenSpec 1.14.3**. `gates doctor` warns, without failing, on
+any other version.
+
+| gatedloop relies on | Used by | When upstream changes it |
+|---|---|---|
+| `openspec list --json` | the session brief, the candidate list in [`running-at-scale.md`](./running-at-scale.md) §1 | the brief offers the wrong menu, or none |
+| `openspec status --change <name> --json` | `tdd-apply` (where to resume, and the change's `schemaName` for dispatch); the commit hook's check of a proposal-only change | resume and dispatch stop, and planning commits are denied: a halt, not a wrong commit |
+| `openspec instructions <artifact> --change <name> --json` | `tdd-apply` step 2 (the context files to read) | the loop reads less context than it should, and nothing refuses |
+| `openspec validate` | the commit hook's check of each staged change in a planning commit; the plan-check job; this repository's close-out | planning commits are denied, or a malformed plan passes |
+| `openspec archive <change> --yes` | `gates merge` (its archive step), `gates record-merged`, `/gatedloop:archive` | the merge stops at its archive step, after the merge row |
+| the generated `/opsx:*` commands | `/gatedloop:propose` delegates to `/opsx:propose`, `/gatedloop:archive` to `/opsx:archive` | propose or archive does whatever the new upstream prompt does; `openspec update --force` regenerates them without asking |
+| `.openspec.yaml` accepting `x-` keys | the approval keys (`x-gatedloop-approved-*`) and `x-gatedloop-epic` | `validate --strict` fails on every approved change |
+
+Workflow packs also read `openspec schemas --json` and `openspec schema which`.
+
+What has broken before is the last row: OpenSpec 1.14.0 started reporting unknown
+change metadata, and `--strict` failed on every attested change until the keys moved
+under `x-`, which 1.14.2 reserves for tools. Expect the next break in the JSON shapes,
+and check `gates doctor` first after any upgrade.
+
+## What's next
+
+The planned changes live in `openspec/changes/`, each with its proposal, design and
+tasks; ideas that aren't scheduled are in [`candidates.md`](./candidates.md). Open
+issues are the rest. Work on readiness (support, stability, a 1.0) waits until a
+second person has run one loop end to end; until then the plugin stays 0.x and
+changes without notice.
+
+So a missing feature is likely *coming*, or out of scope by the rejection test. A
+gate that commits on red, an agent that merges on its own, or a session brief that
+offers a command that does not resolve is *broken*. Report it with
+`/gatedloop:feedback` or a GitHub issue.

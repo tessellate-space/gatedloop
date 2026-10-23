@@ -1,0 +1,33 @@
+# Mirrors main to an Azure DevOps repository on every merge.
+#
+# One-way: Azure DevOps is a passive read-only mirror. Anything pushed there
+# directly will be overwritten by the next --force mirror push.
+#
+# Configuration (repo Settings → Secrets and variables → Actions):
+#   secret   ADO_PAT   Azure DevOps personal access token, Code → Read & Write
+#                      scope. PATs expire (max 1 year) — rotate before expiry.
+#   variable ADO_REPO  Target repo without scheme, e.g.
+#                      dev.azure.com/<org>/<project>/_git/<repo>
+name: Mirror main to Azure DevOps
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push main to Azure DevOps
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+          ADO_REPO: ${{ vars.ADO_REPO }}
+        run: |
+          if [ -z "$ADO_PAT" ] || [ -z "$ADO_REPO" ]; then
+            echo "::error::Mirroring is not configured — set the ADO_PAT secret and the ADO_REPO variable."
+            exit 1
+          fi
+          git push --force "https://pat:${ADO_PAT}@${ADO_REPO}" HEAD:refs/heads/main

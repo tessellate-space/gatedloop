@@ -1,0 +1,86 @@
+# .gates.yaml — the ONE file gatedloop reads to learn your project.
+# Copy to your repo root as `.gates.yaml` and fill in the blanks.
+# Validate with:  gates validate
+#
+# The workflow calls gates/live-checks by their ABSTRACT name and reads the
+# exit code — it never looks inside. Bodies can be `just`, `npm run`, `make`,
+# `cargo`, a raw shell line… anything that returns 0 on success.
+
+gatesVersion: 1
+taskSource: openspec
+
+gates:
+  # ci is the ONLY required gate: one exit code that means "safe to commit".
+  ci: "make check"            # e.g. "just ci" | "npm run ci" | "cargo test && cargo clippy"
+  # Optional — omit any you don't have; the workflow skips them cleanly.
+  unit: "make test"           # fast inner-loop tests
+  # integration: "make itest"
+  # verify: "make verify"     # spec -> behavior (e.g. BDD suite)
+  # eval: "make eval {dataset} {score}"   # advisory; {dataset}/{score} filled at call time
+  #
+  # A gate (or a surface's live-check, below) can also be a {run, requires}
+  # mapping instead of a plain string. `requires` is a precondition: it runs
+  # FIRST, and a non-zero exit means the environment is down, not that the
+  # gate failed — the shim reports it, skips `run` entirely, and exits the
+  # reserved code 75 rather than running `run` against a stack that isn't up.
+  # integration: {run: "make itest", requires: "make stack-check"}
+
+# A change's touched files decide which surfaces are "hot". Each hot surface
+# contributes its `rules` to the review scope and its `live-check` to the live
+# self-check. No areas? Use a single catch-all surface with match: "**".
+surfaces:
+  - name: all
+    match: "**"
+    # Rules scope the convention review for this surface. Inline prose (below)
+    # needs nothing else and is why this template validates as shipped.
+    rules:
+      - "Follow the conventions already visible in the surrounding code"
+    live-check: "make smoke"  # omit this line if there's no runtime probe
+
+# Prefer stable rule-ids once you have a conventions doc: a review finding can
+# then cite the id, and a dangling id fails `gates validate` loudly. Point
+# rules-doc at a file whose `### <rule-id>` headings match the ids you use.
+#
+# surfaces:
+#   - name: all
+#     match: "**"
+#     rules: [naming, error-handling]
+#
+# conventions:
+#   rules-doc: CONVENTIONS.md
+
+# Running N agents in their own git worktree, one merge lane in the primary
+# checkout? Two optional knobs support that pattern (docs/worktree-lanes.md
+# in the gatedloop repo has the full picture) — both are absent by default,
+# which is exactly today's behavior either way.
+#
+# discipline:
+#   propose-branches:        # branch-name globs accepted for proposal
+#     - "plan/*"              # authoring, alongside the merge target (always
+#     - "worktree/*"           # accepted). Declaring this REPLACES the plan/*
+#                              # default rather than adding to it.
+#
+# concurrency:
+#   serialize: [ci]           # gate names (or "live-check") to serialize
+#                              # machine-wide across every worktree of the
+#                              # repo — for the rare gate that can't run
+#                              # twice at once on one machine.
+#   max-wait-seconds: 480     # how long a run waits for the lock before
+#                              # exiting 75 with "gatedloop: lock busy"
+#                              # (default 480, below the 600 s tool cap).
+
+# A human gate AFTER the loop — optional, absent by default (nothing is
+# required and every hook behaves as before). `gates acceptance brief
+# <change>` shows the human each spec scenario and the verdicts for the
+# exact tree; the merge then needs an `accept` recorded against that tree.
+#
+# approval:
+#   plan: self                # who approves the plan (review | self)
+#   acceptance: self          # who accepts the behaviour: self (`gates acceptance
+#                             # attest <change> --local`) or review (the PR's
+#                             # approving review; needs integration.mode: pull-request)
+#
+# acceptance:
+#   match: "features/**/*.feature"   # where your acceptance scenarios live; a
+#                                    # spec scenario with a same-titled one is
+#                                    # `covered` in the brief, else `check by hand`

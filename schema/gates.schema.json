@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tessellate-space/gatedloop/schema/gates.schema.json",
+  "title": "gatedloop project manifest (.gates.yaml)",
+  "description": "The single project-specific file gatedloop reads. Binds a project's stack to the workflow's abstract contract: gates (abstract name -> command) and surfaces (glob -> rules + live-check).",
+  "type": "object",
+  "required": ["gatesVersion", "gates"],
+  "additionalProperties": false,
+  "$defs": {
+    "gateSpec": {
+      "description": "A gate/live-check value: either a literal command string, or a mapping with a required 'run' command and an optional 'requires' precondition command. When 'requires' is declared, the shim runs it first -- its non-zero exit is a distinct, machine-readable outcome (reserved exit code 75) and the 'run' body is never executed.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run"],
+          "properties": {
+            "run": { "type": "string", "minLength": 1, "description": "The command the workflow runs and reads the exit code of." },
+            "requires": { "type": "string", "minLength": 1, "description": "Optional precondition command. Must exit 0 before 'run' executes; a non-zero exit means the environment was absent, not that the gate failed." }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "gatesVersion": {
+      "description": "Manifest schema version. Bump when the shim's expected shape changes.",
+      "type": "integer",
+      "enum": [1]
+    },
+    "taskSource": {
+      "description": "The spec/task system the workflow wraps. v1 supports openspec only.",
+      "type": "string",
+      "enum": ["openspec"],
+      "default": "openspec"
+    },
+    "gates": {
+      "description": "Abstract capability name -> literal command or {run, requires} mapping. The workflow runs the NAME via `gates run <name>` and reads the exit code; it never inspects the body.",
+      "type": "object",
+      "required": ["ci"],
+      "additionalProperties": { "$ref": "#/$defs/gateSpec" },
+      "properties": {
+        "unit": { "$ref": "#/$defs/gateSpec", "description": "Fast inner-loop unit tests (optional but recommended)." },
+        "ci": { "$ref": "#/$defs/gateSpec", "description": "REQUIRED aggregate pre-commit oracle — one exit code." },
+        "integration": { "$ref": "#/$defs/gateSpec", "description": "Integration/API suite (optional)." },
+        "verify": { "$ref": "#/$defs/gateSpec", "description": "Spec -> behavior verification (optional)." },
+        "eval": { "$ref": "#/$defs/gateSpec", "description": "Advisory eval. May contain {dataset} and {score} placeholders substituted from `gates run eval <dataset> <score>`." },
+        "confirm": { "$ref": "#/$defs/gateSpec", "description": "Optional live confirmation of the merged tree, run by `gates merge` step 5 before anything is pushed: the project's own 'bring it up and smoke it' recipe. Red (or exit 75) stops the merge unpublished; undeclared, the step is skipped with a note." }
+      }
+    },
+    "surfaces": {
+      "description": "The changed-file set decides which surfaces are 'hot'; each hot surface contributes its rules to the review scope and its live-check to the live self-check.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "match"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "match": {
+            "description": "A glob, or list of globs, matched against changed file paths (relative to repo root).",
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+            ]
+          },
+          "rules": {
+            "description": "Convention rules for this surface. Each entry is a rule-id (resolved against conventions.rules-doc) OR inline rule prose.",
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "live-check": {
+            "$ref": "#/$defs/gateSpec",
+            "description": "Command (or {run, requires} mapping) run as the live self-check when this surface is hot (optional; omit for surfaces with no runtime probe)."
+          },
+          "gates": {
+            "description": "Optional per-surface overrides for the `ci`/`unit` gates (scale-gate-cost D1). Selected err-full: the scoped command runs only when this is the one non-catch-all hot surface in the diff and it declares the override for that gate; every other case runs the globally declared gate. Each named gate must also be declared globally. Each value takes the same scalar-or-{run, requires} shape as a top-level gate.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ci": { "$ref": "#/$defs/gateSpec" },
+              "unit": { "$ref": "#/$defs/gateSpec" }
+            }
+          }
+        }
+      }
+    },
+    "conventions": {
+      "description": "Where the prose behind rule-ids lives.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rules-doc": {
+          "description": "Path (repo-relative) to the canonical conventions doc. rule-ids in surfaces are resolved here.",
+          "type": "string"
+        }
+      }
+    },
+    "integration": {
+      "description": "How a change reaches main, as onboarding asked and the adopter confirmed (onboarding-asks-first §5). Optional: absence means today's behavior, a local squash-merge at change completion. `gates merge` and `gates integration` read it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "description": "local-squash-merge: `gates merge` squash-merges directly at change completion (today's behavior). pull-request: `gates merge` proves the head, pushes the branch, publishes `gatedloop/*` commit statuses and opens or updates a PR; the forge merges it, and `gates record-merged` records it.",
+          "type": "string",
+          "enum": ["local-squash-merge", "pull-request"]
+        },
+        "requireApproval": {
+          "description": "Only meaningful when mode is pull-request: whether a human review approves the merge. true: `gates merge` opens the PR and leaves auto-merge off. false: it enables squash auto-merge when any declared acceptance is satisfied.",
+          "type": "boolean"
+        }
+      }
+    },
+    "discipline": {
+      "description": "OpenSpec git-discipline knobs (worktree-native-loop design D3). Optional: absence means today's behavior.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "propose-branches": {
+          "description": "Additional branch-name globs (fnmatch) accepted for proposal authoring, alongside the merge target (always accepted). Declaring this list REPLACES the default `plan/*` pattern rather than appending to it -- an adopter who wants both lists both. Every non-target branch, declared or default, must still share history with the merge target.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "concurrency": {
+      "description": "Machine-wide gate serialization across every worktree of the repository (worktree-native-loop design D6). Optional: absence means no locking, today's behavior.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serialize": {
+          "description": "Gate names (must already be declared under `gates`, or `live-check`) that `gates run` serializes machine-wide with a stdlib file lock held only around the gate command.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "max-wait-seconds": {
+          "description": "How long `gates run` waits for a serialized gate's lock before giving up (lock-and-ledger-hygiene D2). On timeout it exits 75 with a message beginning `gatedloop: lock busy`, never running the gate, and writes a ledger row with `precondition: lock-busy`. Default 480: below the host's 600 s tool-call cap, so the wait never gets the gate backgrounded.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 480
+        },
+        "merge-wait-seconds": {
+          "description": "How long `gates merge` waits for a serialized gate's lock at its step 3 (`ci`) and step 5 (`confirm`) (merge-lane-friction D3). The waiting merge holds priority, so other waiters let it take the lock next and its wait is at most the run in progress. Defaults to `max-wait-seconds`; raise it alone when the project's full `ci` outlasts the general bound. On timeout the merge exits 75 and reports the step as not run.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "approval": {
+      "description": "The declared plan-approval policy (solo-approval-mode D1). Optional: absence means today's behavior, `review` -- a second party approves via the forge. Read only by the attestation writers (`gates approval attest --local`/`--pr`); the D10 implementation gate itself never reads this block, only the approval keys it produced.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "properties": {
+        "plan": {
+          "description": "review: a second party approves via a PR's APPROVED review (default). self: standing self-approval -- `gates approval attest --local` becomes a legitimate writer.",
+          "type": "string",
+          "enum": ["review", "self"]
+        },
+        "acceptance": {
+          "description": "The declared acceptance policy for the increment after the loop (acceptance-gate D1). Optional: absence means no acceptance is required anywhere and the merge gate behaves exactly as before. review: a second party accepts via the implementation PR's APPROVED review, recorded with `gates acceptance attest <change> --pr <n>` -- requires `integration.mode: pull-request` (`gates validate` rejects it otherwise; JSON Schema cannot express that cross-block rule). self: standing self-acceptance -- `gates acceptance attest <change> --local` becomes a legitimate writer. Once declared, the merge gate requires an `accept` ledger row pinning the incoming tree.",
+          "type": "string",
+          "enum": ["review", "self"]
+        }
+      }
+    },
+    "loop": {
+      "description": "Knobs for the loop itself (split-test-author design D6). Optional: absence means every default below.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "test-author": {
+          "description": "Who authors a change's failing tests, in the authoring phase before its first task. separate (default): a test-author agent, dispatched by whoever dispatches the implementer; an implementer with no handoff halts with `missing-oracle`. inline: the implementer runs the authoring phase itself, into the same holding area, bound by the same lock.",
+          "type": "string",
+          "enum": ["separate", "inline"],
+          "default": "separate"
+        },
+        "attempts": {
+          "description": "Failed attempts allowed per task, per context (retry-budget design D1, D5): red `unit` or `ci` runs after the task's RED run and since its last restart, counted from the ledger. Exit 75 never counts. Once reached, `gates run unit|ci` for the task refuses with exit 1. 0 is legal but `gates validate` warns.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 2
+        },
+        "fresh-restarts": {
+          "description": "Fresh restarts allowed per task (retry-budget design D4): `gates attempt restart <task>` resets the failed-attempt count this many times, from a clean tree, in a new agent context. 0 disables restarts.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 1
+        }
+      }
+    },
+    "acceptance": {
+      "description": "Where the project's acceptance scenarios live (acceptance-gate D5) -- the only thing the shim knows about acceptance artifacts. `gates acceptance brief` marks a spec scenario `covered` when a line in a matched file carries a scenario marker (`Scenario:`, `Scenario Outline:`, `#### Scenario:`, `- Scenario:`) followed by the same title, compared case-insensitively; otherwise `check by hand`. Optional: absent, every scenario is `check by hand`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": {
+          "description": "A glob (repo-relative, same syntax as a surface's `match`) naming the files that hold acceptance scenarios, e.g. `features/**/*.feature`.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

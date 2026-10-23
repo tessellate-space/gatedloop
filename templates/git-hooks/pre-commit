@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# gatedloop git pre-commit hook (enforce-at-the-effect, design D1/D2).
+#
+# Layer 2 of the four-layer enforcement model (AUTOMATION.md). It fires on the
+# COMMIT OBJECT being created, not on the phrasing of the invocation, so it
+# catches every commit-creating path a `PreToolUse` string matcher cannot see:
+# `git commit`, a `python -c` subprocess, a written-then-run script, `sh -c`,
+# or a library that talks to git directly (the observed #2 bypass). It runs
+# the same `gates discipline check-commit` the tool hook runs (lock-and-ledger-
+# hygiene D4), so the two layers share one implementation: ledger-grade and
+# planning-grade commits are allowed on every path, and anything else needs the
+# O(1) `ci` marker compare — it NEVER re-runs `ci` under a hook timeout.
+#
+# Env-scoped (design D2): enforces ONLY inside a Claude Code session
+# (`CLAUDECODE` set, inherited by every subprocess the session spawns). A human
+# terminal, IDE, or CI runner has the variable absent and sees a transparent
+# no-op — the gate exists to hold an autonomous loop to its invariant, and
+# outside a session no such loop is running the commit. This fails toward the
+# human no-op, never toward blocking a human (design Risks).
+set -uo pipefail
+
+# Outside a session there is no loop to hold to the invariant — clean pass,
+# not a skipped-due check (design D2: this is deliberate scope, not a silent
+# skip of `fail-loud-gates`).
+[ -n "${CLAUDECODE:-}" ] || exit 0
+
+# Resolve the shim via ${CLAUDE_PLUGIN_ROOT} (plugin-relative-paths); the plugin
+# also puts bin/ on PATH, so `gates` is the fallback. This hook is a COPY under
+# .git/hooks — it is not inside the plugin, so a "../bin/gates" escape would not
+# resolve; only the env var or PATH can find the shim.
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/bin/gates" ]; then
+  GATES="${CLAUDE_PLUGIN_ROOT}/bin/gates"
+else
+  GATES="gates"
+fi
+
+# hook-correctness D7: a branch another worktree also holds is refused before
+# the marker check -- the commit would move the ref under that checkout.
+if ! wt_out="$("${GATES}" discipline check-worktree 2>&1)"; then
+  echo "${wt_out}" >&2
+  exit 1
+fi
+
+tree="$(git write-tree 2>/dev/null)"
+if [ -z "${tree}" ]; then
+  echo "gatedloop: could not compute the staged tree (git write-tree failed) — denying the commit until the git state is resolved." >&2
+  exit 1
+fi
+
+# lock-and-ledger-hygiene D4: the tool-level hook's own check. It prints its
+# verdict (ledger-grade, planning-grade, or the marker match) on success; on
+# failure, its denial -- including the stale diagnosis naming which paths
+# differ from the tree `ci` passed on (hook-correctness D4), the most useful
+# line of the denial.
+if ! commit_out="$("${GATES}" discipline check-commit "${tree}" 2>&1)"; then
+  echo "${commit_out}" >&2
+  echo "gatedloop: commit denied at the git layer — the staged tree does not satisfy \`gates discipline check-commit\`." >&2
+  echo "gatedloop: run \`gates run ci\` and stage exactly what it tested, then commit again." >&2
+  echo "gatedloop: rephrasing the commit (a subprocess, a script, a library) will not get past this hook — it fires on the commit object itself, not the command string (issue #2)." >&2
+  exit 1
+fi
+echo "${commit_out}"
+
+# split-test-author D4: the same authored-test lock the tool hook applies,
+# after the commit check, as in hooks/gate-commit.sh.
+if ! tests_out="$("${GATES}" tests check 2>&1)"; then
+  echo "${tests_out}" >&2
+  echo "gatedloop: commit denied at the git layer — the authored tests are locked; see above." >&2
+  exit 1
+fi
+
+exit 0

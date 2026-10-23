@@ -1,0 +1,121 @@
+name: bugfix
+version: 1
+description: Bugfix OpenSpec workflow - report (failing reproduction + root cause) -> spec delta -> tasks. The reproduction is the oracle and comes before the plan (design D3).
+artifacts:
+  - id: report
+    generates: report.md
+    description: A runnable reproduction of the bug, plus its root cause
+    template: report.md
+    instruction: >
+      Capture the bug as something that RUNS, not as a description of one.
+      A written account of what's wrong is not sufficient — this artifact is
+      only complete once you have a reproduction that fails TODAY because of
+      this bug and can be run again after the fix. Write it as a test or
+      script scoped to the failing behavior, runnable through `gates run
+      unit` once this change reaches implementation.
+
+
+      Sections:
+
+      - **Summary**: one or two sentences — what's broken, from the
+      user's or caller's perspective.
+
+      - **Reproduction**: the runnable reproduction itself (or exact steps
+      to produce one), plus its actual failing output pasted verbatim.
+      "Should raise X" is not a reproduction; the output that shows it
+      doesn't is.
+
+      - **Root cause**: the specific code path or logic error responsible —
+      not just where the symptom shows up, but why it happens.
+
+      - **Impact**: who or what is affected, and how severe.
+
+
+      This is the foundation — the spec delta and tasks both build on what
+      this artifact establishes as broken and why.
+    requires: []
+  - id: spec-delta
+    generates: specs/**/*.md
+    description: The spec change this bug fix implies — mandatory for every bug fix (design D3)
+    template: spec-delta.md
+    instruction: >
+      Every bug fix records a spec delta — there is no path through this
+      schema that skips it (design D3: the fixes most likely to be waved
+      through as "trivial" are exactly the ones where a spec silently
+      diverged from behavior, so the safer default makes this mandatory
+      rather than optional).
+
+
+      Decide which of two shapes this is, from the report's root cause:
+
+      - **The specs had a gap.** Nothing in `openspec/specs/` described the
+      correct behavior — this bug fell through a hole in the spec, not just
+      the code. Write an `## ADDED Requirements` (or `## MODIFIED
+      Requirements` on an existing requirement, if the gap was a
+      requirement that existed but was incomplete) block whose new scenario
+      is exactly the one that should have caught this bug before it shipped.
+
+      - **The specs were already correct.** The behavior was fully and
+      correctly specified; only the implementation diverged from it. Write a
+      `## MODIFIED Requirements` block that restates the existing
+      requirement's scenario set unchanged (or with only the wording
+      tightened) — this is deliberately close to a no-op edit. Its purpose
+      is the record: this bug was purely an implementation defect, not a
+      spec gap, and that fact belongs in the change history as much as the
+      fix does.
+
+
+      Use the delta operation headers (`## ADDED Requirements` / `##
+      MODIFIED Requirements`), `### Requirement:` / `#### Scenario:`
+      (exactly four hashtags) format shared by every OpenSpec schema. The
+      new or restated scenario should be written so that, once ported into
+      the project's acceptance suite, it is the scenario that fails on the
+      old code and passes on the fix — the same scenario `report.md`'s
+      reproduction demonstrates in running form.
+    requires:
+      - report
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist, ordered repro-first (design D3)
+    template: tasks.md
+    instruction: >
+      Create the task list for the fix. Order it repro-first, not
+      fix-first: confirming the reproduction is RED comes before any code
+      change, and confirming it's GREEN again comes after — this schema's
+      apply flow (below) enforces that order regardless of how the tasks
+      are phrased, but the list should read that way too so it's obvious
+      from `tasks.md` alone what "done" requires.
+
+
+      Each task MUST be a checkbox: `- [ ] X.Y Task description`. Reference
+      `report.md` for what's broken and why, and the spec delta for the
+      behavior the fix must now satisfy.
+    requires:
+      - spec-delta
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
+  instruction: |
+    This apply flow inverts the usual order (design D3): the reproduction
+    is the oracle and it runs FIRST, before any implementation.
+
+    1. Run report.md's reproduction through `gates run unit`. It MUST fail
+       (RED). If it passes, STOP — this reproduction does not reproduce the
+       reported bug; go back and fix the reproduction itself before writing
+       any fix. A reproduction that passes on first run is a halt
+       condition, never treated as an early "done".
+    2. Implement the fix.
+    3. Run the SAME reproduction again. It MUST now pass (GREEN), and the
+       full `gates run ci` must be green too.
+    4. Commit the fix and the reproduction together, in the same commit —
+       never split them across commits. The spec delta from planning is
+       already in the tree; nothing about implementation should require
+       touching it again unless the fix revealed the delta was itself
+       wrong, in which case fix the delta and say why in the commit.
+# gatedloop's own key, namespaced so it cannot collide with an OpenSpec field.
+# It is what routes this schema -- and any fork of it, under any name -- to the
+# regression-first flow in /gatedloop:tdd-apply. The name `bugfix` carries no
+# meaning to dispatch.
+gatedloop:
+  flow: regression-first

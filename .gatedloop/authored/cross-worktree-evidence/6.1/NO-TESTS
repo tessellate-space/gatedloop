@@ -1,0 +1,1 @@
+Close-out check only: gates run ci and openspec validate --strict on the final tree; no behaviour change.

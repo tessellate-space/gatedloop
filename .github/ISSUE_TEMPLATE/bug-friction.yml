@@ -1,0 +1,78 @@
+name: Bug / friction report
+description: Something in gatedloop broke, was confusing, or fought you.
+title: "[friction] "
+labels: ["friction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. This form mirrors what `/gatedloop:feedback` collects — the
+        **safe default route is to run that skill**, which gathers this context for you and
+        shows you the exact issue body before anything is posted.
+
+        **Privacy — please read.** People run gatedloop inside real projects, some of them
+        client work. Do **not** paste: diff content, your project's file contents, gate
+        **command bodies** (the real command a gate name maps to, e.g. a deploy command with
+        a token), environment variables, or credentials. Include only the whitelisted fields
+        below. If a field's real value is sensitive, redact it or leave it out — an
+        under-detailed report is fine; a leak is not.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what actually happened.
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: input
+    id: command-or-gate
+    attributes:
+      label: Command or gate involved
+      description: The `/gatedloop:*` or `/opsx:*` command, or the abstract gate name (`ci`, `unit`, …). The gate NAME only — never the command it maps to.
+      placeholder: "/gatedloop:tdd-apply  ·  gate: ci"
+    validations:
+      required: false
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `plugin.json`'s `version` field.
+    validations:
+      required: false
+  - type: input
+    id: openspec-version
+    attributes:
+      label: OpenSpec CLI version
+      description: Output of `openspec --version`.
+    validations:
+      required: false
+  - type: input
+    id: os-platform
+    attributes:
+      label: OS / platform
+      description: Output of `uname -sm` (or your OS equivalent).
+    validations:
+      required: false
+  - type: textarea
+    id: gates-diagnostics
+    attributes:
+      label: gates diagnostics
+      description: Output of `gates validate` (and `gates doctor` if your install has it). Diagnostics only — not your gate command bodies.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: gates-shape
+    attributes:
+      label: .gates.yaml shape (names + globs ONLY)
+      description: "The gate NAMES (keys under `gates:`) and each surface's name + `match` glob. NEVER the command a gate name maps to, and never a `live-check:` value."
+      placeholder: |
+        gates: ci, unit, verify
+        surfaces:
+          - backend  match: backend/app/**
+          - frontend match: frontend/**
+      render: text
+    validations:
+      required: false

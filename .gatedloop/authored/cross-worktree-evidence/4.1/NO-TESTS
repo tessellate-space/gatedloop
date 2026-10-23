@@ -1,0 +1,1 @@
+Workflow and docs step order only (.github/workflows/specloop.yml, docs/running-at-scale.md): push the follow-up branch before `gates marker publish ci`. No shim behaviour changes; `gates marker publish` is tested where it is implemented (tests/test_marker_publish.py).

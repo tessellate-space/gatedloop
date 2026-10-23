@@ -1,0 +1,790 @@
+#!/usr/bin/env python3
+"""gatedloop's maintainer release procedure (openspec change `release-procedure`).
+
+This is how *this repository* ships itself. It is not a plugin feature: it is
+not in `bin/` (on every adopter's PATH) and not in `commands/` (every file there
+ships as `/gatedloop:<name>`). Nothing in the installed plugin loads it.
+
+Subcommands, in the order a release uses them (see RELEASING.md):
+
+  status   what shipped since the latest v* tag, and a suggested level. Exits 0
+           when the release is current, 1 when one is due. `--json` prints one
+           document; `--hook` is this repo's SessionStart reminder
+           (.claude/settings.json), which prints one line or nothing and
+           always exits 0.
+  cut     run `docs` first and refuse on any gap, then bump every version field
+           and draft a CHANGELOG.md section. Commits nothing: a human
+           reviews and edits the draft next.
+  publish  check every precondition, then commit -> push -> annotated tag ->
+           push tag -> GitHub release. On a late failure, names what is done
+           and prints the command that finishes the rest.
+  check the version fields agree, are MAJOR.MINOR.PATCH, and are not
+           behind the latest v* tag reachable from HEAD. Run by `ci`.
+  docs     README.md and SETUP.md mention every shipped command, agent, skill,
+           `gates` subcommand, gate name and manifest key, and name none that no
+           longer exists (openspec change `release-docs-sync`). One line per gap
+           with file and line; exit 1 on any.
+
+Stdlib only, in the spirit of `zero-dep-shim`. Every refusal exits non-zero
+with the reason (`fail-loud-gates`).
+"""
+
+import argparse
+import datetime
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+PLUGIN_JSON = ".claude-plugin/plugin.json"
+MARKETPLACE_JSON = ".claude-plugin/marketplace.json"
+PLUGIN_NAME = "gatedloop"
+# The forwarder for the plugin's earlier name (rename-to-gatedloop D4): a
+# second marketplace entry whose version moves with the plugin's, so an
+# existing install updates onto it. Read only while the entry is listed.
+FORWARDER_NAME = "specloop"
+# The state directory, and its earlier name a not-yet-migrated checkout uses.
+STATE_DIRS = (f".{PLUGIN_NAME}", f".{FORWARDER_NAME}")
+
+# What reaches an adopter: the paths whose content changes what an installed
+# plugin does or tells them (design D3). Everything else -- openspec/, docs/,
+# tests/, scripts/, .gatedloop/ -- is planning or tooling and never needs a release.
+SHIPPED_PATHS = (".claude-plugin/", "commands/", "skills/", "agents/", "hooks/", "bin/",
+                 "rules/", "templates/", "schema/", "adoption/", "README.md", "SETUP.md",
+                 "AUTOMATION.md")
+
+ARCHIVE_DIR = "openspec/changes/archive/"
+ARCHIVE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+ADDED = re.compile(r"^## ADDED Requirements\s*$", re.MULTILINE)
+
+MAIN = "main"
+REMOTE = "origin"
+CHANGELOG = "CHANGELOG.md"
+ADOPTION_CATALOG = "adoption/catalog.json"
+CHANGELOG_HEADER = "# Changelog\n"
+DATE_ENV = "GATEDLOOP_RELEASE_DATE"  # overrides today's date in a cut section (tests)
+WHY_LIMIT = 200
+# Subjects that record planning or the release itself, never a change to list.
+BOOKKEEPING_PREFIXES = ("propose:", "attest approval:", "archive change:", "candidates:",
+                        "Release")
+
+SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+TAG = re.compile(r"^v((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$")
+
+
+class ReleaseError(Exception):
+    """A refusal: printed to stderr, exit non-zero."""
+
+
+# --------------------------------------------------------------------------- git
+
+def git(root, *args, check=True):
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise ReleaseError(f"git {' '.join(args)} failed (exit {result.returncode}): "
+                           f"{result.stderr.strip()}")
+    return result
+
+
+def repo_root(cwd=None):
+    result = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise ReleaseError("not inside a git repository")
+    return Path(result.stdout.strip())
+
+
+def parse_semver(value):
+    m = SEMVER.match(value or "")
+    return tuple(int(g) for g in m.groups()) if m else None
+
+
+def latest_tag(root):
+    """The highest `vX.Y.Z` tag reachable from HEAD, as (name, (X, Y, Z)), or None."""
+    out = git(root, "tag", "--merged", "HEAD", "--list", "v*").stdout.split()
+    best = None
+    for name in out:
+        m = TAG.match(name)
+        if not m:
+            continue
+        key = parse_semver(m.group(1))
+        if best is None or key > best[1]:
+            best = (name, key)
+    return best
+
+
+# --------------------------------------------------------------------- versions
+
+def read_fields(root):
+    """The version fields, as [(label, value)], in a fixed order: three, and a
+    fourth while the marketplace lists the forwarder."""
+    def load(rel):
+        path = root / rel
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            raise ReleaseError(f"{rel} not found")
+        except json.JSONDecodeError as exc:
+            raise ReleaseError(f"{rel} is not valid JSON: {exc}")
+
+    plugin = load(PLUGIN_JSON)
+    market = load(MARKETPLACE_JSON)
+    entry = next((p for p in market.get("plugins", []) if p.get("name") == PLUGIN_NAME), None)
+    if entry is None:
+        raise ReleaseError(f"{MARKETPLACE_JSON} has no plugins[] entry named '{PLUGIN_NAME}'")
+    fields = [
+        ("plugin.json version", plugin.get("version")),
+        ("marketplace.json metadata.version", (market.get("metadata") or {}).get("version")),
+        (f"marketplace.json plugins[{PLUGIN_NAME}].version", entry.get("version")),
+    ]
+    forwarder = next((p for p in market.get("plugins", []) if p.get("name") == FORWARDER_NAME), None)
+    if forwarder is not None:
+        fields.append((f"marketplace.json plugins[{FORWARDER_NAME}].version", forwarder.get("version")))
+    return fields
+
+
+def check_version(root):
+    """Validate the fields; return the agreed version string or raise ReleaseError."""
+    fields = read_fields(root)
+    listing = "\n".join(f"  {label}: {value}" for label, value in fields)
+    values = {value for _, value in fields}
+    if len(values) != 1:
+        raise ReleaseError(f"version fields disagree:\n{listing}")
+    version = values.pop()
+    if parse_semver(version) is None:
+        raise ReleaseError(f"version '{version}' is not MAJOR.MINOR.PATCH:\n{listing}")
+    tag = latest_tag(root)
+    if tag is not None and parse_semver(version) < tag[1]:
+        raise ReleaseError(f"version {version} is behind the latest tag {tag[0]} "
+                           f"reachable from HEAD:\n{listing}")
+    return version
+
+
+# ------------------------------------------------------------------ unreleased
+
+def shipped_commits(root, tag):
+    """Commits in tag..HEAD that touch a shipped path, oldest first: [{sha, subject}]."""
+    out = git(root, "log", "--reverse", "--format=%H%x1f%s", f"{tag}..HEAD",
+              "--", *SHIPPED_PATHS).stdout
+    commits = []
+    for line in out.splitlines():
+        sha, _, subject = line.partition("\x1f")
+        commits.append({"sha": sha, "subject": subject})
+    return commits
+
+
+def archived_changes(root, tag):
+    """Archive directories added in tag..HEAD: [{name, dir, minor}], in path order."""
+    out = git(root, "diff", "--name-status", "--no-renames", f"{tag}..HEAD",
+              "--", ARCHIVE_DIR).stdout
+    dirs = []
+    for line in out.splitlines():
+        status, _, path = line.partition("\t")
+        if status != "A" or not path.startswith(ARCHIVE_DIR):
+            continue
+        name = path[len(ARCHIVE_DIR):].split("/", 1)[0]
+        if name not in dirs:
+            dirs.append(name)
+    changes = []
+    for d in dirs:
+        changes.append({"name": ARCHIVE_DATE.sub("", d), "dir": d,
+                        "minor": qualifies_for_minor(root, tag, d)})
+    return changes
+
+
+def qualifies_for_minor(root, tag, archive_dir):
+    """An archived change adds a requirement or creates a capability absent at the tag."""
+    specs = root / ARCHIVE_DIR / archive_dir / "specs"
+    for spec in sorted(specs.glob("*/spec.md")) if specs.is_dir() else []:
+        if ADDED.search(spec.read_text()):
+            return True
+        capability = spec.parent.name
+        at_tag = git(root, "cat-file", "-e", f"{tag}:openspec/specs/{capability}/spec.md",
+                     check=False)
+        if at_tag.returncode != 0:
+            return True
+    return False
+
+
+def status_report(root):
+    """The unreleased-work document `status --json` prints."""
+    tag = latest_tag(root)
+    if tag is None:
+        raise ReleaseError("no vX.Y.Z tag is reachable from HEAD; tag the last release first")
+    commits = shipped_commits(root, tag[0])
+    changes = archived_changes(root, tag[0])
+    if not commits:
+        suggested = None
+    elif any(c["minor"] for c in changes):
+        suggested = "minor"
+    else:
+        suggested = "patch"
+    return {"tag": tag[0], "version": ".".join(map(str, tag[1])), "due": bool(commits),
+            "shipped_commits": commits, "archived_changes": changes, "suggested": suggested}
+
+
+# ------------------------------------------------------------------------- cut
+
+def next_version(version, level):
+    major, minor, patch = parse_semver(version)
+    if level == "major":
+        return f"{major + 1}.0.0"
+    if level == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def first_why_sentence(proposal_text):
+    """The first sentence of a proposal's `## Why`, cut at the first '. ' or 200 chars."""
+    lines = proposal_text.splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.strip() == "## Why") + 1
+    except StopIteration:
+        return None
+    body = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        body.append(line.strip())
+    text = " ".join(part for part in body if part)
+    if not text:
+        return None
+    end = text.find(". ")
+    if end != -1 and end + 1 <= WHY_LIMIT:
+        return text[: end + 1]
+    if len(text) <= WHY_LIMIT:
+        return text
+    return text[:WHY_LIMIT].rstrip() + "…"
+
+
+def is_bookkeeping(subject):
+    return subject.startswith(BOOKKEEPING_PREFIXES)
+
+
+def changelog_section(root, version, date, doc):
+    """The draft `## X.Y.Z — date` section: archived changes, then other shipped subjects."""
+    lines = [f"## {version} — {date}", ""]
+    for change in doc["archived_changes"]:
+        proposal = root / ARCHIVE_DIR / change["dir"] / "proposal.md"
+        why = first_why_sentence(proposal.read_text()) if proposal.is_file() else None
+        lines.append(f"- **{change['name']}**: {why or '(no ## Why in its proposal)'}")
+    names = [c["name"] for c in doc["archived_changes"]]
+    others = [c["subject"] for c in doc["shipped_commits"]
+              if not is_bookkeeping(c["subject"]) and not is_change_squash(root, c["sha"], names)]
+    if others:
+        if doc["archived_changes"]:
+            lines += ["", "### Other changes", ""]
+        lines += [f"- {subject}" for subject in others]
+    return "\n".join(lines) + "\n"
+
+
+def is_change_squash(root, sha, names):
+    """A commit is a listed change's squash when it carries that change's planning files."""
+    if not names:
+        return False
+    paths = git(root, "show", "--name-only", "--format=", sha).stdout.splitlines()
+    owned = tuple(f"openspec/changes/{n}/" for n in names) + \
+        tuple(f"{state}/runs/{n}.jsonl" for state in STATE_DIRS for n in names)
+    return any(p.startswith(owned) for p in paths)
+
+
+def section_heading(version):
+    return re.compile(rf"^## {re.escape(version)}(\s|$)", re.MULTILINE)
+
+
+def insert_section(changelog, section):
+    """Put `section` above the current top `## ` section (or at the end if there is none)."""
+    m = re.search(r"^## ", changelog, re.MULTILINE)
+    if m is None:
+        base = changelog.rstrip("\n")
+        return (base + "\n\n" if base else "") + section
+    return changelog[: m.start()] + section + "\n" + changelog[m.start():]
+
+
+def bump_fields(root, current, new):
+    """Rewrite every version field's `"version": "<current>"` as text; formatting survives."""
+    expected = len(read_fields(root))
+    pattern = re.compile(rf'("version"\s*:\s*"){re.escape(current)}(")')
+    rewritten, total = {}, 0
+    for rel in (PLUGIN_JSON, MARKETPLACE_JSON):
+        text, count = pattern.subn(rf"\g<1>{new}\g<2>", (root / rel).read_text())
+        rewritten[rel], total = text, total + count
+    if total != expected:
+        raise ReleaseError(f'expected exactly {expected} "version": "{current}" occurrences across '
+                           f"{PLUGIN_JSON} and {MARKETPLACE_JSON}, found {total}; nothing changed")
+    return rewritten
+
+
+def require_clean_main(root):
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != MAIN:
+        raise ReleaseError(f"releases are cut on '{MAIN}', not '{branch}'")
+    dirty = changed_paths(root)
+    if dirty:
+        raise ReleaseError("the working tree is not clean:\n" +
+                           "\n".join(f"  {p}" for p in dirty))
+
+
+def changed_paths(root):
+    out = git(root, "status", "--porcelain", "--untracked-files=all").stdout
+    return [line[3:] for line in out.splitlines()]
+
+
+# ------------------------------------------------------------------------ docs
+
+# The adopter-facing docs the inventory is checked against (design D3).
+DOCS_FILES = ("README.md", "SETUP.md")
+SHIM = "bin/gates"
+SCHEMA = "schema/gates.schema.json"
+# Names exempt from the check, each with its reason, keyed by (kind, name).
+# An entry either skips an internal item the docs need not mention (forward),
+# or lets a retired name stay in a migration table (reverse). Keep it small.
+DOCS_EXEMPT = {
+    ("gates subcommand", "gate-marker"): "O(1) marker read called only by the PreToolUse hooks",
+    ("gates subcommand", "ledger"): "`ledger record-merge` is run by the tdd-apply skill at merge",
+    ("gates subcommand", "audit"): "run by the Stop hook and the merge gate (AUTOMATION.md, layer 3)",
+    ("gates subcommand", "taint"): "`taint check` is read by the merge gate; `gates run ci` clears it",
+    ("command", "explore"): "retired; kept in README.md's migration table",
+    ("command", "harness-init"): "retired; kept in the README.md and SETUP.md migration tables",
+}
+
+_WORD = r"(?<![\w-]){}(?![\w-])"
+_GATEDLOOP_REF = re.compile(r"/gatedloop:([a-z0-9][a-z0-9-]*)")
+_GATES_REF = re.compile(r"(?<![\w-])gates ([a-z][a-z0-9-]*)")
+_FENCE = re.compile(r"^\s*(```|~~~)")
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+
+
+def _line_of(path, needle):
+    """1-based line of the first line containing `needle` in `path`, else 1."""
+    try:
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if needle in line:
+                return number
+    except OSError:
+        pass
+    return 1
+
+
+def shim_subcommands(root):
+    """The `{a,b,...}` choice list of `bin/gates --help`; empty when there is no shim."""
+    shim = root / SHIM
+    if not shim.is_file():
+        return []
+    result = subprocess.run([sys.executable, str(shim), "--help"], cwd=root,
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise ReleaseError(f"{SHIM} --help failed (exit {result.returncode}): "
+                           f"{result.stderr.strip()}")
+    m = re.search(r"\{([a-z0-9_,-]+)\}", result.stdout)
+    if m is None:
+        raise ReleaseError(f"{SHIM} --help printed no {{...}} subcommand list")
+    return m.group(1).split(",")
+
+
+def docs_inventory(root):
+    """What ships, from the files themselves: [(kind, name, source, line, patterns)]."""
+    items = []
+    for path in sorted((root / "commands").glob("*.md")):
+        items.append(("command", path.stem, path, 1,
+                      [re.escape(f"/gatedloop:{path.stem}") + r"(?![\w-])"]))
+    for path in sorted((root / "agents").glob("*.md")):
+        items.append(("agent", path.stem, path, 1, [_WORD.format(re.escape(path.stem))]))
+    for path in sorted((root / "skills").glob("*/SKILL.md")):
+        name = path.parent.name
+        items.append(("skill", name, path, 1, [_WORD.format(re.escape(name))]))
+    for sub in shim_subcommands(root):
+        items.append(("gates subcommand", sub, root / SHIM,
+                      _line_of(root / SHIM, f'add_parser("{sub}"'),
+                      [r"(?<![\w-])gates " + re.escape(sub) + r"(?![\w-])"]))
+    schema_path = root / SCHEMA
+    if (root / SHIM).is_file() and not schema_path.is_file():
+        # A moved schema would otherwise drop every gate and key check silently.
+        raise ReleaseError(f"{SHIM} exists but {SCHEMA} does not; cannot list gates or keys")
+    if schema_path.is_file():
+        try:
+            schema = json.loads(schema_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ReleaseError(f"{SCHEMA} is not valid JSON: {exc}")
+        gates = ((schema.get("properties") or {}).get("gates") or {}).get("properties") or {}
+        for gate in gates:
+            items.append(("gate", gate, schema_path, _line_of(schema_path, f'"{gate}":'),
+                          [re.escape(f"`{gate}`")]))
+        for key in schema.get("properties") or {}:
+            items.append(("manifest key", key, schema_path, _line_of(schema_path, f'"{key}":'),
+                          [re.escape(f"`{key}`"), _WORD.format(re.escape(key)) + ":"]))
+    return items
+
+
+def code_lines(text):
+    """(line number, code text) for every fenced line and every inline code span."""
+    fenced = False
+    for number, line in enumerate(text.splitlines(), 1):
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            yield number, line
+        else:
+            for span in _CODE_SPAN.findall(line):
+                yield number, span
+
+
+def docs_gaps(root):
+    """Every gap as one line: forward (undocumented) first, then reverse (stale)."""
+    docs = {rel: (root / rel).read_text() for rel in DOCS_FILES if (root / rel).is_file()}
+    corpus = "\n".join(docs.values())
+    items = docs_inventory(root)
+    gaps = []
+    for kind, name, source, line, patterns in items:
+        if (kind, name) in DOCS_EXEMPT:
+            continue
+        if not any(re.search(p, corpus) for p in patterns):
+            rel = source.relative_to(root)
+            gaps.append(f"{rel}:{line}: undocumented {kind} '{name}': "
+                        f"neither {' nor '.join(DOCS_FILES)} mentions it")
+    # A plugin skill is invocable as /gatedloop:<skill> too, so both count.
+    commands = {name for kind, name, *_ in items if kind in ("command", "skill")}
+    subs = {name for kind, name, *_ in items if kind == "gates subcommand"}
+    for rel, text in docs.items():
+        for number, line in enumerate(text.splitlines(), 1):
+            for name in _GATEDLOOP_REF.findall(line):
+                if name not in commands and ("command", name) not in DOCS_EXEMPT:
+                    gaps.append(f"{rel}:{number}: stale mention '/gatedloop:{name}': "
+                                "no such command or skill")
+        for number, code in code_lines(text):
+            for name in _GATES_REF.findall(code):
+                if name not in subs and ("gates subcommand", name) not in DOCS_EXEMPT:
+                    gaps.append(f"{rel}:{number}: stale mention 'gates {name}': "
+                                f"{SHIM} has no such subcommand")
+    return gaps
+
+
+def require_docs_clean(root):
+    gaps = docs_gaps(root)
+    if gaps:
+        raise ReleaseError(f"the docs are out of step with what ships ({plural(len(gaps), 'gap')}); "
+                           "run /release-docs, then scripts/release docs:\n" +
+                           "\n".join(f"  {g}" for g in gaps))
+
+
+# --------------------------------------------------------------------- publish
+
+def section_text(changelog, version):
+    """The `## <version>` section of the changelog, heading included, or None."""
+    m = section_heading(version).search(changelog)
+    if m is None:
+        return None
+    rest = changelog[m.start():]
+    first_newline = rest.find("\n")
+    if first_newline == -1:
+        return rest.rstrip() + "\n"
+    nxt = re.search(r"^## ", rest[first_newline:], re.MULTILINE)
+    body = rest if nxt is None else rest[: first_newline + nxt.start()]
+    return body.rstrip() + "\n"
+
+
+def adoption_items(root):
+    """The adoption catalogue's items ([] when the repo ships none). A catalogue
+    that exists but cannot be read is a refusal, never an empty list."""
+    path = root / ADOPTION_CATALOG
+    if not path.is_file():
+        return []
+    try:
+        items = json.loads(path.read_text()).get("items")
+    except (OSError, ValueError, AttributeError) as exc:
+        raise ReleaseError(f"{ADOPTION_CATALOG} is unreadable: {exc}")
+    if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+        raise ReleaseError(f"{ADOPTION_CATALOG} has no `items` list of objects")
+    return items
+
+
+def unreleased_adoption_items(root, version):
+    """One failure per catalogue item whose `since` is later than `version`, or
+    not a version at all (adoption-prompts D1, "Unreleased items")."""
+    target = parse_semver(version)
+    failures = []
+    for item in adoption_items(root):
+        since = parse_semver(item.get("since"))
+        if since is None or since > target:
+            failures.append(f"{ADOPTION_CATALOG} item '{item.get('id')}' has since "
+                            f"'{item.get('since')}', later than {version} (or not a version); "
+                            "correct it to this release or drop it from the catalogue")
+    return failures
+
+
+def adoption_cut_warning(root, tag, new):
+    """The `cut` warning (adoption-prompts D7), or None: the manifest schema
+    changed since `tag` and no catalogue item carries `new` as its `since`. A
+    warning, not a refusal: a schema change can be a fix, not a decision."""
+    changed = git(root, "diff", "--name-only", f"{tag}..HEAD", "--", SCHEMA).stdout.strip()
+    if not changed:
+        return None
+    if any(item.get("since") == new for item in adoption_items(root)):
+        return None
+    return (f"release cut: warning: {SCHEMA} changed since {tag}, but no item in "
+            f"{ADOPTION_CATALOG} has since {new}. If adopters have a new decision to "
+            "make, add an adoption item for it (RELEASING.md, \"Adoption items\").")
+
+
+def publish_preconditions(root):
+    """Check everything before the first write. Returns (version, notes) or raises
+    one ReleaseError listing every failed precondition."""
+    failures, version, notes = [], None, None
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != MAIN:
+        failures.append(f"releases are published from '{MAIN}', not '{branch}'")
+    allowed = {PLUGIN_JSON, MARKETPLACE_JSON, CHANGELOG}
+    unexpected = [p for p in changed_paths(root) if p not in allowed]
+    if unexpected:
+        failures.append("only the version fields and CHANGELOG.md may differ from HEAD; "
+                        "also changed: " + ", ".join(unexpected))
+    try:
+        version = check_version(root)
+    except ReleaseError as exc:
+        failures.append(f"check failed: {exc}")
+    if version is not None:
+        tag = f"v{version}"
+        if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+            failures.append(f"tag {tag} already exists locally")
+        remote = git(root, "ls-remote", "--tags", REMOTE, f"refs/tags/{tag}", check=False)
+        if remote.returncode != 0:
+            failures.append(f"cannot read tags from '{REMOTE}': {remote.stderr.strip()}")
+        elif remote.stdout.strip():
+            failures.append(f"tag {tag} already exists on '{REMOTE}'")
+        changelog = (root / CHANGELOG).read_text() if (root / CHANGELOG).is_file() else ""
+        notes = section_text(changelog, version)
+        if notes is None:
+            failures.append(f"{CHANGELOG} has no '## {version}' section; run scripts/release cut")
+        try:
+            failures += unreleased_adoption_items(root, version)
+        except ReleaseError as exc:
+            failures.append(str(exc))
+    fetch = git(root, "fetch", "--quiet", REMOTE, MAIN, check=False)
+    if fetch.returncode != 0:
+        failures.append(f"cannot fetch '{REMOTE}/{MAIN}': {fetch.stderr.strip()}")
+    else:
+        head = git(root, "rev-parse", "HEAD").stdout.strip()
+        upstream = git(root, "rev-parse", f"{REMOTE}/{MAIN}", check=False).stdout.strip()
+        if head != upstream:
+            failures.append(f"HEAD does not match {REMOTE}/{MAIN}; pull or push first")
+    try:
+        auth = subprocess.run(["gh", "auth", "status"], cwd=root, capture_output=True, text=True)
+    except FileNotFoundError:
+        failures.append("gh is not on PATH; install the GitHub CLI and run `gh auth login`")
+    else:
+        if auth.returncode != 0:
+            failures.append(f"`gh auth status` failed (exit {auth.returncode}); "
+                            "run `gh auth login`")
+    if failures:
+        raise ReleaseError("refusing to publish; nothing was written:\n" +
+                           "\n".join(f"  - {f}" for f in failures))
+    return version, notes
+
+
+def publish_steps(version, notes_file):
+    """(name, commands) in the fixed order. The tag is created only after the release
+    commit is on the remote, so no tag, local or remote, ever lacks a pushed commit."""
+    tag = f"v{version}"
+    return [
+        ("commit", [["git", "add", "--", PLUGIN_JSON, MARKETPLACE_JSON, CHANGELOG],
+                    ["git", "commit", "-q", "-m", f"Release {version}"]]),
+        ("push commit", [["git", "push", REMOTE, MAIN]]),
+        ("tag", [["git", "tag", "-a", tag, "-m", f"gatedloop {version}"]]),
+        ("push tag", [["git", "push", REMOTE, tag]]),
+        ("GitHub release", [["gh", "release", "create", tag, "--title", f"gatedloop {version}",
+                             "--notes-file", str(notes_file)]]),
+    ]
+
+
+def partial_publish_report(version, steps, failed_at, detail):
+    tag = f"v{version}"
+    done = [name for name, _ in steps[:failed_at]]
+    lines = [f"release publish: step '{steps[failed_at][0]}' failed: {detail}",
+             f"Completed: {', '.join(done) if done else 'nothing'}."]
+    if "commit" in done:
+        where = "exists locally and on the remote" if "push commit" in done else "exists locally"
+        lines.append(f"The release commit 'Release {version}' {where}.")
+    if "push tag" in done:
+        lines.append(f"Tag {tag} is on the remote.")
+    elif "tag" in done:
+        lines.append(f"Tag {tag} exists locally only; no tag was pushed.")
+    else:
+        lines.append("No tag was created, so no tag was pushed.")
+    remaining = [shlex.join(cmd) for _, cmds in steps[failed_at:] for cmd in cmds]
+    lines += ["Finish with:", "  " + " && ".join(remaining)]
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------- commands
+
+def cmd_publish(root, args):
+    version, notes = publish_preconditions(root)
+    fd, notes_path = tempfile.mkstemp(prefix=f"gatedloop-v{version}-notes-", suffix=".md")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(notes)
+    steps = publish_steps(version, notes_path)
+    for index, (name, commands) in enumerate(steps):
+        for command in commands:
+            try:
+                result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+                code, detail = result.returncode, (result.stderr or result.stdout).strip()
+            except FileNotFoundError as exc:
+                code, detail = 127, str(exc)
+            if code != 0:
+                print(partial_publish_report(version, steps, index, f"exit {code}: {detail}"),
+                      file=sys.stderr)
+                return 1
+        print(f"  done: {name}")
+    os.unlink(notes_path)
+    print(f"Published gatedloop {version}: commit, tag v{version} and GitHub release.")
+    return 0
+
+
+def cmd_cut(root, args):
+    # Every refusal comes before the first write, and the docs check comes first.
+    require_docs_clean(root)
+    require_clean_main(root)
+    current = check_version(root)
+    doc = status_report(root)
+    if not doc["due"]:
+        raise ReleaseError(f"nothing to release: no shipped path changed since {doc['tag']}")
+    new = next_version(current, args.level)
+    changelog_path = root / CHANGELOG
+    changelog = changelog_path.read_text() if changelog_path.is_file() else CHANGELOG_HEADER
+    if section_heading(new).search(changelog):
+        raise ReleaseError(f"{CHANGELOG} already has a section for {new}")
+    manifests = bump_fields(root, current, new)
+    date = os.environ.get(DATE_ENV) or datetime.date.today().isoformat()
+    section = changelog_section(root, new, date, doc)
+    warning = adoption_cut_warning(root, doc["tag"], new)
+
+    for rel, text in manifests.items():
+        (root / rel).write_text(text)
+    changelog_path.write_text(insert_section(changelog, section))
+
+    if warning:
+        print(warning, file=sys.stderr)
+    print(f"Cut {new} (was {current}; suggested level was {doc['suggested']}).")
+    print(f"  version fields: {PLUGIN_JSON}, {MARKETPLACE_JSON} (x{len(read_fields(root)) - 1})")
+    print(f"  {CHANGELOG}: new top section '## {new} — {date}'")
+    print("\nNothing is committed. Review `git diff`, edit the section into release notes,")
+    print("then run: scripts/release publish")
+    return 0
+
+
+def plural(count, noun):
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def reminder_line(doc):
+    return (f"Release due: {plural(len(doc['archived_changes']), 'archived change')} and "
+            f"{plural(len(doc['shipped_commits']), 'shipped commit')} since {doc['tag']}, "
+            f"suggested {doc['suggested']}. Run /release-docs, then "
+            f"`scripts/release cut {doc['suggested']}`.")
+
+
+def hook_status():
+    """SessionStart reminder. Prints one line of context when a release is due and
+    nothing otherwise; any failure is swallowed, because a reminder must never
+    block or clutter a session (design D5)."""
+    try:
+        doc = status_report(repo_root())
+        if not doc["due"]:
+            return 0
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": reminder_line(doc)}}))
+    except Exception:  # noqa: BLE001 -- deliberate: the hook is advisory only
+        pass
+    return 0
+
+
+def cmd_status(root, args):
+    doc = status_report(root)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+        return 1 if doc["due"] else 0
+    if not doc["due"]:
+        print(f"Release is current: nothing shipped since {doc['tag']}.")
+        if doc["archived_changes"]:
+            print(f"({len(doc['archived_changes'])} archived change(s) since {doc['tag']} "
+                  "touched no shipped path.)")
+        return 0
+    print(f"Unreleased since {doc['tag']}:")
+    print(f"\nShipped commits ({len(doc['shipped_commits'])}):")
+    for c in doc["shipped_commits"]:
+        print(f"  {c['sha'][:7]} {c['subject']}")
+    print(f"\nArchived changes ({len(doc['archived_changes'])}):")
+    for c in doc["archived_changes"]:
+        why = "adds a requirement or capability" if c["minor"] else "no new requirement"
+        print(f"  {c['name']} ({why})")
+    if not doc["archived_changes"]:
+        print("  (none)")
+    print(f"\nSuggested level: {doc['suggested']}")
+    print(f"Next: /release-docs (review + merge its PR), then scripts/release docs, "
+          f"then scripts/release cut {doc['suggested']}")
+    return 1
+
+
+def cmd_docs(root, args):
+    gaps = docs_gaps(root)
+    for gap in gaps:
+        print(gap)
+    if gaps:
+        print(f"\nrelease docs: {plural(len(gaps), 'gap')}; README.md and SETUP.md must "
+              "mention what ships and nothing that does not.", file=sys.stderr)
+        return 1
+    print(f"release docs: {' and '.join(DOCS_FILES)} cover every shipped command, agent, "
+          "skill, gates subcommand, gate and manifest key")
+    return 0
+
+
+def cmd_check(root, args):
+    version = check_version(root)
+    tag = latest_tag(root)
+    against = f", not behind {tag[0]}" if tag else " (no v* tag yet)"
+    print(f"release check: all {len(read_fields(root))} version fields read {version}{against}")
+    return 0
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="scripts/release",
+                                     description="gatedloop's maintainer release procedure.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    status = sub.add_parser("status", help="what shipped since the latest tag; exit 1 if due")
+    mode = status.add_mutually_exclusive_group()
+    mode.add_argument("--json", action="store_true", help="print one JSON document")
+    mode.add_argument("--hook", action="store_true",
+                      help="SessionStart reminder: one line of context or nothing; always exit 0")
+    cut = sub.add_parser("cut", help="bump the version and draft the changelog; commits nothing")
+    cut.add_argument("level", choices=("patch", "minor", "major"))
+    sub.add_parser("publish", help="commit, tag, push and create the GitHub release")
+    sub.add_parser("check", help="the version fields agree and are not behind the latest tag")
+    sub.add_parser("docs", help="README.md and SETUP.md mention everything that ships and "
+                                "nothing that does not; exit 1 on any gap")
+    return parser
+
+
+COMMANDS = {"status": cmd_status, "cut": cmd_cut, "publish": cmd_publish, "check": cmd_check,
+            "docs": cmd_docs}
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.command == "status" and args.hook:
+        return hook_status()
+    try:
+        root = repo_root()
+        return COMMANDS[args.command](root, args)
+    except ReleaseError as exc:
+        # 2, not 1: `status` uses 1 to mean "a release is due".
+        print(f"release {args.command}: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

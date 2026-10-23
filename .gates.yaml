@@ -1,0 +1,65 @@
+# gatedloop's own gate manifest — this repo eats its own cooking.
+#
+# It had none until now for a real reason: there was nothing to gate on. The
+# deliverable is prompts, and prompts have no oracle. That changed when
+# harden-manifest-parser added tests/ for the shim, so `ci` finally means
+# something here.
+#
+# Note what is NOT claimed: no gate checks a prompt. `ci` covers the branching
+# Python, version consistency (`scripts/release check`: the three manifest
+# version fields agree and are not behind the latest v* tag), and the plugin
+# manifest, and nothing else. A green `ci` here means "the shim still parses,
+# the version is consistent, and the plugin still loads" — not "the prompts
+# are right". Do not grow it into a proxy for prompt review.
+
+gatesVersion: 1
+taskSource: openspec
+
+# One maintainer, and GitHub refuses self-approval on a PR — so plan approval
+# is attested machine-side with `gates approval attest <change> --local`
+# (SETUP.md, "The declared approval policy"). The content pin (approved_sha) is
+# computed identically to the --pr path; only the source of the verdict differs.
+approval:
+  plan: self
+
+# This repo follows its own scale example (docs/running-at-scale.md, design D6
+# of merge-pull-request): `gates merge` proves the head, pushes, publishes the
+# `gatedloop/*` statuses and opens the PR; the maintainer reviews and merges it
+# in the forge. `.github/workflows/gatedloop.yml` posts `gatedloop/ci` from CI and
+# runs `gates record-merged` after each merge, so the merge row and the archive
+# are no longer recorded by hand.
+integration:
+  mode: pull-request
+  requireApproval: true
+
+gates:
+  # Both are cheap and deterministic; ordered cheapest-first.
+  ci: "python3 -m unittest discover -s tests -q && python3 scripts/release check && claude plugin validate ."
+  unit: "python3 -m unittest discover -s tests -q"
+
+surfaces:
+  # The prompts. No executable oracle exists for these, so there is no
+  # live-check — convention review is the only gate that means anything here,
+  # which is exactly why the rule list is the long one.
+  - name: prompts
+    match: "{commands,skills,agents,hooks,templates,packs,forwarder}/**"
+    rules:
+      - stack-agnostic-prompts
+      - plugin-relative-paths
+      - no-forked-upstream-assets
+      - commands-flat-skills-nested
+      - self-contained-plugin
+      - docs-follow-surface
+
+  # The shim and its tests. This surface has a real oracle, so review is
+  # narrower: correctness is `ci`'s job, and these rules cover what `ci`
+  # cannot see (docs-follow-surface: a new subcommand or key reaches the docs).
+  - name: shim
+    match: "{bin,tests}/**"
+    rules:
+      - zero-dep-shim
+      - fail-loud-gates
+      - docs-follow-surface
+
+conventions:
+  rules-doc: docs/conventions.md

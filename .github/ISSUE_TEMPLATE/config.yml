@@ -1,0 +1,10 @@
+# Blank issues are disabled so every report carries the
+# whitelisted structure of one of the two forms above. A blank issue invites
+# unbounded pasting — exactly the failure mode the whitelist exists to prevent —
+# so the two structured forms (bug/friction and field report) are the only routes.
+# The safe default remains the `/gatedloop:feedback` skill, which shows the literal
+# body before anything is posted.
+#
+# No repository URL or slug is hard-coded here: these templates live in the repo
+# they file against, so they target it inherently.
+blank_issues_enabled: false

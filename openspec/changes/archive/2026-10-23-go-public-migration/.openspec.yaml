@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-10-22
+skip_specs: true
+x-gatedloop-approved-by: "Radu Buta <64685892+radub21@users.noreply.github.com>"
+x-gatedloop-approved-at: "2026-10-22T09:18:45.166753+00:00"
+x-gatedloop-approved-sha: "c5a30aafda1c3e0db5d8720971478460478bf5609a31d9201f11fb0ad283b8da"
