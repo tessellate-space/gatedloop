@@ -5015,7 +5015,7 @@ def _change_for_ref(root: Path, ref: str) -> str | None:
 
 
 def _change_ledger_rows(root: Path, change: str, ref: str) -> list[dict]:
-    """The change's ledger as the incoming ref carries it (PR specloop PR 100: never the
+    """The change's ledger as the incoming ref carries it (specloop PR 100: never the
     current branch's): the rows committed in `<ref>:.gatedloop/runs/<change>.jsonl`,
     then any not yet committed in the worktree that has the branch checked
     out -- the working file is the append-only continuation of the committed
@@ -5052,7 +5052,7 @@ def cmd_taint(m: dict, root: Path, args) -> int:
     when the change carries an unresolved taint; 0 otherwise.
 
     With `--ref`, the change and its ledger come from the incoming ref
-    (merge-step, PR specloop PR 100): during a merge the current branch is the target,
+    (merge-step, specloop PR 100): during a merge the current branch is the target,
     which names no change, so the check never fired there. A ref that names
     no change falls back to the current branch, as before."""
     if args.taint_cmd != "check":
@@ -10519,7 +10519,7 @@ def _merge_preconditions(m: dict, root: Path, change: str) -> dict:
 def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool = True) -> str:
     """Step 1 (design D2): commit trailing ledger rows on the branch, then
     the merge hook's incoming-tree checks against `<change>^{tree}` and the
-    named change's ledger -- never the current branch's (PR specloop PR 100). Returns
+    named change's ledger -- never the current branch's (specloop PR 100). Returns
     the incoming tree. `require_acceptance=False` is pull-request mode
     (merge-pull-request D2): there a declared acceptance decides whether
     auto-merge is enabled instead of refusing here -- under `acceptance:

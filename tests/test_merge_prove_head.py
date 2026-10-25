@@ -3,7 +3,7 @@ D2 of `merge-step`).
 
 Step 1 commits the branch's trailing ledger rows, then runs the merge
 hook's incoming-tree checks as functions against the NAMED change's ledger
-and `<change>^{tree}` -- never the current branch. PR specloop PR 100 found the hook's
+and `<change>^{tree}` -- never the current branch. specloop PR 100 found the hook's
 taint check resolving the change from the current branch, which during a
 merge is `main`, so the check never fired; the taint test here runs from
 `main` for exactly that reason. Each refusal must leave the target and the

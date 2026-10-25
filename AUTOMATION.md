@@ -24,7 +24,7 @@ The workflow's hard rules used to live only in prompt text:
 | A task stops retrying once its budget is used | `agents/tdd-implementer.md` §5, `skills/tdd-apply/SKILL.md` §5e (retry-budget D1/D2) | `gates run` itself: before a `unit` or `ci` run for a task it counts the task's failed attempts from the ledger, and once `loop.attempts` is reached it exits 1 without running the gate. A fresh restart (`gates attempt restart`) needs a clean tree and is allowed `loop.fresh-restarts` times per task |
 | A human turn in the loop is visible | `skills/tdd-apply/SKILL.md` §5e/§6/§7 "pause and ask" (escalation-outcomes D4/D5) | `hooks/record-ask.sh` (`PreToolUse` on `AskUserQuestion`) appends an `intervention`/`ask` row on a change branch — it records, never denies; the reflog audit appends an `intervention`/`human-commit` row for a commit whose only green-`ci` evidence was written outside a session |
 | A commit made after the last session stop is audited before the merge | escalation-outcomes D5 | `hooks/gate-merge.sh` runs `gates audit --ref <incoming>` immediately before `gates taint check`, so such a commit is tainted or classified before the merge is decided. With the ref, the audit is of the change that ref names, run in the worktree holding its branch; run bare it audited the current branch, which during a merge from the primary is the target |
-| A tainted change is refused when the merge runs on the target | merge-step (PR specloop PR 100) | `hooks/gate-merge.sh` passes the incoming ref: `gates taint check --ref <ref>` reads the change that ref names and its ledger as the ref carries it. Without it the check resolved the change from the current branch, which during a merge is the target, so it never fired. `gates merge` step 1 calls the same function |
+| A tainted change is refused when the merge runs on the target | merge-step (specloop PR 100) | `hooks/gate-merge.sh` passes the incoming ref: `gates taint check --ref <ref>` reads the change that ref names and its ledger as the ref carries it. Without it the check resolved the change from the current branch, which during a merge is the target, so it never fired. `gates merge` step 1 calls the same function |
 | Verified on main: the merged tree is proven before the target sees it (`local-squash-merge`) | `tdd-apply` §7.5's three-line squash recipe (merge-step) | `gates merge <change>` runs the merge in code: the merge hook's incoming-tree checks as functions, an unscoped `ci` on the staged squash, `discipline check-commit` before each of its commits (the git-layer pre-commit hook still fires on them), the optional `confirm` gate, and one push only after every step passed. Its subprocess `git` calls are not seen by the Bash `PreToolUse` hooks; it is the sanctioned path because it runs those checks itself |
 | A human accepted the behaviour, not just clicked merge (opt-in: `approval.acceptance`) | acceptance-gate D4 | `hooks/gate-merge.sh`'s fourth check, after taint: `gates acceptance check <tree>` on the same tree the live-check and unscoped-`ci` markers matched — passes only when the latest `acceptance` ledger row for that tree is an `accept`, attested by `gates acceptance attest --local` (under `self`) or from the PR's `APPROVED` review (`--pr`); passes stating "not required" when no policy is declared, so the hook is byte-identical to before for everyone else |
 | A forge merge requires the gates that passed locally (`pull-request` mode) | merge-pull-request D1 | `gates marker publish <gate>` posts `gatedloop/<gate>` only from a green local marker for the commit's normalized tree, naming that tree; `gates marker check-remote` verifies one. Nothing local can block a forge merge: branch protection requiring `gatedloop/ci` and `gatedloop/tests` from the CI provider is what enforces it (layer 4) |
@@ -249,8 +249,8 @@ whichever writer recorded it.
 
 ### Approval attestation, verified against real pull requests (task 1d.7)
 
-Run 2026-09-04 in a throwaway private repo (`radub21/specloop-e2e-1d7-d9c715`, PRs specloop PR 1
-and specloop PR 2 — left in place, the test account's token has no `delete_repo` scope). GitHub
+Run 2026-09-04 in a throwaway private repo (`radub21/specloop-e2e-1d7-d9c715`, PRs 1
+and 2 — left in place, the test account's token has no `delete_repo` scope). GitHub
 refuses a self-approval, so the `APPROVED` review came from `github-actions[bot]` via a
 `pull_request` workflow using `GITHUB_TOKEN`, which needs both
 `default_workflow_permissions: write` and `can_approve_pull_request_reviews: true` on
@@ -264,7 +264,7 @@ step:
 | approved plan, not yet merged | exit 1 | — | not present on `origin/main` |
 | merged, not yet attested | exit 1 | — | merged, but no `approved_by` |
 | **(a) approved + merged + attested** | **exit 0** | **allow** | merged to `origin/main`, approved by `github-actions` |
-| **(b) merged with no approving review** | **exit 1** | **deny (2)** | `gates approval attest` refused first — "PR specloop PR 2 has no APPROVED review" — and wrote nothing |
+| **(b) merged with no approving review** | **exit 1** | **deny (2)** | `gates approval attest` refused first — `"PR #2 has no APPROVED review"` — and wrote nothing |
 | **(c) approved, then the artifact edited** | **exit 1** | **deny (2)** | `approved_sha` no longer matches the plan content on `origin/main` |
 
 Two results from that run are worth stating plainly:
