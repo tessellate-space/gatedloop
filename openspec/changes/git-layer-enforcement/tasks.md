@@ -8,7 +8,7 @@
 ## 2. The push gate
 
 - [x] 2.1 `gates discipline check-push <sha>` per design D3: merge-row pass, incoming-tree checks pass, each unmet check named with `gates merge` as remedy; tests drive a real repo with a target branch, a `gates merge` squash (passes), a raw merge with no markers (denied), a feature-branch push (ignored), a deletion (ignored).
-- [ ] 2.2 `templates/git-hooks/pre-push` reading git's stdin lines and calling `check-push` only for the merge target; test the hook end to end through `git push` to a local bare remote, inside and outside an agent session.
+- [x] 2.2 `templates/git-hooks/pre-push` reading git's stdin lines and calling `check-push` only for the merge target; test the hook end to end through `git push` to a local bare remote, inside and outside an agent session.
 
 ## 3. Install, doctor, adoption, onboarding
 

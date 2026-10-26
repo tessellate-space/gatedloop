@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# gatedloop git pre-push hook (enforce-at-the-effect, git-layer-enforcement D3).
+#
+# The git-layer equivalent of the merge gate. A raw merge into the merge
+# target followed by a push reaches the shared history with no check at all;
+# this hook fires on the push itself, so it holds whatever made the merge (a
+# hand-run `git merge`, a script, a library). For each ref git is about to
+# update it runs `gates discipline check-push`, which allows an update of the
+# merge target only when the pushed commit is proven -- a `merge` ledger row
+# records it (what `gates merge` writes before its one push), or the merge
+# gate's incoming-tree checks hold for its tree -- and passes every other
+# branch and every deletion untouched. It NEVER runs a gate: the check reads
+# markers and ledger rows only.
+#
+# Scoped to a declared agent session (git-layer-enforcement D1): `gates
+# discipline agent-session` exits 0 when a variable `discipline.agent-env`
+# lists is set (default `[CLAUDECODE]`), else 1, and on 1 this hook is a
+# transparent no-op. A human's push is never gated here; the forge's branch
+# protection is what covers it.
+set -uo pipefail
+
+# Resolve the shim (git-layer-enforcement D2): the plugin root
+# (plugin-relative-paths), then `gates` on PATH, then the path `gates hook
+# install` recorded below -- the one line it writes into this copy, so the
+# hook finds the shim on a host with no plugin environment at all.
+GATES_INSTALLED=''
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/bin/gates" ]; then
+  GATES="${CLAUDE_PLUGIN_ROOT}/bin/gates"
+elif command -v gates >/dev/null 2>&1; then
+  GATES="gates"
+elif [ -n "${GATES_INSTALLED}" ] && [ -x "${GATES_INSTALLED}" ]; then
+  GATES="${GATES_INSTALLED}"
+else
+  # Nothing finds the shim, so a session cannot be told from a human: fail
+  # toward the human (design Risks). `gates doctor` reports the copy stale.
+  echo "gatedloop: the pre-push hook could not resolve the gates shim (no plugin root, no \`gates\` on PATH, no recorded path) — the push is not gated. Run \`gates hook install\` to record the current path." >&2
+  exit 0
+fi
+
+"${GATES}" discipline agent-session </dev/null
+session=$?
+if [ "${session}" -eq 1 ]; then
+  exit 0
+elif [ "${session}" -ne 0 ]; then
+  echo "gatedloop: push denied — \`gates discipline agent-session\` failed (exit ${session}), so whether this push is gated cannot be decided." >&2
+  exit 1
+fi
+
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  # A deletion pushes the zero sha; it updates no tree, so nothing to prove.
+  case "${local_sha}" in *[!0]*) ;; *) continue ;; esac
+  # The shim decides which line updates the merge target; every other line
+  # passes silently.
+  if ! out="$("${GATES}" discipline check-push "${local_sha}" --remote-ref "${remote_ref}" </dev/null 2>&1)"; then
+    echo "${out}" >&2
+    status=1
+  elif [ -n "${out}" ]; then
+    echo "${out}"
+  fi
+done
+
+exit "${status}"
