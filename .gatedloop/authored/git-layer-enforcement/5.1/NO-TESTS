@@ -1,1 +1,0 @@
-Verification only: runs the existing ci gate and openspec validate on the final tree; it changes no behaviour.

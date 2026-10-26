@@ -22,7 +22,7 @@
 
 ## 5. Close
 
-- [ ] 5.1 `gates run ci` green on the final tree; `openspec validate git-layer-enforcement --strict` passes.
+- [x] 5.1 `gates run ci` green on the final tree; `openspec validate git-layer-enforcement --strict` passes.
 
 ## Workflow follow-up
 
