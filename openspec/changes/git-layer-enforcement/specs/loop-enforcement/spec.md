@@ -86,3 +86,55 @@ Project documentation SHALL state, for each guarantee the loop makes, which laye
 
 - **WHEN** an adopter runs the loop from a host that is not Claude Code
 - **THEN** the documentation tells them the shim, the ledger, the commit and push gates and the forge statuses hold, and that the tool-hook denials (implement, scaffold, propose, archive, the Stop audit) do not
+
+### Requirement: The push hook is opt-in and a decline sticks
+
+The `pre-push` hook SHALL be installed only with the adopter's consent. `gates hook install --commit-only` SHALL install or refresh the `pre-commit` hook alone and record the `git-push-hook` adoption item as `declined`. While that item is recorded `declined`, a plain `gates hook install` SHALL skip `pre-push` and say how to add it; `gates hook install --push` SHALL install it and record `adopted`.
+
+#### Scenario: Installing the commit hook only
+
+- **WHEN** an adopter runs `gates hook install --commit-only`
+- **THEN** only the `pre-commit` hook is installed or refreshed, and the `git-push-hook` item is recorded `declined`
+
+#### Scenario: A re-install after a decline
+
+- **WHEN** the `git-push-hook` item is recorded `declined` and an adopter runs `gates hook install`
+- **THEN** only the `pre-commit` hook is installed or refreshed, the output says the push hook was skipped and names `gates hook install --push`, and no `pre-push` hook is written
+
+#### Scenario: Opting back in
+
+- **WHEN** an adopter who declined runs `gates hook install --push`
+- **THEN** the `pre-push` hook is installed and the `git-push-hook` item is recorded `adopted`
+
+#### Scenario: The doctor respects a decline
+
+- **WHEN** the `git-push-hook` item is recorded `declined` and no `pre-push` hook is installed
+- **THEN** `gates doctor` reports the `git-push-hook` row as ok, naming the decline, and does not warn
+
+### Requirement: The git-layer hooks act only inside a declared agent session
+
+The `pre-commit` and `pre-push` hooks SHALL check anything only when a variable named in `discipline.agent-env` (default `[CLAUDECODE]`) is set. Otherwise each SHALL exit 0 without checking, so commits and pushes made by a human in a terminal, from an IDE, or by a CI runner are untouched, whether or not the hooks are installed.
+
+#### Scenario: A human commits and pushes the target
+
+- **WHEN** no `discipline.agent-env` variable is set and a human commits code and pushes the merge target with both hooks installed
+- **THEN** neither hook checks anything, and the commit and the push proceed
+
+#### Scenario: A CI runner pushes
+
+- **WHEN** a CI job without any `discipline.agent-env` variable set pushes any branch, the merge target included
+- **THEN** the `pre-push` hook exits 0 without checking
+
+### Requirement: Plan approval is unchanged by the git-layer hooks
+
+This change SHALL NOT alter how a plan is approved. `approval.plan: self` local attestation, `review`, and a merge of the plan's pull request as its approval SHALL work exactly as before. The push gate SHALL check only a pushed commit's merge proof (a merge row or the incoming-tree checks), never how the change's plan was approved.
+
+#### Scenario: A self-attested plan
+
+- **WHEN** a project declares `approval.plan: self` and a maintainer runs `gates approval attest <change> --local`
+- **THEN** the approval is recorded and checked exactly as before this change
+
+#### Scenario: The push gate does not read the approval
+
+- **WHEN** a change merged by `gates merge` is pushed to the target
+- **THEN** the push gate allows it on its merge row alone, whatever approval policy the project declares
