@@ -9129,6 +9129,173 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
 
 
 
+# ---------- the push gate (git-layer-enforcement D3) ------------------------
+#
+# `gates discipline check-push <sha> --remote-ref <ref>`: what the git
+# `pre-push` hook asks for each ref a push updates. Only an update of the
+# merge target's branch is checked; every other branch, and a deletion (the
+# zero sha), passes silently. The target passes when the pushed commit is
+# proven, two ways, and no gate runs in either:
+#
+#   1. a `merge` row in a ledger the pushed commit carries names it -- or
+#      names an ancestor S of it such that S..<sha> touches only ledger and
+#      planning paths. That is `gates merge`'s own push: its merge row names
+#      the squash commit, and the archive commit pushed on top carries only
+#      the move under `openspec/` and the row itself.
+#   2. the merge gate's incoming-tree checks hold for the pushed commit's
+#      tree (the same set `_merge_prove_head` applies to a change head).
+
+_ZERO_SHA_RE = re.compile(r"^0+$")
+
+
+def _ledger_rows_at(root: Path, sha: str) -> list[dict]:
+    """Every ledger row the commit `sha` carries, from every change's file."""
+    rows: list[dict] = []
+    for prefix in LEDGER_PREFIXES:
+        listed = _git(root, "ls-tree", "-r", "--name-only", sha, "--", prefix + "/")
+        if listed.returncode != 0:
+            continue
+        for rel in listed.stdout.splitlines():
+            if not rel.endswith(".jsonl"):
+                continue
+            blob = _git(root, "cat-file", "blob", f"{sha}:{rel}")
+            if blob.returncode == 0:
+                rows.extend(_parse_jsonl_rows(blob.stdout))
+    return rows
+
+
+def _push_merge_row(root: Path, m: dict, sha: str, rows: list[dict]) -> str | None:
+    """The squash commit a merge row names that vouches for `sha` (way 1)."""
+    for r in rows:
+        named = r.get("sha") if r.get("gate") == "merge" else None
+        if not isinstance(named, str) or not named.strip():
+            continue
+        named = _rev(root, named.strip())
+        if named is None:
+            continue
+        if named == sha:
+            return named
+        if not _is_ancestor(root, named, sha):
+            continue
+        diff = _git(root, "diff", "--name-only", named, sha)
+        if diff.returncode != 0:
+            continue
+        if all(_is_ledger_path(p) or _is_planning_path(p, m) for p in diff.stdout.splitlines() if p):
+            return named
+    return None
+
+
+def _push_changes(root: Path, sha: str, target_branch: str) -> list[str]:
+    """The changes a pushed commit carries in: local change branches whose tip
+    it contains and whose change is still active in its tree."""
+    out = _git(root, "for-each-ref", "--merged", sha, "--format=%(refname:short)", "refs/heads/")
+    names = []
+    for name in out.stdout.splitlines() if out.returncode == 0 else []:
+        name = name.strip()
+        if not name or name == target_branch or "/" in name:
+            continue
+        has = _git(root, "cat-file", "-e", f"{sha}:openspec/changes/{name}")
+        if has.returncode == 0:
+            names.append(name)
+    return sorted(names)
+
+
+def _push_tree_problems(m: dict, root: Path, sha: str, changes: list[str]) -> list[str]:
+    """The merge gate's incoming-tree checks against the pushed commit (way
+    2), each unmet one named: a `live-check` marker and a full `ci` marker for
+    its tree, `verify` where declared, and -- for each change it carries in --
+    no unresolved taint, the authored-test lock, and acceptance where a
+    policy is declared."""
+    tree = _commit_tree(root, sha)
+    if tree is None:
+        return [f"gatedloop: could not resolve the tree of {sha[:12]}."]
+    problems: list[str] = []
+    stores = [root]
+    for change in changes:
+        for store in _marker_stores(root, change):
+            if store not in stores:
+                stores.append(store)
+    for gate, scope in (("live-check", None), ("ci", "full")):
+        texts = []
+        for store in stores:
+            rc, _out, err = _captured(_check_marker_and_report, store, gate, tree, scope)
+            if rc == 0:
+                break
+            texts.append(err.strip())
+        else:
+            hint = ("run `gates run live-check` on the pushed commit" if gate == "live-check"
+                    else "run an unscoped `gates run ci` (nothing staged) on the pushed commit")
+            problems.append(f"{texts[0]}\n  -> {hint}.")
+    rows = _ledger_rows_at(root, sha)
+    change_rows = {c: _change_ledger_rows(root, c, sha) for c in changes}
+    if (m.get("gates") or {}).get("verify"):
+        norm = _normalize_tree(root, tree)
+        every = rows + [r for rs in change_rows.values() for r in rs]
+        if not any(r.get("gate") == "verify" and r.get("exit") == 0 and r.get("tree")
+                   and _normalize_tree(root, r["tree"]) == norm for r in every):
+            problems.append(
+                f"gatedloop: `verify` is declared, and no green `verify` is recorded for "
+                f"(ledger-normalized) tree {norm!r}.\n  -> run `gates run verify` on it.")
+    for change in changes:
+        if _taint_unresolved(change_rows[change]):
+            problems.append(_taint_refusal(change))
+        try:
+            lock = _lock_at_commit(root, change, sha)
+        except _ForgeRefusal as refusal:
+            problems.append(refusal.message)
+        else:
+            if lock.problems:
+                problems.append(lock.refusal())
+    if _acceptance_policy(m):
+        for change in changes or [None]:
+            rc, _out, err = _captured(_acceptance_check, m, root,
+                                      argparse.Namespace(tree=tree, change=change))
+            if rc != 0:
+                problems.append(err.strip())
+    return problems
+
+
+def _check_push(m: dict, root: Path, sha: str, remote_ref: str | None) -> int:
+    if _ZERO_SHA_RE.match(sha or ""):
+        return 0  # a deletion updates no tree
+    target, reason = _resolve_merge_target(root)
+    if target is None:
+        print(f"gatedloop: push denied — no merge target resolves ({reason}), so whether "
+              "this push updates it cannot be decided.", file=sys.stderr)
+        return 1
+    branch = _split_target(target)[1]
+    if remote_ref is not None and remote_ref != f"refs/heads/{branch}":
+        return 0  # not the merge target: passes untouched
+    full = _rev(root, sha)
+    if full is None:
+        print(f"gatedloop: push denied — {sha} is not a commit in this repository.",
+              file=sys.stderr)
+        return 1
+    rows = _ledger_rows_at(root, full)
+    vouched = _push_merge_row(root, m, full, rows)
+    if vouched is not None:
+        how = "it" if vouched == full else f"{vouched[:12]}, and only ledger and planning paths follow it"
+        print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — a merge row records {how}")
+        return 0
+    changes = _push_changes(root, full, branch)
+    problems = _push_tree_problems(m, root, full, changes)
+    if not problems:
+        print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — the merge gate's "
+              "incoming-tree checks hold for its tree")
+        return 0
+    name = changes[0] if len(changes) == 1 else "<change>"
+    print(
+        f"gatedloop: push to '{branch}' denied at the git layer — commit {full[:12]} is not "
+        f"proven: no merge row records it, and the incoming-tree checks fail:\n"
+        + "\n".join(problems)
+        + f"\ngatedloop: integrate through `gates merge {name}`: it proves the head, records "
+        "the merge row and pushes once. A raw merge pushed by hand reaches the shared "
+        "history unchecked, which is what this hook refuses.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_discipline(m: dict, root: Path, args) -> int:
     if args.discipline_cmd == "check-commit":
         tree = args.tree
@@ -9256,6 +9423,9 @@ def cmd_discipline(m: dict, root: Path, args) -> int:
 
     if args.discipline_cmd == "check-worktree":
         return _check_worktree(root)
+
+    if args.discipline_cmd == "check-push":
+        return _check_push(m, root, args.sha, args.remote_ref)
 
     if args.discipline_cmd == "merge-scope":
         # hook-correctness D2: the merge hook guards integration only. Prints
@@ -11767,6 +11937,10 @@ def main() -> int:
     sp_prop.add_argument("path", nargs="?", default=None, help="omit with --scaffold")
     sp_prop.add_argument("--scaffold", action="store_true", help="check the openspec-new-change step itself, before any file exists (design D4)")
     sp_prop.set_defaults(fn=cmd_discipline)
+    sp_push = disc_sub.add_parser("check-push", help="the pre-push hook's check: exit 1 unless an update of the merge target pushes a proven commit (a merge row records it, or the merge gate's incoming-tree checks hold); other refs and deletions pass")
+    sp_push.add_argument("sha", help="the local sha being pushed (all zeros: a deletion)")
+    sp_push.add_argument("--remote-ref", help="the remote ref it updates (refs/heads/<branch>); only the merge target's is checked. Omitted: the sha is checked as a push of the target")
+    sp_push.set_defaults(fn=cmd_discipline)
     sp_wt = disc_sub.add_parser("check-worktree", help="exit 1 if the current branch is checked out in more than one worktree, naming each")
     sp_wt.set_defaults(fn=cmd_discipline)
     sp_ms = disc_sub.add_parser("merge-scope", help="print 'integrating' if a merge here lands on the integration target (its branch, or a detached HEAD at its tip), else 'not-integrating'")
