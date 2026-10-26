@@ -6,7 +6,37 @@ Issue numbers before 0.7.0 were remapped when the issues moved here from the pri
 
 ## What it does
 
-gatedloop takes an approved [OpenSpec](https://github.com/Fission-AI/OpenSpec) change to verified-on-main without taking the agent's word for anything. A gate is a command your project declares, and its verdict is the exit code, nothing else. Hooks make the gates non-optional: a commit is refused without a green `ci` on exactly the tree being committed, and a merge is refused without a green `live-check` on exactly the tree coming in. A task is done exactly when its code, its checkbox and its ledger row are committed together, so a halted run resumes from the first unchecked task. A commit that skipped its gate taints the change, and a tainted change does not merge. OpenSpec writes the plan; gatedloop is the enforcement and onboarding layer around it.
+gatedloop covers one stretch of the software lifecycle: **from a plan a person has approved to a merge a person decides on.** Inside that stretch a coding agent implements, tests and integrates on its own. gatedloop's job is to make sure the agent cannot leave that loop without a human: it cannot start on an unapproved plan, cannot commit past a red gate, cannot edit the tests it is held to, cannot retry forever, cannot stop quietly, and cannot merge where your process says a person merges. Each of those is a hook that denies the action, not a sentence in a prompt. A gate is a command your project declares, and its verdict is the exit code, nothing else.
+
+It does not write the plan, and it does not deploy. [OpenSpec](https://github.com/Fission-AI/OpenSpec) authors the plan; your pipeline ships the result. gatedloop is the enforcement and onboarding layer between the two.
+
+### Where it sits in the lifecycle
+
+| Stage | Who does it | gatedloop's part |
+|---|---|---|
+| Intent, requirements, design | You, with OpenSpec (`/opsx:propose`) | None. It neither authors nor judges the plan. `/gatedloop:propose` only opens the pull request you review it in. |
+| **Plan approval** | A person, in the plan PR | Records the approval and pins it to the plan's content. Implementation cannot start without it, or after the plan is edited. |
+| **Implementation and testing** | The agent | The loop: tests written and locked first, then red, green, `ci`, convention review, one atomic commit per task. |
+| **Integration** | gatedloop, then a person | Proves the branch head, publishes the evidence, opens the PR or squashes. Stops wherever your declared process needs a person. |
+| **Merge decision** | A person | The agent cannot supply it. |
+| Deploy, operate, monitor | Your pipeline | None. |
+
+### What the agent cannot do
+
+Every row is a `PreToolUse` or `Stop` hook, or a check inside `gates`, that denies the action outright. SETUP.md's "Enforcement" section has the mechanism behind each one.
+
+| The agent cannot... | ...without | Enforced by |
+|---|---|---|
+| start implementing a change | a plan a person approved, unchanged since the approval | the branch-creation hook (`gates discipline check-implement`) |
+| commit | a green `ci` on exactly the tree being committed | the commit hook, and the optional git `pre-commit` hook |
+| edit a test it is implementing against | sending it back as a defect | the authored-test lock, checked at every commit and again at the merge |
+| keep retrying a red task | a person | the retry budget: past `loop.attempts`, `gates run` refuses the task's next run |
+| stop early, or narrate a halt instead of recording it | a `halt` row with a cause from a closed set | the `Stop` hook, which re-enters the loop at the next unchecked task |
+| merge | a green `live-check` on the incoming tree, and no commit that skipped its gate | the merge hook, and `gates merge` step 1 |
+| merge at all, where your process names a person | your review | `integration.requireApproval`; in pull-request mode the forge's branch protection, which the agent cannot satisfy |
+| archive | the change present on the merge target | the archive hook |
+
+A task is done exactly when its code, its checkbox and its ledger row are committed together, so a halted run resumes from the first unchecked task, and the ledger is the record of every gate verdict along the way.
 
 ## Quickstart
 
@@ -168,7 +198,7 @@ authoring, one lane per change, `ready`/`halt` rows, `gates merge` in either mod
 published statuses and `gates record-merged`, planner sessions handing plans to one
 orchestrator with `gates handoff` — an example to adapt, not a supported component.
 
-## Where gatedloop sits
+## Where gatedloop sits on the adoption ladder
 
 An existing OpenSpec adoption model scores each SDLC phase 0–4 — `none` → `advise` → `observe` → `act` → **`close`**, where *close* means a tool changes real state, reads back the result, and self-corrects with no human turn — across three levels:
 
