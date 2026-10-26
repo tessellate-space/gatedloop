@@ -58,7 +58,8 @@ class TestInstallNothingPresent(unittest.TestCase):
             self.assertTrue(hook.stat().st_mode & 0o111, "hook must be executable")
             body = hook.read_text()
             self.assertIn("discipline check-commit", body)
-            self.assertIn("CLAUDECODE", body, "must be env-scoped (design D2)")
+            self.assertIn("discipline agent-session", body,
+                          "must be scoped to a declared agent session (git-layer-enforcement D1)")
 
     def test_idempotent_second_run_no_op(self):
         with tempfile.TemporaryDirectory() as tmp:
