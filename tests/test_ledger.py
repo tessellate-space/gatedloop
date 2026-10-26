@@ -169,7 +169,7 @@ class TestLedgerKeyedOnChangeAndTask(unittest.TestCase):
 class TestLedgerSurvivesSquashMerge(unittest.TestCase):
     """Task 1b.6: rows survive a squash-merge intact, and no row references
     a SHA absent from `main` after the squash (design D8's whole point —
-    PR specloop PR 1 in this repo demonstrated branch commits stop being ancestors of
+    specloop PR 1 (the private archive) demonstrated branch commits stop being ancestors of
     `main`, but the ledger file's final state is carried by the squash
     commit regardless)."""
 

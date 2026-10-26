@@ -40,7 +40,7 @@ class RecordMergedTest(unittest.TestCase):
 
     def _merged_in_forge(self, tmp: Path) -> tuple:
         """A change carried through the loop in a lane, then squash-merged
-        onto `main` the way the forge does it, as PR specloop PR 7 from head `add-thing`.
+        onto `main` the way the forge does it, as PR #7 from head `add-thing`.
         The primary is on `main` at that squash, as a CI checkout would be."""
         repo = MergeRepo(tmp, manifest_extra=PR_MODE)
         forge = Forge(tmp / "forge.json").install(repo.bin)
@@ -50,7 +50,7 @@ class RecordMergedTest(unittest.TestCase):
         git(repo.lane, "add", "-A")
         git(repo.lane, "commit", "-q", "-m", "record trailing ledger rows")
         git(repo.primary, "merge", "--squash", CHANGE)
-        git(repo.primary, "commit", "-q", "-m", f"{CHANGE}: {PROPOSAL_TITLE} (specloop PR 7)")
+        git(repo.primary, "commit", "-q", "-m", f"{CHANGE}: {PROPOSAL_TITLE} (#7)")
         squash = git(repo.primary, "rev-parse", "HEAD")
         git(repo.primary, "push", "-q", "origin", "HEAD:main")
         repo.push_log.write_text("")

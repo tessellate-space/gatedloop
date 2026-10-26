@@ -146,7 +146,7 @@ name `--pr`.
 
 #### Scenario: A merged plan PR under self
 
-- **WHEN** plan PR specloop PR 42 for `add-thing` was merged into the target by `alice` and the
+- **WHEN** plan PR #42 for `add-thing` was merged into the target by `alice` and the
   policy is `self`
 - **THEN** `add-thing`'s approval reads `alice (merged #42)` at the PR's merge time,
   and `check-implement` accepts it
@@ -165,12 +165,12 @@ missing or unauthenticated.
 
 #### Scenario: An open PR
 
-- **WHEN** PR specloop PR 42 is still open
+- **WHEN** PR #42 is still open
 - **THEN** `--merged 42` refuses, naming the PR's state
 
 #### Scenario: A PR into another branch
 
-- **WHEN** PR specloop PR 42 was merged into a branch other than the target
+- **WHEN** PR #42 was merged into a branch other than the target
 - **THEN** `--merged 42` refuses, naming the base and the target
 
 ### Requirement: A handoff is refused unless the plan is approved on the target
@@ -202,7 +202,7 @@ or when the change is already approved, it SHALL skip with a message saying why.
 
 #### Scenario: The record job after a plan PR merges
 
-- **WHEN** `gates record-merged` runs on the squash of plan PR specloop PR 42 for `add-thing`
+- **WHEN** `gates record-merged` runs on the squash of plan PR #42 for `add-thing`
   under `self`
 - **THEN** one local commit carries `add-thing`'s approval keys from the merge, and
   nothing is pushed

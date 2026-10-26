@@ -150,7 +150,7 @@ fi
 # its branch lives -- bare, it resolved the current branch (the target), so a
 # merge from the primary audited nothing.
 "${GATES}" audit ${ref_args[@]+"${ref_args[@]}"} >/dev/null 2>&1 || true
-# merge-step (PR specloop PR 100): during an integrating merge the current branch is
+# merge-step (specloop PR 100): during an integrating merge the current branch is
 # the target, which names no change, so a bare `taint check` never fired.
 # With the incoming ref it reads THAT change's ledger as the ref carries it
 # (the same function `gates merge` step 1 calls); a ref naming no change

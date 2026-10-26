@@ -31,6 +31,14 @@ ALLOWED_TOKENS = (
     "remove-specloop-forwarders",
     # A real repository a past end-to-end run used (AUTOMATION.md); renaming it would be false.
     "radub21/specloop-e2e",
+    # An archived change's name (openspec/changes/archive/2026-08-18-reposition-specloop).
+    "reposition-specloop",
+)
+
+# Patterns of text allowed on any line, as regexes rather than literals.
+ALLOWED_TOKEN_PATTERNS = (
+    # Names a PR in the private archive repository, the history this one was exported from.
+    r"specloop PR \d+",
 )
 
 # (path glob, scope, reason). A scope is None (the whole file),
@@ -147,6 +155,8 @@ class TestEarlierNameAllowList(unittest.TestCase):
             rest = text
             for token in ALLOWED_TOKENS:
                 rest = re.sub(re.escape(token), "", rest, flags=re.IGNORECASE)
+            for pattern in ALLOWED_TOKEN_PATTERNS:
+                rest = re.sub(pattern, "", rest, flags=re.IGNORECASE)
             if "specloop" not in rest.lower():
                 return True
             for glob, scope, _reason in ALLOWED:

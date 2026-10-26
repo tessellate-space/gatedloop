@@ -295,7 +295,7 @@ class CutFixture(RepoTestCase):
         # The squash commit of `new-thing`: it carries the change's tasks.md.
         self.repo.write("skills/new/SKILL.md", "# New\n")
         self.repo.write("openspec/changes/new-thing/tasks.md", "- [x] 1.1\n")
-        self.repo.commit_all("New thing: a skill that does it (specloop PR 9)")
+        self.repo.commit_all("New thing: a skill that does it (#9)")
         self.repo.archive_change("new-thing", "Adopters lack a thing.\nIt hurts. A lot.")
         self.repo.write("hooks/brief.sh", "echo fixed\n")
         self.repo.commit_all("Fix the session brief")
