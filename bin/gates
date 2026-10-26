@@ -1504,7 +1504,7 @@ def _shim_location(shim_path) -> tuple:
 def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=None,
                   yaml_importable=None, forge_cli=None, old_approval_changes=None,
                   gates_on_path=_NOT_CHECKED, local_settings=_NOT_CHECKED,
-                  earlier_names=_NOT_CHECKED) -> list:
+                  earlier_names=_NOT_CHECKED, push_hook_state=None) -> list:
     """The pure diagnostic logic (design D3/D4). Returns a list of
     ``(level, title, detail)`` where `level` is 'ok' or 'warn' — never a
     blocking 'error', because doctor is advisory: nothing here fails validation
@@ -1518,6 +1518,9 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
     `yaml_importable` (schema-declared-flow D5) is whether PyYAML imports.
     `None` omits the row; a bool adds one advisory ok/warn row. Its absence is
     never a failure: every gate, hook and dispatch decision works without it.
+
+    `push_hook_state` (git-layer-enforcement D4) is the git pre-push hook's
+    state, from the same primitive; `None` omits its row.
 
     `old_approval_changes` (openspec-1-14-compat D4) lists the active changes
     still carrying 0.5.0-spelled approval keys. `None` omits the row.
@@ -1671,6 +1674,47 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
                 "or re-run `/gatedloop:gates-init`.",
             ))
 
+    # 4b. Git-layer push hook wiring (git-layer-enforcement D4): the commit
+    #     hook's five states, for the hook that gates a push of the merge
+    #     target. Omitted when not checked.
+    if push_hook_state is not None:
+        if push_hook_state == "wired":
+            checks.append((
+                "ok", "git-push-hook",
+                "The git pre-push hook (the merge target's push gate) is installed. It "
+                "enforces only inside a declared agent session and no-ops for humans.",
+            ))
+        elif push_hook_state == "stale-copy":
+            checks.append((
+                "warn", "git-push-hook",
+                "The git pre-push hook is a direct copy of an earlier (or locally edited) "
+                "gatedloop template, or the shim path it records is gone and nothing else "
+                "resolves the shim. Run `gates hook install`: it replaces the copy and keeps "
+                "the old body in `pre-push.gatedloop-prev` beside it.",
+            ))
+        elif push_hook_state == "manager-uncomposed":
+            checks.append((
+                "warn", "git-push-hook",
+                "A hook manager (husky/lefthook/pre-commit) owns the hook path but the "
+                "git-layer push gate is not composed into it. Run `gates hook install` "
+                "(it composes where safe, refuses-and-instructs otherwise) — without it, "
+                "a raw merge of the target pushed by hand is checked by nothing local.",
+            ))
+        elif push_hook_state == "unmanaged-hook":
+            checks.append((
+                "warn", "git-push-hook",
+                "An existing, unmanaged pre-push hook is present and the git-layer push "
+                "gate is not in it. `gates hook install` will refuse-and-instruct rather "
+                "than risk your hook; wire the printed block by hand.",
+            ))
+        else:  # absent
+            checks.append((
+                "warn", "git-push-hook",
+                "The git pre-push hook (the merge target's push gate) is not installed, so "
+                "a raw merge of the target pushed by hand reaches the shared history "
+                "unchecked. Run `gates hook install` or re-run `/gatedloop:gates-init`.",
+            ))
+
     # 5. The optional YAML dependency (schema-declared-flow D5).
     if yaml_importable is not None:
         if yaml_importable:
@@ -1809,7 +1853,8 @@ def cmd_doctor(_args) -> int:
                            gates_on_path=shutil.which("gates"),
                            local_settings=_read_text_or_none(
                                root / ".claude" / "settings.local.json"),
-                           earlier_names=_earlier_name_remnants(root))
+                           earlier_names=_earlier_name_remnants(root),
+                           push_hook_state=_hook_state(root, "pre-push"))
 
     print("gatedloop: gates doctor — onboarding preflight\n")
     for level, title, detail in checks:
