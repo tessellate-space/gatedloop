@@ -35,7 +35,7 @@ import unittest
 from pathlib import Path
 
 from _forge_fixture import Forge, NO_CI
-from _hook_fixture import TEMPLATE, default_hook, init_repo, write_hook
+from _hook_fixture import TEMPLATE, default_hook, init_repo, normalized, write_hook
 from _merge_fixture import MergeRepo, combined, git
 
 REPO = Path(__file__).resolve().parent.parent
@@ -169,7 +169,7 @@ class TestHookWrites(unittest.TestCase):
             r = _gates(root, "hook", "install")
 
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertEqual(hook.read_bytes(), TEMPLATE.read_bytes())
+            self.assertEqual(normalized(hook.read_text()), TEMPLATE.read_text())
             self.assertIn("# gatedloop git pre-commit hook", hook.read_text())
             backup = hook.with_name("pre-commit.gatedloop-prev")
             self.assertEqual(backup.read_text(), EARLIER_COPY)

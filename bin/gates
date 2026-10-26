@@ -38,6 +38,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -3885,37 +3886,84 @@ def cmd_marker(m: dict, root: Path, args) -> int:
 
 HOOK_BEGIN = f"# >>> {NAME} pre-commit (enforce-at-the-effect) >>>"
 HOOK_END = f"# <<< {NAME} pre-commit (enforce-at-the-effect) <<<"
+PUSH_HOOK_BEGIN = f"# >>> {NAME} pre-push (enforce-at-the-effect) >>>"
+PUSH_HOOK_END = f"# <<< {NAME} pre-push (enforce-at-the-effect) <<<"
 # The template's own header line — used to recognize an already-installed
 # direct copy (which carries no BEGIN sentinel). It is the header rather than
 # the check the body runs, because that check changed (lock-and-ledger-hygiene
 # D4: `gate-marker check ci` became `discipline check-commit`) and a copy of
 # either body is still one of ours, never a foreign one.
 _HOOK_TEMPLATE_MARK = f"# {NAME} git pre-commit hook (enforce-at-the-effect"
+_PUSH_HOOK_TEMPLATE_MARK = f"# {NAME} git pre-push hook (enforce-at-the-effect"
+
+# git-layer-enforcement D4: both git-layer hooks install, compose, refuse and
+# are diagnosed through one path, hook by hook.
+GIT_HOOKS = ("pre-commit", "pre-push")
+_HOOK_MARKERS = {
+    "pre-commit": (HOOK_BEGIN, HOOK_END, _HOOK_TEMPLATE_MARK),
+    "pre-push": (PUSH_HOOK_BEGIN, PUSH_HOOK_END, _PUSH_HOOK_TEMPLATE_MARK),
+}
+
+# git-layer-enforcement D2: the one line `gates hook install` writes into a
+# template — the installing shim's path, the hook's last fallback for finding
+# the shim outside a plugin environment. The shipped template holds it empty,
+# and a copy is compared with the template with this line emptied.
+_RECORDED_LINE_RE = re.compile(r"^GATES_INSTALLED=.*$", re.MULTILINE)
+_EMPTY_RECORDED_LINE = "GATES_INSTALLED=''"
 
 
-def _hook_template_path() -> Path:
+def _hook_template_path(hook: str = "pre-commit") -> Path:
     return (
         Path(__file__).resolve().parent.parent
-        / "templates" / "git-hooks" / "pre-commit"
+        / "templates" / "git-hooks" / hook
     )
 
 
-def _composed_hook_snippet() -> str:
+def _composed_hook_snippet(hook: str = "pre-commit") -> str:
     """The delegating block appended when composing into an existing hook.
-    It calls the shipped template (one source of truth for the check logic) and
-    is a transparent no-op outside a session or when the plugin root is
-    unavailable — so it never blocks a human commit."""
+    It calls the shipped template (one source of truth for the check logic,
+    the agent-session decision included: git-layer-enforcement D1) with the
+    hook's arguments and stdin, and is a transparent no-op when the plugin
+    root is unavailable — so it never blocks a human."""
+    begin, end, _mark = _HOOK_MARKERS[hook]
     return "\n".join([
-        HOOK_BEGIN,
-        "# Env-scoped git-layer commit gate. Delegates to the shipped template so",
-        "# there is a single source of truth; a transparent no-op outside a Claude",
-        "# Code session or when the plugin root is unavailable (never blocks a human).",
-        'if [ -n "${CLAUDECODE:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT:-}/templates/git-hooks/pre-commit" ]; then',
-        '  "${CLAUDE_PLUGIN_ROOT}/templates/git-hooks/pre-commit" || exit $?',
+        begin,
+        f"# Git-layer {hook} gate. Delegates to the shipped template so there is a",
+        "# single source of truth; the template decides whether this is an agent",
+        "# session (`gates discipline agent-session`) and is a transparent no-op",
+        "# otherwise, as this block is when the plugin root is unavailable.",
+        f'if [ -x "${{CLAUDE_PLUGIN_ROOT:-}}/templates/git-hooks/{hook}" ]; then',
+        f'  "${{CLAUDE_PLUGIN_ROOT}}/templates/git-hooks/{hook}" "$@" || exit $?',
         "fi",
-        HOOK_END,
+        end,
         "",
     ])
+
+
+def _hook_install_body(hook: str) -> str:
+    """The template with the installing shim's path recorded (D2)."""
+    line = "GATES_INSTALLED=" + shlex.quote(str(Path(__file__).resolve()))
+    return _RECORDED_LINE_RE.sub(lambda _m: line, _hook_template_path(hook).read_text(), count=1)
+
+
+def _hook_recorded_shim_gone(text: str) -> bool:
+    """Whether a copy records a shim path that no longer exists while
+    neither the plugin root nor PATH resolves the shim: then nothing the hook
+    tries finds it, and the copy is stale (git-layer-enforcement D2)."""
+    m = _RECORDED_LINE_RE.search(text)
+    if not m:
+        return False
+    try:
+        words = shlex.split(m.group(0)[len("GATES_INSTALLED="):])
+    except ValueError:
+        return True
+    recorded = words[0] if words else ""
+    if not recorded or os.access(recorded, os.X_OK):
+        return False
+    plugin = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if plugin and os.access(os.path.join(plugin, "bin", "gates"), os.X_OK):
+        return False
+    return shutil.which("gates") is None
 
 
 def _read_text_safe(p: Path) -> str:
@@ -4181,17 +4229,18 @@ def _hooks_dir(root: Path) -> Path:
     return p if p.is_absolute() else (root / p)
 
 
-def _detect_hook_owner(root: Path) -> tuple[str, Path | None]:
-    """Classify who owns the pre-commit hook path. Returns `(kind, path)`:
-    kind ∈ {husky, lefthook, pre-commit, hooksPath, bare-hook, none}. `path`
-    is the concrete pre-commit file our check lives in / would install to, when
-    meaningful. Managers are authority on the hook path, so they win over a
-    stray `.git/hooks/pre-commit`."""
+def _detect_hook_owner(root: Path, hook: str = "pre-commit") -> tuple[str, Path | None]:
+    """Classify who owns the `hook` path (`pre-commit` or `pre-push`). Returns
+    `(kind, path)`: kind ∈ {husky, lefthook, pre-commit, hooksPath, bare-hook,
+    none}. `path` is the concrete hook file our check lives in / would install
+    to, when meaningful. Managers are authority on the hook path, so they win
+    over a stray `.git/hooks/<hook>`; a manager owns every hook path at once
+    (git-layer-enforcement D4), a bare hook only its own."""
     if (root / ".husky").is_dir():
-        # husky v9 points core.hooksPath at .husky/_ and runs .husky/pre-commit;
+        # husky v9 points core.hooksPath at .husky/_ and runs .husky/<hook>;
         # older husky sources husky.sh from the same per-hook script. Either
-        # way .husky/pre-commit is the file to compose into.
-        return "husky", root / ".husky" / "pre-commit"
+        # way .husky/<hook> is the file to compose into.
+        return "husky", root / ".husky" / hook
     for name in ("lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml"):
         if (root / name).exists():
             return "lefthook", None
@@ -4200,64 +4249,71 @@ def _detect_hook_owner(root: Path) -> tuple[str, Path | None]:
             return "pre-commit", None
     hooks_path = _core_hooks_path(root)
     if hooks_path is not None:
-        return "hooksPath", hooks_path / "pre-commit"
-    default_hook = _hooks_dir(root) / "pre-commit"
+        return "hooksPath", hooks_path / hook
+    default_hook = _hooks_dir(root) / hook
     if default_hook.exists():
         return "bare-hook", default_hook
     return "none", default_hook
 
 
-def _hook_already_wired(path: Path | None) -> bool:
+def _hook_already_wired(path: Path | None, hook: str = "pre-commit") -> bool:
     if path is None or not path.exists():
         return False
     existing = _read_text_safe(path)
-    return (HOOK_BEGIN in existing or _HOOK_TEMPLATE_MARK in existing
-            or _hook_marks_earlier(existing))
+    begin, _end, mark = _HOOK_MARKERS[hook]
+    return (begin in existing or mark in existing
+            or (hook == "pre-commit" and _hook_marks_earlier(existing)))
 
 
-def _hook_copy_at(path: Path | None) -> dict:
+def _hook_copy_at(path: Path | None, hook: str = "pre-commit") -> dict:
     """Whether `path` holds a *direct copy* of a gatedloop hook template, and
     whether that copy is *current* (adoption-followups D1). A copy carries the
     template header and no composed-block marker, wherever it sits; it is
-    current when its bytes equal the shipped template's, so a local edit reads
-    as stale (the refresh keeps it in a backup, D3). A composed block delegates
+    current when its text, with the recorded shim-path line emptied, equals
+    the shipped template's and that path still resolves the shim, or
+    something else does (git-layer-enforcement D2). A local edit reads as
+    stale (the refresh keeps it in a backup, D3). A composed block delegates
     to the shipped template at run time and is never a copy."""
     if path is None or not path.is_file():
         return {"copy": False, "current": False}
     try:
-        body = path.read_bytes()
+        text = path.read_bytes().decode("utf-8", errors="replace")
     except OSError:
         return {"copy": False, "current": False}
-    text = body.decode("utf-8", errors="replace")
-    template = _HOOK_TEMPLATE_MARK in text or EARLIER_HOOK_TEMPLATE_MARK in text
-    if not template or HOOK_BEGIN in text or EARLIER_HOOK_BEGIN in text:
+    begin, _end, mark = _HOOK_MARKERS[hook]
+    earlier = hook == "pre-commit" and EARLIER_HOOK_TEMPLATE_MARK in text
+    template = mark in text or earlier
+    if not template or begin in text or (hook == "pre-commit" and EARLIER_HOOK_BEGIN in text):
         return {"copy": False, "current": False}
     try:
-        current = body == _hook_template_path().read_bytes()
+        shipped = _hook_template_path(hook).read_text()
     except OSError:
-        current = False
+        return {"copy": True, "current": False}
+    normalized = _RECORDED_LINE_RE.sub(lambda _m: _EMPTY_RECORDED_LINE, text, count=1)
+    current = normalized == shipped and not _hook_recorded_shim_gone(text)
     return {"copy": True, "current": current}
 
 
-def _hook_copy_facts(root: Path) -> dict:
-    """`{"copy", "current"}` for the repo's pre-commit hook path: the one fact
-    both `gates doctor` (via `_hook_state`) and the adoption evaluators read
+def _hook_copy_facts(root: Path, hook: str = "pre-commit") -> dict:
+    """`{"copy", "current"}` for the repo's `hook` path: the one fact both
+    `gates doctor` (via `_hook_state`) and the adoption evaluators read
     (adoption-followups D2), so the two never disagree about a hook."""
-    _kind, path = _detect_hook_owner(root)
-    return _hook_copy_at(path)
+    _kind, path = _detect_hook_owner(root, hook)
+    return _hook_copy_at(path, hook)
 
 
-def _hook_state(root: Path) -> str:
-    """A single primitive for `gates doctor`'s hook sub-check (task 2.4):
-    'wired' (installed or composed), 'stale-copy' (a direct copy of an earlier
-    or locally edited template; adoption-followups D7), 'manager-uncomposed'
-    (a manager owns the path but our check isn't in it), 'unmanaged-hook' (a
-    foreign bare hook), or 'absent' (nothing installed)."""
-    kind, path = _detect_hook_owner(root)
-    copy = _hook_copy_at(path)
+def _hook_state(root: Path, hook: str = "pre-commit") -> str:
+    """A single primitive for `gates doctor`'s hook sub-checks (task 2.4;
+    both hooks since git-layer-enforcement D4): 'wired' (installed or
+    composed), 'stale-copy' (a direct copy of an earlier or locally edited
+    template, or one whose recorded shim is gone; adoption-followups D7),
+    'manager-uncomposed' (a manager owns the path but our check isn't in it),
+    'unmanaged-hook' (a foreign bare hook), or 'absent' (nothing installed)."""
+    kind, path = _detect_hook_owner(root, hook)
+    copy = _hook_copy_at(path, hook)
     if copy["copy"] and not copy["current"]:
         return "stale-copy"
-    if _hook_already_wired(path):
+    if _hook_already_wired(path, hook):
         return "wired"
     if kind in ("husky", "lefthook", "pre-commit", "hooksPath"):
         return "manager-uncomposed"
@@ -4266,13 +4322,13 @@ def _hook_state(root: Path) -> str:
     return "absent"
 
 
-def _hook_refuse(kind: str, path: Path | None) -> int:
+def _hook_refuse(kind: str, path: Path | None, hook: str = "pre-commit") -> int:
     """Refuse-and-instruct: never clobber; print exactly how to wire it by
     hand. Non-zero exit — the check is NOT in place, and the caller
     (`gates-init`) must report that rather than treat it as done."""
     where = {
         "bare-hook": (
-            "an existing, unmanaged pre-commit hook is present and its exit "
+            f"an existing, unmanaged {hook} hook is present and its exit "
             "semantics are unknown — appending could silently never run"
         ),
         "lefthook": "lefthook manages hooks via its own config file",
@@ -4280,10 +4336,10 @@ def _hook_refuse(kind: str, path: Path | None) -> int:
         "hooksPath": "core.hooksPath redirects hooks to a path this installer does not recognize",
     }.get(kind, "the hook topology could not be classified safely")
     print(
-        f"gatedloop: refusing to modify the pre-commit hook — {where}.\n"
+        f"gatedloop: refusing to modify the {hook} hook — {where}.\n"
         "gatedloop: nothing was changed. Wire the git-layer check by hand by adding this "
-        "block to your pre-commit hook (or your manager's pre-commit entry):\n\n"
-        f"{_composed_hook_snippet()}",
+        f"block to your {hook} hook (or your manager's {hook} entry):\n\n"
+        f"{_composed_hook_snippet(hook)}",
         file=sys.stderr,
     )
     if path is not None:
@@ -4291,72 +4347,87 @@ def _hook_refuse(kind: str, path: Path | None) -> int:
     return 1
 
 
-def _hook_install(root: Path) -> int:
-    tmpl = _hook_template_path()
-    if not tmpl.exists():
-        sys.exit(f"gatedloop: hook template not found at {tmpl}")
-    kind, path = _detect_hook_owner(root)
+_HOOK_PURPOSE = {
+    "pre-commit": "commit enforcement",
+    "pre-push": "push enforcement (the merge target)",
+}
 
-    # adoption-followups D3: gatedloop's own direct copy whose body differs
-    # from the shipped template is the one file this installer may replace.
-    # Checked before the "already wired" return, which a stale copy would
-    # otherwise satisfy, leaving the old body in place forever.
-    copy = _hook_copy_at(path)
+
+def _hook_install_one(root: Path, hook: str) -> int:
+    tmpl = _hook_template_path(hook)
+    if not tmpl.exists():
+        print(f"gatedloop: hook template not found at {tmpl}", file=sys.stderr)
+        return 1
+    kind, path = _detect_hook_owner(root, hook)
+
+    # adoption-followups D3: gatedloop's own direct copy that is not current
+    # (a different body, or a recorded shim that is gone) is the one file
+    # this installer may replace. Checked before the "already wired" return,
+    # which a stale copy would otherwise satisfy, leaving it in place forever.
+    copy = _hook_copy_at(path, hook)
     if copy["copy"] and not copy["current"]:
         backup = path.with_name(path.name + f".{NAME}-prev")
         backup.write_bytes(path.read_bytes())
-        path.write_bytes(tmpl.read_bytes())
+        path.write_text(_hook_install_body(hook))
         path.chmod(0o755)
         print(
-            f"gatedloop: refreshed the git pre-commit hook at {path} to the shipped "
+            f"gatedloop: refreshed the git {hook} hook at {path} to the shipped "
             f"template. The previous body is saved at {backup}; any local edit you "
             "made to the old copy is there."
         )
         return 0
 
-    if _hook_already_wired(path):
+    if _hook_already_wired(path, hook):
         print(
-            f"gatedloop: git-layer commit enforcement is already installed "
+            f"gatedloop: git-layer {_HOOK_PURPOSE[hook]} is already installed "
             f"({kind}) at {path} — nothing to do."
         )
         return 0
 
     if kind == "none":
-        # Nothing present: install the shipped template directly (task 2.3).
+        # Nothing present: install the shipped template directly (task 2.3),
+        # with the installing shim's path recorded (git-layer-enforcement D2).
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tmpl.read_text())
+        path.write_text(_hook_install_body(hook))
         path.chmod(0o755)
         print(
-            f"gatedloop: installed the git pre-commit hook at {path}. It enforces "
-            "only inside a Claude Code session (CLAUDECODE set); a human commit is "
-            "unaffected."
+            f"gatedloop: installed the git {hook} hook at {path}. It enforces only "
+            "inside a declared agent session (`discipline.agent-env`, default "
+            "CLAUDECODE); a human's commit or push is unaffected."
         )
         return 0
 
     if kind == "husky":
-        # Compose: append the delegating snippet to .husky/pre-commit — a plain
+        # Compose: append the delegating snippet to .husky/<hook> — a plain
         # shell script husky runs. Appending is additive and preserves every
         # existing line (never clobbers).
-        snippet = _composed_hook_snippet()
+        snippet = _composed_hook_snippet(hook)
         if path.exists():
             content = _read_text_safe(path)
             if content and not content.endswith("\n"):
                 content += "\n"
             path.write_text(content + "\n" + snippet)
             print(
-                f"gatedloop: composed the git-layer check into the existing husky hook "
-                f"at {path} (existing content preserved)."
+                f"gatedloop: composed the git-layer check into the existing husky {hook} "
+                f"hook at {path} (existing content preserved)."
             )
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("#!/usr/bin/env sh\n" + snippet)
-            print(f"gatedloop: added a husky pre-commit hook at {path} with the git-layer check.")
+            print(f"gatedloop: added a husky {hook} hook at {path} with the git-layer check.")
         path.chmod(0o755)
         return 0
 
     # lefthook / pre-commit framework / an unrecognized core.hooksPath / a
     # foreign bare hook: no safe automatic composition — refuse and instruct.
-    return _hook_refuse(kind, path)
+    return _hook_refuse(kind, path, hook)
+
+
+def _hook_install(root: Path) -> int:
+    """Install both git-layer hooks (git-layer-enforcement D4), each under the
+    same owner detection; exit 1 when either is not in place."""
+    results = [_hook_install_one(root, hook) for hook in GIT_HOOKS]
+    return 1 if any(results) else 0
 
 
 def cmd_hook(args) -> int:
@@ -11672,7 +11743,7 @@ def main() -> int:
     sub.add_parser("migrate-name", help="move this project onto the gatedloop names: state directory, change metadata, hook markers; prints the edits it does not make")
     sp = sub.add_parser("hook", help="install the git-layer commit hook (composes with a manager, never clobbers)")
     hook_sub = sp.add_subparsers(dest="hook_cmd", required=True)
-    sp_inst = hook_sub.add_parser("install", help="install/compose the git pre-commit hook; refuses-and-instructs when unsafe")
+    sp_inst = hook_sub.add_parser("install", help="install/compose the git pre-commit and pre-push hooks; refuses-and-instructs when unsafe")
     sp_inst.set_defaults(fn=cmd_hook)
     sp_gcwd = hook_sub.add_parser("git-cwd", help="print the guarded command's effective directory, resolved from hook JSON on stdin (design D1)")
     sp_gcwd.add_argument("kind", nargs="?", default=None, choices=_GIT_CWD_KINDS, help="the invocation kind being guarded (omit for a non-command hook, e.g. a Write tool call)")

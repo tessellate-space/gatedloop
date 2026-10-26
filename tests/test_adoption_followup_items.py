@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hook_fixture import (GATES_SHIM, OLDER_COPY, REPO, TEMPLATE,  # noqa: E402
+from _hook_fixture import (GATES_SHIM, OLDER_COPY, PUSH_TEMPLATE, REPO, TEMPLATE,  # noqa: E402
                            composed_husky_hook, default_hook, write_hook)
 
 _loader = importlib.machinery.SourceFileLoader("gates_shim_followup_items", str(GATES_SHIM))
@@ -47,6 +47,7 @@ def installed(version="0.5.0", manifest=None):
         shutil.copy(REPO / "adoption" / "catalog.json", plugin / "adoption" / "catalog.json")
         (plugin / "templates" / "git-hooks").mkdir(parents=True)
         shutil.copy(TEMPLATE, plugin / "templates" / "git-hooks" / "pre-commit")
+        shutil.copy(PUSH_TEMPLATE, plugin / "templates" / "git-hooks" / "pre-push")
         (plugin / ".claude-plugin").mkdir()
         set_version(plugin, version)
         project.mkdir()
