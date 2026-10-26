@@ -1,1 +1,0 @@
-Docs only: AUTOMATION.md, SETUP.md and README.md prose; the one machine check, `python3 scripts/release docs`, already exists and is run as the task's own acceptance.

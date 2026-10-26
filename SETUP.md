@@ -1112,7 +1112,7 @@ in `AUTOMATION.md`:
 | Layer | Mechanism | Catches | Defeated by |
 |---|---|---|---|
 | 1. `PreToolUse` string match | the hooks in the table above | the honest direct `git commit` | any indirection (observed, #2) |
-| 2. Git `pre-commit` hook | `gates discipline check-commit` at the git layer (the same check as layer 1), **inside a session only** | **every** commit-creating path | `--no-verify`; `env -u CLAUDECODE` |
+| 2. Git `pre-commit` and `pre-push` hooks | `gates discipline check-commit` at the git layer (the same check as layer 1), and `gates discipline check-push` for a push of the merge target, **inside a declared agent session only** | **every** commit-creating path, on any host; a raw merge of the target pushed by hand | `--no-verify`; unsetting the `discipline.agent-env` variables |
 | 3. Post-hoc reflog audit | the `Stop` hook joins each new commit's tree to the ledger's green-`ci` rows | anything that slipped layers 1–2 | nothing hides it — it taints and blocks the merge, but cannot un-create the commit |
 | 4. Forge branch protection | adopter-configured required checks/reviews | `gh pr merge` and forge-UI merges | a repo with no branch protection configured |
 
@@ -1120,9 +1120,38 @@ Layer 2 is **opt-in** — `gates hook install` (offered by `/gatedloop:gates-ini
 wires a git `pre-commit` hook that runs the same `gates discipline check-commit` as layer
 1 at the layer where the commit object is created, regardless of how it was phrased, so a
 ledger-only or planning-only commit is allowed at its grade on every path and anything
-else needs the `ci` marker. It enforces **only inside a
-Claude Code session** (`CLAUDECODE` present); a human terminal, an IDE, or a CI runner
-sees a transparent no-op. `gates hook install` composes with an existing hook manager
+else needs the `ci` marker. The same install adds a git `pre-push` hook: a push that
+updates the merge target is denied unless `gates discipline check-push <sha>
+--remote-ref <ref>` finds the pushed commit proven — a `merge` ledger row records it
+(what `gates merge` writes before its one push), or the merge gate's incoming-tree
+checks hold for its tree (`live-check` and full `ci` markers, `verify` where declared,
+and for each change it carries in, no unresolved taint, the authored-test lock and
+acceptance where declared). A denial names each unmet check and `gates merge <change>`
+as the remedy; other branches and deletions pass silently, and neither hook runs a
+gate. Under `integration.mode: pull-request` the forge pushes the target, so the hook
+never sees that push; branch protection covers it.
+
+Both hooks enforce **only inside a declared agent session**. `discipline.agent-env` in
+`.gates.yaml` lists the environment variables whose presence marks one; the default is
+`[CLAUDECODE]`, and declaring the list replaces it:
+
+```yaml
+discipline:
+  agent-env:
+    - CLAUDECODE
+    - OTHER_HOST_VAR   # the variable your other agent host sets
+```
+
+`gates discipline agent-session` exits 0 when any is set and 1 otherwise, and both hooks
+are a transparent no-op on 1 — a human terminal, an IDE, or a CI runner is unaffected.
+`gates validate` fails naming the key when it is not a non-empty list of variable names;
+the hooks then decide by the default rather than blocking anyone.
+
+The hooks resolve the shim through `${CLAUDE_PLUGIN_ROOT}`, then `gates` on PATH, then
+the absolute path of the shim that ran `gates hook install`, which it records in the
+copy it writes (the one line it changes), so the hooks work on a host with no plugin
+environment. If none resolves, the hook lets the commit or push through with a stderr
+note, and `gates doctor` reports the copy stale. `gates hook install` composes with an existing hook manager
 (husky, lefthook, the pre-commit framework, a `core.hooksPath` redirect, or a bare hook)
 where it safely can and refuses-and-instructs where it cannot — it never clobbers.
 It finds the hook where git itself runs hooks from (`git rev-parse --git-path hooks`:
@@ -1135,11 +1164,14 @@ check (it denies a ledger-only or planning-only commit made outside the tool lay
 Run `gates hook install` again to refresh it. It recognizes its own copy by the
 template's header line, and when the copy's bytes differ from the shipped template
 (an older template, or a local edit) it saves the old body to
-`pre-commit.gatedloop-prev` beside the hook, writes the shipped template, keeps it
+`pre-commit.gatedloop-prev` (or `pre-push.gatedloop-prev`) beside the hook, writes the shipped template, keeps it
 executable, and prints both paths. A second refresh overwrites that backup. A copy
 that already matches is left alone ("nothing to do"), and a foreign hook or a hook
-manager's config is still never touched. `gates doctor` warns on a stale copy, and
-`/gatedloop:upgrade` offers the refresh as the `git-hook-refresh` item. A composed
+manager's config is still never touched. The comparison ignores the recorded shim-path line, and a copy whose
+recorded path is gone while nothing else resolves the shim is stale too. `gates doctor`
+reports both hooks (`git-commit-hook`, `git-push-hook`) and warns on a stale copy, and
+`/gatedloop:upgrade` offers the refresh as the `git-hook-refresh` item (either hook)
+and, where the commit hook is wired and the push hook absent, the `git-push-hook` item. A composed
 block delegates to the shipped template at run time, so it picks up a new check on
 its own and is never stale.
 

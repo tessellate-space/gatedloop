@@ -18,7 +18,7 @@
 
 ## 4. Docs
 
-- [ ] 4.1 AUTOMATION.md coverage table per design D5; SETUP.md (`discipline.agent-env`, the push gate, `hook install` for two hooks, the shim-path fallback); README.md requirements say which hosts run which layer. `python3 scripts/release docs` exits 0.
+- [x] 4.1 AUTOMATION.md coverage table per design D5; SETUP.md (`discipline.agent-env`, the push gate, `hook install` for two hooks, the shim-path fallback); README.md requirements say which hosts run which layer. `python3 scripts/release docs` exits 0.
 
 ## 5. Close
 
