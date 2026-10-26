@@ -14,7 +14,7 @@
 
 - [x] 3.1 `gates hook install` installs both templates under one owner detection, writes the shim path fallback, and the stale check normalizes that line, per design D2 and D4; tests for fresh install, husky composition, refuse-and-instruct, a stale copy of either hook.
 - [x] 3.2 `gates doctor` `git-push-hook` row with the five states; test each.
-- [ ] 3.3 Adoption: `git-hook-refresh` detector covers both hooks; new `git-push-hook` item per design D4; `commands/gates-init.md` offer names both hooks; tests for the catalogue.
+- [x] 3.3 Adoption: `git-hook-refresh` detector covers both hooks; new `git-push-hook` item per design D4; `commands/gates-init.md` offer names both hooks; tests for the catalogue.
 
 ## 4. Docs
 

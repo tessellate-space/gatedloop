@@ -94,15 +94,15 @@
       "id": "git-hook-refresh",
       "since": "0.5.0",
       "recurs": true,
-      "what": "The git pre-commit hook in this repository is a direct copy of an earlier (or locally edited) gatedloop template, so it does not run the shipped check. A refresh replaces the copy and keeps the old body in `pre-commit.gatedloop-prev` beside it.",
-      "question": "Refresh the git pre-commit hook to the template this gatedloop version ships?",
+      "what": "A git-layer hook in this repository (`pre-commit` or `pre-push`) is a direct copy of an earlier (or locally edited) gatedloop template, or the shim path it records is gone, so it does not run the shipped check. A refresh replaces the copy and keeps the old body beside it as `<hook>.gatedloop-prev`.",
+      "question": "Refresh the git-layer hooks to the templates this gatedloop version ships?",
       "options": [
-        {"answer": "adopted", "label": "Refresh it now; the old body is kept in `pre-commit.gatedloop-prev` (Recommended)"},
+        {"answer": "adopted", "label": "Refresh them now; each old body is kept as `<hook>.gatedloop-prev` (Recommended)"},
         {"answer": "declined", "label": "Not at this version: keep the installed copy, which does not run the shipped check"}
       ],
       "detector": {"kind": "git-hook-current"},
       "applies_when": {"kind": "git-hook-copy"},
-      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 10, the git-layer commit hook install"}
+      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 10, the git-layer hook install"}
     },
     {
       "id": "approval-keys",
@@ -159,6 +159,19 @@
       "detector": {"kind": "earlier-name"},
       "applies_when": null,
       "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which can wait because both contexts are posted until 0.8.0."}
+    },
+    {
+      "id": "git-push-hook",
+      "since": "0.8.0",
+      "what": "gatedloop now ships a git `pre-push` hook beside the commit hook. Inside a declared agent session (`discipline.agent-env`, default `CLAUDECODE`) it denies a push that updates the merge target unless the pushed commit is proven: a `merge` ledger row records it, as `gates merge` writes, or the merge gate's incoming-tree checks hold for its tree. Without it, a raw merge of the target pushed by hand reaches the shared history unchecked. Other branches, deletions and human pushes are untouched.",
+      "question": "Install the git pre-push hook that gates a push of the merge target?",
+      "options": [
+        {"answer": "adopted", "label": "Yes: install the push hook with `gates hook install` (Recommended)"},
+        {"answer": "declined", "label": "No: keep the commit hook only; a raw merge pushed by hand stays unchecked locally"}
+      ],
+      "detector": {"kind": "git-push-hook-installed"},
+      "applies_when": {"kind": "git-commit-hook-wired"},
+      "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 10, the git-layer hook install"}
     }
   ]
 }

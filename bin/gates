@@ -1017,9 +1017,10 @@ ADOPTION_DETECTOR_KINDS = {"manifest-key": ("key",), "rules-target": ("target",)
                            "schema-key": ("key",), "decision-only": (),
                            "git-hook-current": (), "old-approval-keys": (),
                            "earlier-name": (),
-                           "file-contains": ("path", "text")}
+                           "file-contains": ("path", "text"),
+                           "git-push-hook-installed": ()}
 ADOPTION_PREDICATE_KINDS = ("manifest-key", "path-exists", "surface-key", "any",
-                            "git-hook-copy")
+                            "git-hook-copy", "git-commit-hook-wired")
 ADOPTION_ACTION_KINDS = {"manifest-key": ("key",), "onboarding-step": ("step",),
                          "confirm": ("detail",)}
 ADOPTION_REQUIRED_FIELDS = ("id", "since", "what", "question", "options", "detector",
@@ -1077,8 +1078,8 @@ def _check_predicate(where: str, pred) -> None:
             if sub is None:
                 raise AdoptionError(f"{where} `of` entry {n + 1} is null")
             _check_predicate(f"{where} `of` entry {n + 1}", sub)
-    elif pred["kind"] == "git-hook-copy":
-        return  # no fields: it reads facts["hook"] (adoption-followups D2)
+    elif pred["kind"] in ("git-hook-copy", "git-commit-hook-wired"):
+        return  # no fields: it reads the gathered hook facts (adoption-followups D2)
     elif not _nonempty_str(pred.get("glob")):
         raise AdoptionError(f"{where} of kind 'path-exists' needs a non-empty `glob`")
 
@@ -1147,6 +1148,9 @@ def load_adoption_catalog(data) -> list[dict]:
 #   hook            {"copy", "current"} for the pre-commit hook path, from the
 #                   same `_hook_copy_facts` `gates doctor` reads
 #                   (adoption-followups D2)
+#   push_hook       the same for the pre-push hook path (git-layer-enforcement D4)
+#   hook_states     {"pre-commit": state, "pre-push": state}, `_hook_state`'s
+#                   doctor vocabulary for each hook
 #   old_approval_changes
 #                   active changes still carrying 0.5.0-spelled approval keys,
 #                   from the same scan doctor's `approval-keys` row reads
@@ -1183,10 +1187,18 @@ def adoption_detector_acted(detector: dict, facts: dict) -> bool:
     if kind == "decision-only":
         return False
     if kind == "git-hook-current":
-        # Acted unless the hook path holds a direct copy that is not current;
-        # no hook, or a composed one, leaves nothing to refresh (D2).
-        hook = facts["hook"]
-        return not (hook["copy"] and not hook["current"])
+        # Acted unless either hook path holds a direct copy that is not
+        # current (D2; both hooks since git-layer-enforcement D4); no hook, or
+        # a composed one, leaves nothing to refresh.
+        for hook in (facts["hook"], facts.get("push_hook") or {}):
+            if hook.get("copy") and not hook.get("current"):
+                return False
+        return True
+    if kind == "git-push-hook-installed":
+        # Acted once the push hook is anything but absent (git-layer-
+        # enforcement D4): a stale or uncomposed one is the refresh's and
+        # the doctor's business, not this offer's.
+        return (facts.get("hook_states") or {}).get("pre-push", "absent") != "absent"
     if kind == "old-approval-keys":
         # Acted unless an active change still carries an earlier-spelled
         # approval key (openspec-1-14-compat D4a).
@@ -1221,7 +1233,9 @@ def adoption_applies(predicate, facts: dict) -> bool:
     if kind == "any":
         return any(adoption_applies(sub, facts) for sub in predicate["of"])
     if kind == "git-hook-copy":
-        return bool(facts["hook"]["copy"])
+        return bool(facts["hook"]["copy"] or (facts.get("push_hook") or {}).get("copy"))
+    if kind == "git-commit-hook-wired":
+        return (facts.get("hook_states") or {}).get("pre-commit") == "wired"
     raise AdoptionError(f"unknown applies_when kind '{kind}'")
 
 
@@ -1387,6 +1401,8 @@ def _adoption_project_facts(root: Path, manifest: dict, items: list[dict]) -> di
             files[detector["path"]] = _read_text_or_none(root / detector["path"])
     return {"manifest": manifest, "rules_doc": rules_doc, "schemas": schemas,
             "existing_globs": existing, "hook": _hook_copy_facts(root),
+            "push_hook": _hook_copy_facts(root, "pre-push"),
+            "hook_states": {hook: _hook_state(root, hook) for hook in GIT_HOOKS},
             "old_approval_changes": _changes_with_old_approval_keys(root),
             "earlier_names": _earlier_name_remnants(root),
             "files": files}

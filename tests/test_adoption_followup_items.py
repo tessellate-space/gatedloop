@@ -1,6 +1,7 @@
-"""The shipped `git-hook-refresh` and `confirm-gate` items, end to end through
-`gates adoption status` (openspec change `adoption-followups`, design D5/D6;
-the upgrade-adoption delta's added requirements).
+"""The shipped `git-hook-refresh`, `confirm-gate` and `git-push-hook` items, end
+to end through `gates adoption status` (openspec change `adoption-followups`,
+design D5/D6, the upgrade-adoption delta's added requirements; and
+`git-layer-enforcement`, design D4).
 
 Stdlib only, per `zero-dep-shim`. These sit at the CLI layer on purpose: what
 is under test is the *shipped catalogue's* entries meeting the real fact
@@ -25,7 +26,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hook_fixture import (GATES_SHIM, OLDER_COPY, PUSH_TEMPLATE, REPO, TEMPLATE,  # noqa: E402
+from _hook_fixture import (GATES_SHIM, OLDER_COPY, OLDER_PUSH_COPY, PUSH_TEMPLATE, REPO,  # noqa: E402
+                           TEMPLATE,
                            composed_husky_hook, default_hook, write_hook)
 
 _loader = importlib.machinery.SourceFileLoader("gates_shim_followup_items", str(GATES_SHIM))
@@ -90,6 +92,14 @@ class TestGitHookRefreshListing(unittest.TestCase):
             write_hook(default_hook(project), OLDER_COPY)
             self.assertIn("git-hook-refresh", listed(plugin, project))
 
+    def test_a_stale_push_hook_copy_lists_it(self):
+        # git-layer-enforcement D4: the one refresh item covers both hooks.
+        # Fails if its detector still read the commit hook alone.
+        with installed() as (plugin, project):
+            write_hook(default_hook(project), TEMPLATE.read_bytes())
+            write_hook(default_hook(project, "pre-push"), OLDER_PUSH_COPY)
+            self.assertIn("git-hook-refresh", listed(plugin, project))
+
     def test_a_delegating_hook_or_none_does_not_list_it(self):
         # Scenario "The hook delegates to the shipped template".
         setups = (("composed", lambda p: composed_husky_hook(p, gates._composed_hook_snippet())),
@@ -152,6 +162,31 @@ class TestConfirmGateListing(unittest.TestCase):
             record(plugin, project, "confirm-gate", "declined")
             set_version(plugin, "0.6.0")
             self.assertNotIn("confirm-gate", listed(plugin, project))
+
+
+
+class TestGitPushHookListing(unittest.TestCase):
+    """git-layer-enforcement D4, scenario "Only the commit hook is present":
+    a project with the commit hook wired and no push hook is asked, once, to
+    install the push hook."""
+
+    def test_commit_hook_without_push_hook_lists_it(self):
+        with installed("0.8.0") as (plugin, project):
+            write_hook(default_hook(project), TEMPLATE.read_bytes())
+            self.assertIn("git-push-hook", listed(plugin, project))
+
+    def test_installing_the_hooks_clears_it(self):
+        with installed("0.8.0") as (plugin, project):
+            write_hook(default_hook(project), TEMPLATE.read_bytes())
+            install = run_gates(plugin, project, "hook", "install")
+            self.assertEqual(install.returncode, 0, install.stderr)
+            self.assertNotIn("git-push-hook", listed(plugin, project))
+
+    def test_no_commit_hook_does_not_list_it(self):
+        # Fails if the item asked a project that never took the commit hook:
+        # the onboarding offer covers both hooks for it instead.
+        with installed("0.8.0") as (plugin, project):
+            self.assertNotIn("git-push-hook", listed(plugin, project))
 
 
 if __name__ == "__main__":

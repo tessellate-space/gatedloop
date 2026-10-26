@@ -401,31 +401,40 @@ returns (`AUTOMATION.md` §3). Ask — **do not write anything without an explic
   rule).
 - **On no**, write nothing — leave any existing permission files exactly as they are.
 
-### 10. Offer git-layer commit enforcement (opt-in, default-yes)
+### 10. Offer git-layer commit and push enforcement (opt-in, default-yes)
 The `PreToolUse` commit gate matches the Bash tool's command *string*, so a commit
 created through indirection — a Python subprocess, a written-then-run script, a git
 library — slips past it (observed in the field: issue #2). A git `pre-commit` hook
 fires on the commit *object* itself and catches every path, running the same
-`gates discipline check-commit` as the `PreToolUse` gate (an O(1) compare, never a `ci` run). Offer to install it, defaulting toward yes (an
+`gates discipline check-commit` as the `PreToolUse` gate (an O(1) compare, never a `ci` run).
+A git `pre-push` hook does the same for the merge: a push that updates the merge
+target is denied unless `gates discipline check-push` finds the pushed commit proven
+(a `merge` ledger row records it, as `gates merge` writes, or the merge gate's
+incoming-tree checks hold for its tree), so a raw merge of the target pushed by hand
+no longer reaches the shared history unchecked. Both hooks hold on any host, not only
+in Claude Code. Offer to install them, defaulting toward yes (an
 adopter who installed the enforcement plugin presumably wants the enforcement), but
-never install it silently — the same consent pattern as the permission step above.
+never install them silently — the same consent pattern as the permission step above.
 
 - **Ask with the AskUserQuestion tool**, **default-yes**: "Install the git-layer commit
-  hook, so an agent can't route around the commit gate through a subprocess or script?
-  It enforces only inside a Claude Code session — your own terminal, your IDE, and CI
-  are unaffected." — yes (default) / no.
+  and push hooks, so an agent can't route around the commit gate through a subprocess
+  or script, or push a raw merge of the target? They enforce only inside a declared
+  agent session (`discipline.agent-env`, default `CLAUDECODE`) — your own terminal,
+  your IDE, and CI are unaffected." — yes (default) / no.
 - **On yes**, run:
   ```bash
   gates hook install
   ```
-  It detects who owns the hook path (husky, lefthook, the pre-commit framework, a
-  `core.hooksPath` redirect, or a bare `.git/hooks/pre-commit`) and **composes** the
-  check in where it safely can, **refusing-and-instructing** where it cannot — it never
-  clobbers an existing hook. The one file it replaces is its own: a direct copy of an
-  earlier (or locally edited) gatedloop template is **refreshed** to the shipped one,
-  with the old body saved as `pre-commit.gatedloop-prev` beside it, and the output names
-  both paths. This is also the step `/gatedloop:upgrade` runs for the `git-hook-refresh`
-  item. Report its result verbatim: a clean install or compose
+  It installs both hooks in one run. For each, it detects who owns the hook path
+  (husky, lefthook, the pre-commit framework, a `core.hooksPath` redirect, or a bare
+  `.git/hooks/<hook>`) and **composes** the check in where it safely can,
+  **refusing-and-instructing** where it cannot — it never clobbers an existing hook. A
+  direct install records the installing shim's path in the hook, so it still finds the
+  shim outside a plugin environment. The one file it replaces is its own: a direct copy
+  of an earlier (or locally edited) gatedloop template, or one whose recorded shim path
+  is gone, is **refreshed** to the shipped one, with the old body saved as
+  `<hook>.gatedloop-prev` beside it, and the output names both paths. This is also the
+  step `/gatedloop:upgrade` runs for the `git-hook-refresh` and `git-push-hook` items. Report its result verbatim: a clean install or compose
   exits 0; a refusal exits non-zero and prints the exact block to add by hand — relay
   that block rather than treating onboarding as failed. A refusal is "wire it yourself,"
   not "onboarding broke."
@@ -483,4 +492,4 @@ gates validate
 - Never bind a detected task-runner candidate without the adopter's explicit confirmation, even when step 3 found exactly one. Detecting is offering; only the adopter's answer decides.
 - Never bind a detected integration-process default without the adopter's explicit confirmation. The same rule that governs gate candidates governs this one.
 - Never write permission rules without an explicit yes, and never write them to `.claude/settings.json` — only `.claude/settings.local.json`, which is personal and gitignored (design D4).
-- Never install the git-layer commit hook without an explicit yes (default-yes, but still asked). `gates hook install` is the only thing that touches `.git/hooks` or a hook manager's config, it never clobbers, and a decline leaves onboarding able to complete normally.
+- Never install the git-layer commit and push hooks without an explicit yes (default-yes, but still asked). `gates hook install` is the only thing that touches `.git/hooks` or a hook manager's config, it never clobbers, and a decline leaves onboarding able to complete normally.
