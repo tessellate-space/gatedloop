@@ -1329,13 +1329,25 @@ def cmd_adoption_record(root: Path, args) -> int:
     if args.decision not in ADOPTION_DECISIONS:
         raise AdoptionError(f"unknown decision '{args.decision}' "
                             f"(one of: {', '.join(ADOPTION_DECISIONS)})")
+    path = _write_adoption_decision(root, args.id, args.decision)
+    print(f"gatedloop: recorded {args.id}: {args.decision} (gatedloop {_installed_plugin_version()}) in {path}. "
+          "Commit it, so the whole team shares the decision.")
+    return 0
+
+
+def _write_adoption_decision(root: Path, item_id: str, decision: str) -> Path:
+    """Write one decision to `.gatedloop/adoption.json` (design D2's record):
+    shared by `gates adoption record` and `gates hook install --commit-only /
+    --push` (git-layer-enforcement 6.2), so the record has one writer. The
+    write is a temp file then a rename, so a reader never sees half a
+    record."""
     version = _installed_plugin_version()
     decisions = _read_adoption_decisions(root)
     by = _local_git_identity(root)
     if not by:
         raise AdoptionError("no git identity configured (user.name/user.email); "
                             "set one so the record says who decided")
-    decisions[args.id] = {"decision": args.decision, "by": by, "at": _now_iso(),
+    decisions[item_id] = {"decision": decision, "by": by, "at": _now_iso(),
                           "version": version}
     path = _state_dir(root) / ADOPTION_RECORD_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1349,9 +1361,7 @@ def cmd_adoption_record(root: Path, args) -> int:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    print(f"gatedloop: recorded {args.id}: {args.decision} (gatedloop {version}) in {path}. "
-          "Commit it, so the whole team shares the decision.")
-    return 0
+    return path
 
 
 def _adoption_manifest(root: Path) -> dict:
@@ -1694,7 +1704,15 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
     #     hook's five states, for the hook that gates a push of the merge
     #     target. Omitted when not checked.
     if push_hook_state is not None:
-        if push_hook_state == "wired":
+        if push_hook_state == "declined":
+            checks.append((
+                "ok", "git-push-hook",
+                "The git pre-push hook is not installed: this project declined it (the "
+                "`git-push-hook` adoption item is recorded `declined`), so `gates hook "
+                "install` installs the commit hook only. Add it with `gates hook install "
+                "--push`.",
+            ))
+        elif push_hook_state == "wired":
             checks.append((
                 "ok", "git-push-hook",
                 "The git pre-push hook (the merge target's push gate) is installed. It "
@@ -1843,6 +1861,18 @@ def _pyyaml_importable() -> bool:
     return True
 
 
+def _doctor_push_hook_state(root: Path) -> str:
+    """The push hook's doctor state, `declined` when it is absent because the
+    project declined it (git-layer-enforcement 6.2). An unreadable adoption
+    record leaves the plain state: the doctor is advisory and never fails."""
+    state = _hook_state(root, "pre-push")
+    if state == "absent":
+        with contextlib.suppress(AdoptionError):
+            if _push_hook_declined(root):
+                return "declined"
+    return state
+
+
 def cmd_doctor(_args) -> int:
     """gates doctor — the onboarding preflight (design D3). Special-cased in
     main() to run WITHOUT requiring a manifest, since it is gates-init's step 0
@@ -1870,7 +1900,7 @@ def cmd_doctor(_args) -> int:
                            local_settings=_read_text_or_none(
                                root / ".claude" / "settings.local.json"),
                            earlier_names=_earlier_name_remnants(root),
-                           push_hook_state=_hook_state(root, "pre-push"))
+                           push_hook_state=_doctor_push_hook_state(root))
 
     print("gatedloop: gates doctor — onboarding preflight\n")
     for level, title, detail in checks:
@@ -4484,10 +4514,56 @@ def _hook_install_one(root: Path, hook: str) -> int:
     return _hook_refuse(kind, path, hook)
 
 
-def _hook_install(root: Path) -> int:
-    """Install both git-layer hooks (git-layer-enforcement D4), each under the
-    same owner detection; exit 1 when either is not in place."""
-    results = [_hook_install_one(root, hook) for hook in GIT_HOOKS]
+PUSH_HOOK_ITEM = "git-push-hook"
+
+
+def _push_hook_declined(root: Path) -> bool:
+    """Whether the project declined the push hook: the `git-push-hook`
+    adoption item recorded `declined` in `.gatedloop/adoption.json` (by the
+    upgrade walk, or by `gates hook install --commit-only`). Raises
+    AdoptionError when the record cannot be read."""
+    record = _read_adoption_decisions(root).get(PUSH_HOOK_ITEM)
+    return isinstance(record, dict) and record.get("decision") == "declined"
+
+
+def _hook_install(root: Path, commit_only: bool = False, push: bool = False) -> int:
+    """Install the git-layer hooks (git-layer-enforcement D4), each under the
+    same owner detection; exit 1 when any is not in place. The push hook is
+    opt-in (task 6.2): `--commit-only` installs the commit hook alone and
+    records the `git-push-hook` item `declined`; while it is declined a plain
+    install skips the push hook and says so; `--push` installs it and records
+    `adopted`."""
+    try:
+        declined = _push_hook_declined(root)
+    except AdoptionError as e:
+        print(f"gatedloop: cannot tell whether this project declined the push hook — {e}",
+              file=sys.stderr)
+        return 1
+    if commit_only or (declined and not push):
+        hooks = ("pre-commit",)
+    else:
+        hooks = GIT_HOOKS
+    results = [_hook_install_one(root, hook) for hook in hooks]
+    if declined and not (commit_only or push):
+        print(
+            f"gatedloop: skipped the git pre-push hook — this project declined it (the "
+            f"`{PUSH_HOOK_ITEM}` adoption item is recorded `declined`). Add it with "
+            "`gates hook install --push`."
+        )
+    decision = "declined" if commit_only else "adopted" if push else None
+    if decision:
+        try:
+            path = _write_adoption_decision(root, PUSH_HOOK_ITEM, decision)
+        except AdoptionError as e:
+            print(f"gatedloop: the push-hook choice was not recorded — {e}", file=sys.stderr)
+            return 1
+        follow = (
+            "`gates hook install` now installs the commit hook only; add the push hook "
+            "with `gates hook install --push`." if commit_only
+            else "`gates hook install` installs both hooks again."
+        )
+        print(f"gatedloop: recorded {PUSH_HOOK_ITEM}: {decision} in {path}. Commit it, so the "
+              f"whole team shares the decision. {follow}")
     return 1 if any(results) else 0
 
 
@@ -4496,7 +4572,7 @@ def cmd_hook(args) -> int:
         return _hook_git_cwd(args.kind)
     root = _repo_root()
     if args.hook_cmd == "install":
-        return _hook_install(root)
+        return _hook_install(root, commit_only=args.commit_only, push=args.push)
     sys.exit(f"gatedloop: unknown hook subcommand '{args.hook_cmd}'")
 
 
@@ -11805,6 +11881,9 @@ def main() -> int:
     sp = sub.add_parser("hook", help="install the git-layer commit hook (composes with a manager, never clobbers)")
     hook_sub = sp.add_subparsers(dest="hook_cmd", required=True)
     sp_inst = hook_sub.add_parser("install", help="install/compose the git pre-commit and pre-push hooks; refuses-and-instructs when unsafe")
+    inst_which = sp_inst.add_mutually_exclusive_group()
+    inst_which.add_argument("--commit-only", action="store_true", help="install or refresh only the pre-commit hook, and record the `git-push-hook` adoption item as declined (a plain install then skips pre-push)")
+    inst_which.add_argument("--push", action="store_true", help="install both hooks even after a decline, and record the `git-push-hook` adoption item as adopted")
     sp_inst.set_defaults(fn=cmd_hook)
     sp_gcwd = hook_sub.add_parser("git-cwd", help="print the guarded command's effective directory, resolved from hook JSON on stdin (design D1)")
     sp_gcwd.add_argument("kind", nargs="?", default=None, choices=_GIT_CWD_KINDS, help="the invocation kind being guarded (omit for a non-command hook, e.g. a Write tool call)")

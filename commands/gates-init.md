@@ -420,7 +420,11 @@ never install them silently — the same consent pattern as the permission step 
   and push hooks, so an agent can't route around the commit gate through a subprocess
   or script, or push a raw merge of the target? They enforce only inside a declared
   agent session (`discipline.agent-env`, default `CLAUDECODE`) — your own terminal,
-  your IDE, and CI are unaffected." — yes (default) / no.
+  your IDE, and CI are unaffected." — yes, both (default) / commit hook only / no.
+- **On commit hook only**, run `gates hook install --commit-only`. It installs the
+  commit hook alone and records the `git-push-hook` adoption item as `declined`, so a
+  later `gates hook install` keeps skipping the push hook (and says so) until
+  `gates hook install --push`.
 - **On yes**, run:
   ```bash
   gates hook install

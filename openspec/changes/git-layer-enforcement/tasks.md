@@ -27,7 +27,7 @@
 ## 6. The push hook stays opt-in (review follow-up)
 
 - [x] 6.1 Amend the delta spec: the push hook is opt-in and a decline sticks; the git-layer hooks act only inside a declared agent session; plan approval is unchanged. Re-attest with `gates approval attest git-layer-enforcement --local`.
-- [ ] 6.2 `gates hook install --commit-only` and `--push`; a plain install skips `pre-push` while the `git-push-hook` item is recorded `declined` (the existing `.gatedloop/adoption.json` record); `gates doctor` reports a declined push hook as ok; the adoption item's declined option says how to opt back in; SETUP.md hook-install section; tests for `--commit-only`, a re-install after a decline, opting back in, and the doctor.
+- [x] 6.2 `gates hook install --commit-only` and `--push`; a plain install skips `pre-push` while the `git-push-hook` item is recorded `declined` (the existing `.gatedloop/adoption.json` record); `gates doctor` reports a declined push hook as ok; the adoption item's declined option says how to opt back in; SETUP.md hook-install section; tests for `--commit-only`, a re-install after a decline, opting back in, and the doctor.
 
 ## Workflow follow-up
 

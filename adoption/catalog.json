@@ -167,7 +167,7 @@
       "question": "Install the git pre-push hook that gates a push of the merge target?",
       "options": [
         {"answer": "adopted", "label": "Yes: install the push hook with `gates hook install` (Recommended)"},
-        {"answer": "declined", "label": "No: keep the commit hook only; a raw merge pushed by hand stays unchecked locally"}
+        {"answer": "declined", "label": "No: keep the commit hook only. `gates hook install` then skips the push hook until `gates hook install --push`; a raw merge pushed by hand stays unchecked locally"}
       ],
       "detector": {"kind": "git-push-hook-installed"},
       "applies_when": {"kind": "git-commit-hook-wired"},

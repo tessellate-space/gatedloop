@@ -1131,6 +1131,15 @@ as the remedy; other branches and deletions pass silently, and neither hook runs
 gate. Under `integration.mode: pull-request` the forge pushes the target, so the hook
 never sees that push; branch protection covers it.
 
+The push hook is **opt-in**. `gates hook install --commit-only` installs or refreshes
+the commit hook alone and records the `git-push-hook` adoption item as `declined` in
+`.gatedloop/adoption.json` (commit it, so the team shares the choice), the same record
+`/gatedloop:upgrade` writes when that item is answered `declined`. While it is
+declined, a plain `gates hook install` refreshes the commit hook only and prints that
+the push hook was skipped; `gates doctor` reports the `git-push-hook` row as ok,
+naming the decline. Opt back in with `gates hook install --push` (it records
+`adopted`) or by answering the item `adopted`.
+
 Both hooks enforce **only inside a declared agent session**. `discipline.agent-env` in
 `.gates.yaml` lists the environment variables whose presence marks one; the default is
 `[CLAUDECODE]`, and declaring the list replaces it:
