@@ -54,6 +54,12 @@ This README states the boundary. The reasoning behind it (the two-axis model, th
 Two projects, one workflow, and the seam is deliberate — **OpenSpec authors the artifacts, gatedloop runs the gated loop over them**:
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+---
 flowchart TD
     idea(["An idea or an issue"])
 
