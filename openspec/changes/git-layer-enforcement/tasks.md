@@ -2,7 +2,7 @@
 
 ## 1. Agent sessions are declared
 
-- [ ] 1.1 `discipline.agent-env` in `schema/gates.schema.json` and `gates validate` (list of non-empty identifiers, default `[CLAUDECODE]`); `gates discipline agent-session` per design D1; tests for default, a second variable, an invalid value.
+- [x] 1.1 `discipline.agent-env` in `schema/gates.schema.json` and `gates validate` (list of non-empty identifiers, default `[CLAUDECODE]`); `gates discipline agent-session` per design D1; tests for default, a second variable, an invalid value.
 - [ ] 1.2 `templates/git-hooks/pre-commit` uses `discipline agent-session` and the three-step shim resolution of design D2; the template test and the hook tests pass with `CLAUDECODE` and with a declared second variable.
 
 ## 2. The push gate

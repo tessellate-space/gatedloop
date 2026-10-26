@@ -123,6 +123,13 @@
           "description": "Additional branch-name globs (fnmatch) accepted for proposal authoring, alongside the merge target (always accepted). Declaring this list REPLACES the default `plan/*` pattern rather than appending to it -- an adopter who wants both lists both. Every non-target branch, declared or default, must still share history with the merge target.",
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "agent-env": {
+          "description": "Environment variable names whose presence (a non-empty value) marks an agent session (git-layer-enforcement D1). The git-layer `pre-commit` and `pre-push` hooks enforce when any is set and are a transparent no-op otherwise; `gates discipline agent-session` makes that decision. Declaring this list REPLACES the default. An adopter running the loop on a host other than Claude Code adds that host's variable.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "default": ["CLAUDECODE"]
         }
       }
     },

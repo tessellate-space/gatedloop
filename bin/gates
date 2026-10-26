@@ -831,6 +831,10 @@ def _errors(m: dict, root: Path) -> list[str]:
                             "discipline.propose-branches entries must be branch-"
                             f"name globs, not absolute paths (got {p!r})"
                         )
+        if isinstance(disc, dict) and "agent-env" in disc:
+            problem = _agent_env_problem(disc.get("agent-env"))
+            if problem:
+                errs.append(problem)
 
     # worktree-native-loop design D6: `concurrency.serialize` names gates
     # (or `live-check`, a declarable gate in the contract table though not a
@@ -8483,6 +8487,56 @@ def _stale_plan_branch_advisory(root: Path, target: str) -> str:
     )
 
 
+DEFAULT_AGENT_ENV = ("CLAUDECODE",)
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _agent_env_problem(value) -> str | None:
+    """Why `discipline.agent-env` is not a non-empty list of environment
+    variable names (git-layer-enforcement D1), or None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(v, str) and _ENV_NAME_RE.match(v) for v in value)):
+        return ("discipline.agent-env must be a non-empty list of environment variable "
+                f"names (letters, digits and _, not starting with a digit); got {value!r}")
+    return None
+
+
+def _agent_env_names(root: Path) -> list[str]:
+    """The variables that mark an agent session: the manifest's
+    `discipline.agent-env` when it is valid, else the default `[CLAUDECODE]`.
+    Read without `load_manifest`, because the git hooks ask this in
+    repositories with no manifest yet. A malformed declaration falls back to
+    the default and says so on stderr -- never an error, which would make
+    every hook deny, a human's commit included; `gates validate` is where it
+    fails loud."""
+    path, _ignored = _find_manifest(root)
+    if path is None:
+        return list(DEFAULT_AGENT_ENV)
+    try:
+        data = _load(path) or {}
+    except Exception as e:
+        print(f"gatedloop: could not read {path.name} ({e}); deciding the agent session "
+              f"by the default discipline.agent-env {list(DEFAULT_AGENT_ENV)}", file=sys.stderr)
+        return list(DEFAULT_AGENT_ENV)
+    disc = data.get("discipline") if isinstance(data, dict) else None
+    if not isinstance(disc, dict) or "agent-env" not in disc:
+        return list(DEFAULT_AGENT_ENV)
+    problem = _agent_env_problem(disc.get("agent-env"))
+    if problem:
+        print(f"gatedloop: {problem} — deciding the agent session by the default "
+              f"{list(DEFAULT_AGENT_ENV)}; `gates validate` reports it", file=sys.stderr)
+        return list(DEFAULT_AGENT_ENV)
+    return list(disc["agent-env"])
+
+
+def cmd_agent_session(root: Path) -> int:
+    """`gates discipline agent-session` (git-layer-enforcement D1): exit 0
+    when any declared agent-env variable is set to a non-empty value, else 1.
+    The git-layer hooks are a no-op on 1, so the decision lives here, once."""
+    names = _agent_env_names(root)
+    return 0 if any(os.environ.get(n) for n in names) else 1
+
+
 def _declared_propose_branch_patterns(m: dict) -> list[str]:
     """The accepted non-target branch-name globs (design D3, worktree-
     native-loop): the manifest's `discipline.propose-branches` when present
@@ -11727,8 +11781,17 @@ def main() -> int:
     sp_cont.set_defaults(fn=cmd_discipline)
     sp_next = disc_sub.add_parser("next-task", help="print '<change>\\t<next unchecked task>' regardless of tree state (PreCompact snapshot)")
     sp_next.set_defaults(fn=cmd_discipline)
+    disc_sub.add_parser(
+        "agent-session",
+        help="exit 0 if a variable `discipline.agent-env` lists (default CLAUDECODE) is set, else 1 -- the git-layer hooks no-op on 1",
+    )
 
     args = p.parse_args()
+    if args.cmd == "discipline" and args.discipline_cmd == "agent-session":
+        # Special-cased ahead of everything (git-layer-enforcement D1): the
+        # git hooks ask it first, in any repository, with or without a
+        # manifest, and it reads nothing but the manifest's one key.
+        return cmd_agent_session(_repo_root())
     if args.cmd not in ("doctor", "migrate-name"):
         # rename-to-gatedloop D2: both state directories would split the
         # ledger, so nothing that reads or writes state runs on them.
