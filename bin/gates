@@ -11053,7 +11053,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
         if task is None:
             task = _current_task_after_handoff(rows)
         if task is not None:
-            refusal = _budget_refusal(m, rows, task)
+            refusal = _budget_refusal(m, rows, task) or _token_budget_refusal(m, rows, change, task)
             if refusal:
                 print(refusal, file=sys.stderr)
                 return 1
@@ -11360,6 +11360,35 @@ def _budget_refusal(m: dict, rows: list[dict], task: str) -> str | None:
             f"`stalled` ({halt}); a human takes it from there."
         )
     return "\n".join(lines)
+
+
+def token_budget(m: dict) -> int | None:
+    """The declared `loop.token-budget`, or `None` (absent or malformed --
+    a malformed value is `gates validate`'s business, and is no budget)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    v = loop.get("token-budget") if isinstance(loop, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
+
+def _token_budget_refusal(m: dict, rows: list[dict], change: str, task: str) -> str | None:
+    """token-ledger D5: the refusal once the change's recorded usage reaches
+    `loop.token-budget`, else `None`. Recorded rows only: the task in flight
+    is counted at its commit or the session stop, and the message says so."""
+    budget = token_budget(m)
+    if budget is None:
+        return None
+    spent = recorded_usage(rows)
+    if spent < budget:
+        return None
+    return "\n".join([
+        f"gatedloop: change '{change}' has reached its token budget: {spent} tokens "
+        f"recorded, loop.token-budget is {budget}. The gate was not run.",
+        "  The count is recorded usage only: the task in flight is counted at its "
+        "commit or the session stop, so it may have spent more than this says.",
+        f"  Halt with cause `budget` (`gates halt record budget --task {task} --detail "
+        "\"<what remains>\"`) and never retry: a human decides whether to raise the "
+        "budget, cheapen the gates, or split the change.",
+    ])
 
 
 # ---------- attempt notes and fresh restarts (retry-budget D3, D4) ---------
