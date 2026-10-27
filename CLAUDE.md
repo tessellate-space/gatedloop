@@ -22,7 +22,9 @@ it, so they behave the same locally and in CI.
 Everything is exercised by running the shim or the OpenSpec CLI directly.
 
 ```bash
-python3 -m unittest discover -s tests   # the shim's manifest-parsing tests
+python3 -m unittest discover -s tests   # the whole suite, serially (~14 min)
+python3 scripts/test-parallel          # the same suite, one process per module (~3 min); what `ci` runs
+python3 scripts/test-parallel --affected   # only modules the branch's changes reach; a surface's scoped `ci`
 ./bin/gates validate               # validate a .gates.yaml (exits 1 with all errors listed)
 ./bin/gates run ci                 # run a declared gate, exit with its code
 ./bin/gates surfaces               # which surfaces are hot for the current diff
