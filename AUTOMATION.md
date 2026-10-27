@@ -441,11 +441,17 @@ enforcement:
   whose staged index holds a placed test that differs from the blob placed for it, or a
   held test (`.gatedloop/authored/<change>/…`) that differs from the latest handoff. The
   only way to change an authored test is back through its author: `gates tests defect
-  --kind setup|assertion`, then a re-handoff for that task. The kind is required and each
-  has its own cap per task, enforced by refusing the next defect: three `setup` (the test
-  cannot run as written; past the cap, halt `weak-spec`), two `assertion` (it asserts the
-  wrong behaviour; past the cap, a human, `oracle-conflict`). A defect row from before
-  kinds existed counts as `assertion`.
+  --kind setup|assertion|green`, then a re-handoff for that task. The kind is required and
+  each has its own cap per task, enforced by refusing the next defect: three `setup` (the
+  test cannot run as written; past the cap, halt `weak-spec`), two `assertion` (it asserts
+  the wrong behaviour; past the cap, a human, `oracle-conflict`), one `green` (the placed
+  tests passed before any implementation, an observation rather than a claim they are
+  wrong; the author re-declares the task or rewrites the tests, and past the cap a human
+  decides, `oracle-conflict`). A defect row from before kinds existed counts as
+  `assertion`. A defect at a completed task reopens it: the re-handed-off tests are placed
+  and locked as usual, and the red run its first placement recorded stays the record. A
+  halt voids a placement only at a task not yet completed, completion being ordered by
+  the commits that tick the task and carry the row (`unblock-authored-lock` D2–D5).
 - **Red before green is a checked fact.** For every placed task with tests, the same
   check requires a `unit` run recorded after the placement that failed with an exit other
   than 75 (a precondition failure is not a red run), and it refuses implementation staged

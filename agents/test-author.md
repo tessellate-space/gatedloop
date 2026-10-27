@@ -56,3 +56,12 @@ Then the interface decisions you took (§5), each project rule that overrode a b
 
 ## 8. Re-dispatch with a defect or a review finding
 When re-dispatched for task N.M, read the recorded defect (`gates tests show <change>` lists each with its kind and detail, and you are handed the detail), or the authored-set review's finding, and revise or defend only that task's tests. A `setup` defect says the test could not run as written: fix the path, import or fixture. If you hold it was not a setup problem, defend the tests instead; the implementer then records an `assertion` defect, which spends the stricter cap. Then run `gates tests handoff <change> --task N.M`. A defended test is handed off unchanged, with the defence in your report — the implementer reads it, and a third disagreement goes to a human.
+
+A `green` defect says the task's placed tests passed before anything was implemented. It is an observation, not a claim that the tests are wrong, and it has one answer of three:
+- **Re-declare it `CHARACTERIZATION`** with its reason, keeping the tests, when they rightly pin behaviour the tree already has (output an earlier task already wrote, say). The implementer's first run after the new placement must then pass.
+- **Re-declare it `NO-TESTS`** with its reason and no tests, when the task changes no behaviour any test of yours can see.
+- **Rewrite the tests** so they fail against the tree as it is, when they missed the task's behaviour.
+
+A task gets one `green` defect; if the re-placed tests are green again with no declaration, a human decides. **Interim rule, until the plan declares each task's oracle (`task-oracle`):** a test file the `unit` gate never runs (an end-to-end step file, say) can never go red under it, so declare its task `CHARACTERIZATION`, with that as the reason.
+
+**A reopened task.** You may be re-dispatched for a task that is already completed, because a defect was found after its code was committed. Revise only that task's tests as above and hand them off with `--task N.M`. Write them against the interface the committed code exposes; the red run its first placement recorded stays the record, so they are not expected to fail again.

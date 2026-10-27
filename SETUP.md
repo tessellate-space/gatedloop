@@ -299,14 +299,17 @@ The authoring phase:
 
 Per task, `gates tests place <N.M>` moves that task's tests onto their real paths, `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it.
 
-A test the implementer judges wrong goes back to the author with `gates tests defect <N.M> --kind setup|assertion --detail …`. The kind is required, and each has its own cap per task:
+A test the implementer judges wrong, or placed tests that pass before anything is implemented, go back to the author with `gates tests defect <N.M> --kind setup|assertion|green --detail …`. The kind is required, and each has its own cap per task:
 
 | Kind | Means | Cap | Past the cap |
 |---|---|---|---|
 | `setup` | the test cannot run as written: a path, import, fixture or environment it assumes is wrong | 3 | halt `weak-spec`: the author's brief is missing something |
 | `assertion` | the test runs, and asserts behaviour the spec doesn't require or contradicts | 2 | halt `oracle-conflict`: a human decides |
+| `green` | the placed tests passed before any implementation, on a task not declared `characterization`: an observation, not a claim the tests are wrong. The author re-declares the task (`CHARACTERIZATION` with a reason, or `NO-TESTS`) or rewrites the tests to fail against the tree | 1 | halt `oracle-conflict`: a human decides |
 
-So fixture mistakes no longer spend the behaviour cap. A defect row recorded before kinds existed counts as `assertion`. `gates tests show` lists each defect with its kind and detail, and `gates stats --outcomes` counts them by kind, so a mislabelled defect is visible.
+So fixture mistakes no longer spend the behaviour cap, and a test that is right but green on its first run has a truthful record. A defect row recorded before kinds existed counts as `assertion`.
+
+A defect at a task already committed **reopens** it: the author re-hands it off and it is placed again as usual, and the red run its first placement recorded stays the record, so no second red run is demanded against committed code. A **halt** at a completed task leaves its placement in force (a halt in flight still voids it). Completion is read from history: a task is completed at a ledger row when the commit that checks it in `tasks.md` comes before the first commit carrying the row, so ticking a task in the same commit as a halt does not count. A ledger-only commit (a halt or defect row on its own) skips the lock in both commit hooks, since it cannot change a test. `gates tests show` lists each defect with its kind and detail, and `gates stats --outcomes` counts them by kind, so a mislabelled defect is visible.
 
 ### `loop.attempts` and `loop.fresh-restarts` — the retry budget
 ```yaml
@@ -422,7 +425,7 @@ gates tests handoff <change> [--task N.M] [--inline]   # record the holding area
 gates tests place <N.M>                          # move one task's held tests onto their real paths
 gates tests check [--task N.M]                   # the authored-test lock the commit hooks run
 gates tests check --ref <commit> [--change <name>]   # the same lock at a commit's tree and ledger, every task; no handoff passes
-gates tests defect <N.M> --kind setup|assertion --detail "..."   # an authored test is wrong: back to its author (3 setup, 2 assertion per task)
+gates tests defect <N.M> --kind setup|assertion|green --detail "..."   # an authored test is wrong, or green before implementation: back to its author (3 setup, 2 assertion, 1 green per task)
 gates tests show [<change>] [--json]             # author, each task's tests or reason, characterization, placement, defects by kind
 gates adoption status [--json]                   # the settings this plugin version asks the project to decide, still undecided
 gates adoption record <id> adopted|declined|later   # record the project's decision on an adoption item in .gatedloop/adoption.json
@@ -869,9 +872,10 @@ gets the status too — or as `failure` naming the first offending path, then ex
 
 `gates tests check --ref <commit> [--change <name>]` is the lock at a commit rather than
 the staged index: each placed path must hold exactly its placed content (its base content
-where a defect or halt voided the placement), the holding area must match the latest
-handoff, and every placed task with tests must have a red `unit` run recorded after its
-placement, all read from the commit's tree and the ledger it carries. It checks every
+where a defect, or a halt at a task not yet completed, voided the placement; its earlier
+placed content where a defect reopened a completed task), the holding area must match the
+latest handoff, and every placed task with tests must have a red `unit` run recorded after
+its placement (after its first placement, for a reopened task), all read from the commit's tree and the ledger it carries. It checks every
 task and names the path, the task and the commit on a failure. The change comes from
 `--change`, else from the branch the ref names. `gates merge` step 1 runs it on the
 branch head in both modes, so a placed test edited past the commit hooks refuses the
