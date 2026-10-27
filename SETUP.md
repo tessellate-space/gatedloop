@@ -333,6 +333,40 @@ Either key must be a non-negative integer, or `gates validate` fails naming it. 
 
 **Cost:** one author dispatch and one authored-set review per change, plus one author dispatch per defect.
 
+### Token usage: `usage` rows, `economics` and `loop.token-budget`
+```yaml
+economics:                 # optional: only `gates stats --cost` reads it
+  currency: USD
+  prices:                  # per million tokens, per model name as the usage rows record it
+    "<model-name>": { input: 3, output: 15, cache-read: 0.3, cache-write: 3.75 }
+loop:
+  token-budget: 5000000    # optional, no default: tokens a change may spend
+```
+The ledger records what the host session spent on each task (`token-ledger`). Two hooks write a `usage` row through `gates usage record`, and nothing else does:
+
+- **At a gated commit.** Once `hooks/gate-commit.sh` has allowed a commit, it passes the hook input's `transcript_path` to `gates usage record --stage`. The row covers the task's window, and the ledger is staged so the row lands in the commit it costs.
+- **At every session stop.** `hooks/continue-loop.sh` records the task in flight before it decides whether to continue, so a task that halts or is abandoned is costed up to the stop. With no task in flight (the authoring phase), the row is `task: null`, the unattributed bucket.
+
+A row holds `task`, `window` (`from`, `to`), `messages` (assistant messages counted, subagents' included), `source`, and `tokens`, which maps each model name to its `input`, `output`, `cache_read` and `cache_write` counts. It holds counts only, never a line of transcript text. A window starts at the later of the task's latest `gates task start` and the end of its latest counted usage row, so two flushes never count a message twice: the second writes zero. `source` says where the counts came from:
+
+| `source` | Counts | When |
+|---|---|---|
+| `claude-code-transcript` | yes | the hook input named a transcript that parsed. Sibling subagent transcripts under the session's directory are counted with it. |
+| `no-transcript` | null | no transcript path: a human's session, another host, or the git-layer `pre-commit` hook, which has no hook input |
+| `unreadable-transcript` | null | the file exists but nothing in it parsed; `detail` says why |
+
+A null-count row never moves the window, so the next readable flush still covers that span. A missing source is never a failure: `gates usage record` exits 0 and the commit or stop goes ahead. It writes nothing off a change branch or before the change has a ledger. Only a ledger that can't be written exits 1, and the hooks ignore even that. A tree whose only change is appended usage rows still counts as a clean task boundary for the `Stop` hook's continue decision and for `gates attempt restart`.
+
+```bash
+gates usage record [--task N.M] [--transcript <path>] [--change <name>] [--stage]   # what the hooks run; the task defaults to the one in flight
+gates usage show [--change <name>] [--json]                      # the change's usage rows and tokens per task
+gates stats --cost                                               # price the recorded tokens with economics.prices
+```
+
+**Prices are your binding.** `economics.prices` maps a model name to its prices per million tokens for `input`, `output`, `cache-read` and `cache-write`, in the one `currency` you declare. `gates validate` checks the shape: a currency string when prices are declared, all four prices, each a non-negative number. It checks nothing about the model names. `gates stats --cost` multiplies each model's counts by its prices, prints a cost per task and per change, and names every recorded model it found no price for, with its tokens, beside the priced subtotal. Without the block, `--cost` prints tokens only and says no prices are declared. Prices affect `--cost` and nothing else; the tokens are what the ledger stores.
+
+**The budget is enforced in code.** With `loop.token-budget` declared (a positive integer, or `gates validate` fails), task-bearing `gates run unit` and `gates run ci` sum every usage row of the change, counting input, output, cache-read and cache-write across every model. At or above the budget they exit 1 without running the gate, naming the budget, the recorded spend and `gates halt record budget --task <N.M>`. The loop halts with cause `budget`. It never retries and never restarts, because the spend belongs to the change. The merge's unscoped `ci` and a run with no task are never budgeted. Without the key, no budget applies. **The lag:** only recorded rows count, and the task in flight is recorded at its commit or the session stop, so a change can overshoot by up to one task's spend in one session. The refusal says so.
+
 ### Scoped `ci`/`unit` — per-task gate cost proportional to what a task touched
 
 A surface MAY declare its own `ci`/`unit` command, cheaper than the aggregate one:
@@ -395,10 +429,13 @@ gates run live-check           # run every hot surface's live-check
 gates run eval sales 0.86      # fills {dataset}=sales {score}=0.86
 gates surfaces                 # which surfaces are hot for the current diff
 gates rules                    # which rule-ids apply to the current diff (feed to review)
-gates stats                    # gate economics from the durable ledger (active time, per-gate share, failed attempts)
+gates stats                    # gate economics from the durable ledger (active time, per-gate share, failed attempts, tokens per task and model)
 gates stats --outcomes --all   # autonomy: terminal state, hands-off share of merged changes, halts by cause, interventions by kind
 gates epics [--json]           # every epic (named by children in x-gatedloop-epic) with each child's state and tasks done/total
-gates stats --epic <name>      # an epic's per-child economics and totals: state, tasks, gate runs, gate time, red runs, halts
+gates stats --epic <name>      # an epic's per-child economics and totals: state, tasks, gate runs, gate time, red runs, tokens, halts
+gates stats --cost             # tokens priced with economics.prices; unpriced models named; tokens alone without prices
+gates usage record [--task N.M] [--transcript <path>] [--change <name>] [--stage]   # append a `usage` row (the commit and Stop hooks run it); exit 0 whatever the source
+gates usage show [--change <name>] [--json]                      # a change's usage rows and tokens per task
 gates halt record stalled --task 2.3 --detail "attempt budget used"   # record why the loop stopped (closed cause set)
 gates intervention record ask --task 2.3 --detail "which port?"          # record a human turn the question-tool hook did not see
 gates attempt note 2.3 --hypothesis … --changed … --oracle … --next …   # the lesson of a failed attempt (four one-line fields)
@@ -458,7 +495,10 @@ Changed-file set defaults to `git diff HEAD` + staged + untracked. Override with
 **When gates feel slow:** run `gates stats` (add `--change <name>` for a change other
 than the current branch, or `--all` for every recorded change) to see where active
 loop time actually goes — time and share per gate, failed-attempt counts, and a
-per-task breakdown, read straight back out of the durable ledger. Then read
+per-task breakdown, read straight back out of the durable ledger. Beside time it
+prints the tokens each task and model spent, from `usage` rows, and names the tasks
+with none; a ledger from before usage rows existed says token spend was not
+recorded. Then read
 [`docs/gate-economics.md`](docs/gate-economics.md) for what to do about what it shows.
 
 **When you want to know what stopped the runs:** `gates stats --outcomes` reads the same
