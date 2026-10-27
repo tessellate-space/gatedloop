@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "gatedloop — the enforcement and onboarding layer for OpenSpec, packaged as a Claude Code plugin.",
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "plugins": [
     {
       "name": "gatedloop",
       "source": "./",
       "description": "The enforcement and onboarding layer for OpenSpec: gated per-task TDD, convention review, and a blocking live self-check carry an approved OpenSpec change to verified-on-main. Bring your own schema, bring your own stack.",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "category": "workflow",
       "keywords": ["openspec", "spec-driven-development", "tdd", "workflow", "closed-loop"]
     },
@@ -21,7 +21,7 @@
       "name": "specloop",
       "source": "./forwarder/specloop",
       "description": "Specloop is now gatedloop. This entry holds only a notice naming the steps to switch, for one release.",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "category": "workflow"
     }
   ]

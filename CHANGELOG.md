@@ -9,6 +9,42 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.8.0 — 2026-10-27
+
+The authored-test lock no longer leaves a finished change unable to merge, and the git layer reaches beyond Claude Code.
+
+**The authored-test lock**
+
+- **unblock-authored-lock** (#66). Fixes #56 and #49.
+  - **A ledger-only commit skips the lock** in both commit hooks, so `gates merge` can commit its own rows at steps 1 and 5. `gates discipline check-commit --verdict-file` gives the hooks the verdict as a token.
+  - **A halt at a completed task no longer cancels its placement.** A task counts as completed once its `[x]` was committed before the row.
+  - **A test defect at a completed task reopens it.** The red run recorded at its first placement stays the record, so no second red run is demanded against committed code.
+  - **A new defect kind, `green`,** for placed tests that pass before any implementation. It records what was seen rather than an untrue `setup` or `assertion` claim. The author answers by re-declaring the task (`CHARACTERIZATION` or `NO-TESTS`) or by rewriting its tests. It has a cap of one, then an `oracle-conflict` halt.
+  - **Failed attempts are counted from the task's latest placement**, so a test-defect cycle no longer spends the attempt budget. `gates attempt restart` accepts the task's placed tests at their placed content.
+  - The merge's head proof (`gates tests check --ref`) applies the same rules, so a change stuck under 0.7.0 can merge. A completed task that never had its red run gets `gates tests defect <task> --kind green`. The author re-declares it, it is placed again, and `unit` runs green.
+
+**Enforcement**
+
+- **git-layer-enforcement** (#52):
+  - **`discipline.agent-env`** names the variable your agent host sets (default `CLAUDECODE`). The git hooks enforce wherever it is set, so an agent on another host is gated too, and a human's own commits and pushes are left alone.
+  - **An opt-in `pre-push` hook** denies a push that updates the merge target unless the pushed commit is proven. `gates hook install` offers it, `--commit-only` declines it until `--push`, and a decline sticks. `gates doctor` reports both hooks.
+  - `AUTOMATION.md` now has a guarantee-by-layer table for each host.
+
+**The earlier name**
+
+- **defer-earlier-name-expiry** (#65): the earlier `specloop` names keep working, with the warning, through 0.8.x. They now stop working in **0.9.0**, not 0.8.0, so this fix could ship without waiting on their removal. Statuses are still posted under both names.
+
+**Other changes**
+
+- README: where gatedloop sits in the lifecycle and what the agent cannot do, and loop-diagram labels that GitHub no longer clips.
+- Restored `#NN` references and fixture numbers that the export from the private archive had rewritten to `specloop PR N`.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Re-run `gates hook install`** if you installed the git-layer hook. The installed copy predates both the lock fix and the agent-env change. `gates doctor` reports it as `stale-copy`. `/gatedloop:upgrade` offers the new push hook.
+3. **Not using Claude Code?** Set `discipline.agent-env` in `.gates.yaml` to the variable your agent host sets.
+
 ## 0.7.0 — 2026-10-23
 
 Specloop is now **gatedloop**, and this is its first public release.
