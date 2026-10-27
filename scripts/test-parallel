@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Run tests/ one module per process, in parallel (this repo's tooling; never shipped).
+
+`python3 -m unittest discover -s tests` runs ~140 modules serially, and most of them
+build real git repositories, so `ci` took 13-15 minutes per commit. Each module here
+runs as its own `unittest discover -s tests -p <module>` -- the same discovery root,
+sys.path and imports as the serial run -- and the largest modules start first so the
+slowest one does not land last.
+
+    scripts/test-parallel [-j N]              # every module; N defaults to $GATEDLOOP_TEST_JOBS, else the CPU count
+    scripts/test-parallel -p 'test_x*.py'     # only the modules matching a glob (the `unit` gate's `-- -p ...`)
+    scripts/test-parallel --affected          # only the modules the branch's changes can reach (a surface's scoped `ci`)
+
+--affected reads the change set from git: everything that differs between the branch's
+merge-base with the merge target and the working tree, plus untracked files. It selects
+each changed test module, each module naming a changed file (by file name or module
+stem), and each module naming a fixture (`tests/_*.py`) that names one. It runs every
+module -- err-full, as the shim's own scope selection does -- when git cannot answer,
+or when the shim, a fixture, the schema, the manifest or this script changed. The merge
+always re-runs the full suite on the squash, so a narrow selection here can only ever
+let a task commit through sooner; it cannot let a change merge.
+
+Exits 1 if any module fails, printing each failed module's full output; stdlib only.
+"""
+import argparse
+import fnmatch
+import os
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TESTS = ROOT / "tests"
+
+
+def run_module(path: Path) -> tuple[Path, int, str, float]:
+    start = time.monotonic()
+    out = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS), "-p", path.name, "-q"],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    return path, out.returncode, out.stdout, time.monotonic() - start
+
+
+# A change to any of these can reach every module.
+EVERYTHING = ("bin/gates", "tests/_*.py", "schema/*", ".gates.yaml", "scripts/test-parallel")
+
+
+def _git(*args: str) -> str | None:
+    out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
+def changed_paths() -> set[str] | None:
+    """Paths differing from the merge-base with the merge target, or `None` if git
+    cannot say (the caller then runs everything)."""
+    base = None
+    for target in ("origin/main", "main", "origin/master", "master"):
+        base = _git("merge-base", target, "HEAD")
+        if base:
+            break
+    if not base:
+        return None
+    diff = _git("diff", "--name-only", base.strip())
+    untracked = _git("ls-files", "--others", "--exclude-standard")
+    if diff is None or untracked is None:
+        return None
+    return {p for p in (diff + untracked).splitlines() if p.strip()}
+
+
+def affected(modules: list[Path]) -> tuple[list[Path], str]:
+    changed = changed_paths()
+    if changed is None:
+        return modules, "git could not name the change set"
+    hit = sorted(p for p in changed if any(fnmatch.fnmatch(p, g) for g in EVERYTHING))
+    if hit:
+        return modules, f"{hit[0]} changed"
+    names = set()
+    for p in changed:
+        name = Path(p).name
+        names.add(name)
+        if name.endswith(".py"):
+            names.add(name[:-3])
+    texts = {m: m.read_text(errors="replace") for m in modules}
+    fixtures = [f for f in TESTS.glob("_*.py") if any(n in f.read_text(errors="replace") for n in names)]
+    names |= {f.stem for f in fixtures}
+    picked = [m for m in modules
+              if f"tests/{m.name}" in changed or any(n in texts[m] for n in names)]
+    return picked, f"{len(changed)} changed paths"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("-j", "--jobs", type=int,
+                    default=int(os.environ.get("GATEDLOOP_TEST_JOBS") or os.cpu_count() or 4))
+    ap.add_argument("-p", "--pattern", help="run only the modules whose file name matches this glob")
+    ap.add_argument("--affected", action="store_true",
+                    help="run only the modules the branch's changes can reach (err-full)")
+    args = ap.parse_args()
+
+    modules = sorted(TESTS.glob("test_*.py"), key=lambda p: p.stat().st_size, reverse=True)
+    if args.pattern:
+        modules = [m for m in modules if fnmatch.fnmatch(m.name, args.pattern)]
+    if not modules:
+        print(f"test-parallel: no test modules under {TESTS} match "
+              f"{args.pattern or 'test_*.py'}", file=sys.stderr)
+        return 1
+    if args.affected:
+        total = len(modules)
+        modules, why = affected(modules)
+        print(f"test-parallel: --affected selected {len(modules)} of {total} modules ({why})")
+        if not modules:
+            return 0
+    start = time.monotonic()
+    failed: list[tuple[Path, str]] = []
+    slowest: list[tuple[float, str]] = []
+    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        for fut in as_completed([pool.submit(run_module, m) for m in modules]):
+            path, code, output, secs = fut.result()
+            slowest.append((secs, path.name))
+            if code != 0:
+                failed.append((path, output))
+    for path, output in sorted(failed):
+        print(f"===== FAILED: tests/{path.name}\n{output}", file=sys.stderr)
+    top = ", ".join(f"{n} {s:.0f}s" for s, n in sorted(slowest, reverse=True)[:3])
+    print(f"test-parallel: {len(modules)} modules, {len(failed)} failed, "
+          f"{time.monotonic() - start:.0f}s with -j {args.jobs} (slowest: {top})")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

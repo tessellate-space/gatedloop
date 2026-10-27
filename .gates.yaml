@@ -33,9 +33,12 @@ integration:
   requireApproval: true
 
 gates:
-  # Both are cheap and deterministic; ordered cheapest-first.
-  ci: "python3 -m unittest discover -s tests -q && python3 scripts/release check && claude plugin validate ."
-  unit: "python3 -m unittest discover -s tests -q"
+  # Deterministic; ordered cheapest-first. `scripts/test-parallel` runs each test
+  # module in its own process (~3 min instead of ~14 serially); `unit` takes the
+  # same `-p '<file>'` a scoped run passes. This global `ci` is the full oracle:
+  # what the merge runs on the squash and what CI publishes as `gatedloop/ci`.
+  ci: "python3 scripts/test-parallel && python3 scripts/release check && claude plugin validate ."
+  unit: "python3 scripts/test-parallel"
 
 surfaces:
   # The prompts. No executable oracle exists for these, so there is no
@@ -50,6 +53,10 @@ surfaces:
       - commands-flat-skills-nested
       - self-contained-plugin
       - docs-follow-surface
+    # A diff that touches only this surface runs only the test modules it can
+    # reach (scale-gate-cost D1, err-full). The merge still runs the full `ci`.
+    gates:
+      ci: "python3 scripts/test-parallel --affected && python3 scripts/release check && claude plugin validate ."
 
   # The shim and its tests. This surface has a real oracle, so review is
   # narrower: correctness is `ci`'s job, and these rules cover what `ci`
@@ -60,6 +67,22 @@ surfaces:
       - zero-dep-shim
       - fail-loud-gates
       - docs-follow-surface
+    # A diff that touches only this surface runs only the test modules it can
+    # reach (scale-gate-cost D1, err-full). The merge still runs the full `ci`.
+    gates:
+      ci: "python3 scripts/test-parallel --affected && python3 scripts/release check && claude plugin validate ."
+
+  # Plans and docs. No rules of their own (review scope is unchanged); this
+  # surface exists so a plan or docs commit runs the few modules that read them
+  # instead of the whole suite.
+  - name: docs
+    match:
+      - "{openspec,docs}/**"
+      - "{README,SETUP,AUTOMATION,CHANGELOG,RELEASING,CLAUDE}.md"
+    # A diff that touches only this surface runs only the test modules it can
+    # reach (scale-gate-cost D1, err-full). The merge still runs the full `ci`.
+    gates:
+      ci: "python3 scripts/test-parallel --affected && python3 scripts/release check && claude plugin validate ."
 
 conventions:
   rules-doc: docs/conventions.md
