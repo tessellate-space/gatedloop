@@ -9,13 +9,20 @@ Make the loop's stopping rule enforceable and give it memory: failed attempts ar
 
 For a task, the shim SHALL count failed attempts from the ledger alone, never from the
 caller's `--attempt`. A failed attempt is a red `unit` or `ci` run for that task,
-recorded after the task's first red `unit` run since its latest task start, and after
-its latest restart. Exit 75 SHALL NOT count.
+recorded after the task's first red `unit` run since the later of its latest task start
+and its latest test placement, and after its latest restart. Exit 75 SHALL NOT count.
 
 #### Scenario: A down environment is not an attempt
 
 - **WHEN** a `unit` run for the task exits 75
 - **THEN** the failed-attempt count is unchanged
+
+#### Scenario: A test-defect cycle spends nothing
+
+- **WHEN** task 1.1's placed tests fail on setup, a `setup` defect is recorded, the
+  author re-hands off, and the task's tests are placed again
+- **THEN** the red runs before the new placement are not counted, the next red `unit`
+  run is the task's red run, and the count starts from zero after it
 
 ### Requirement: The attempt cap is enforced
 
@@ -64,9 +71,11 @@ oldest first, across restarts.
 
 `gates attempt restart <task>` SHALL refuse unless the working tree is clean at the
 task's last commit, and SHALL refuse once the task's restarts number
-`loop.fresh-restarts`. Otherwise it SHALL record a `restart` row, after which the
-failed-attempt count starts again from zero. The implementer SHALL NOT restart itself;
-restarting is the dispatcher's act, in a new agent context.
+`loop.fresh-restarts`. A task's placed tests SHALL count as clean while each holds
+exactly its placed content, and so SHALL the removal of their holding files. Otherwise it
+SHALL record a `restart` row, after which the failed-attempt count starts again from
+zero. The implementer SHALL NOT restart itself; restarting is the dispatcher's act, in a
+new agent context.
 
 #### Scenario: A restart with one remaining
 
@@ -84,6 +93,18 @@ restarting is the dispatcher's act, in a new agent context.
 
 - **WHEN** the working tree has uncommitted changes
 - **THEN** `gates attempt restart` refuses and records nothing
+
+#### Scenario: Only the task's placed tests differ
+
+- **WHEN** the only differences from the task's last commit are task 1.2's placed
+  tests at exactly their placed content and the removal of their holding files
+- **THEN** `gates attempt restart 1.2` treats the tree as clean and records the
+  `restart` row
+
+#### Scenario: A placed test edited after placement
+
+- **WHEN** one of task 1.2's placed tests differs from its placed content
+- **THEN** `gates attempt restart 1.2` refuses, naming the path, and records nothing
 
 ### Requirement: The budget is declared in the manifest
 
