@@ -69,7 +69,17 @@ fi
 # failure, its denial -- including the stale diagnosis naming which paths
 # differ from the tree `ci` passed on (hook-correctness D4), the most useful
 # line of the denial.
-if ! commit_out="$("${GATES}" discipline check-commit "${tree}" 2>&1)"; then
+# unblock-authored-lock D1: check-commit names the grade that allowed the
+# commit in a one-token file; the lock below is skipped on `ledger` by
+# reading that token, never by matching the printed line.
+verdict_file="$(mktemp "${TMPDIR:-/tmp}/gatedloop-verdict.XXXXXX" 2>/dev/null)"
+if [ -z "${verdict_file}" ]; then
+  echo "gatedloop: could not create a temporary file for the commit verdict — denying the commit." >&2
+  exit 1
+fi
+trap 'rm -f "${verdict_file}"' EXIT
+
+if ! commit_out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict_file}" 2>&1)"; then
   echo "${commit_out}" >&2
   echo "gatedloop: commit denied at the git layer — the staged tree does not satisfy \`gates discipline check-commit\`." >&2
   echo "gatedloop: run \`gates run ci\` and stage exactly what it tested, then commit again." >&2
@@ -77,6 +87,12 @@ if ! commit_out="$("${GATES}" discipline check-commit "${tree}" 2>&1)"; then
   exit 1
 fi
 echo "${commit_out}"
+
+# A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row cannot
+# change a test, so the lock has nothing to judge in it (as in the tool hook).
+if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+  exit 0
+fi
 
 # split-test-author D4: the same authored-test lock the tool hook applies,
 # after the commit check, as in hooks/gate-commit.sh.

@@ -65,7 +65,22 @@ if [ -z "${tree}" ]; then
   exit 2
 fi
 
-if out="$("${GATES}" discipline check-commit "${tree}" 2>&1)"; then
+# unblock-authored-lock D1: check-commit names the grade that allowed the
+# commit in a one-token file, so the lock below is skipped on a ledger-grade
+# verdict by reading that token, never by matching the printed line.
+verdict_file="$(mktemp "${TMPDIR:-/tmp}/gatedloop-verdict.XXXXXX" 2>/dev/null)"
+if [ -z "${verdict_file}" ]; then
+  echo "gatedloop: could not create a temporary file for the commit verdict in '${resolved_repo}' — denying the commit." >&2
+  exit 2
+fi
+trap 'rm -f "${verdict_file}"' EXIT
+
+if out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict_file}" 2>&1)"; then
+  # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row
+  # cannot change a test, so the lock has nothing to judge in it.
+  if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+    exit 0
+  fi
   # split-test-author D4: the authored tests are locked wherever the marker
   # is checked -- a placed or held test edited, or no red run after
   # placement, denies the commit. Passes when no handoff exists.

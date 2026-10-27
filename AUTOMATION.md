@@ -456,7 +456,13 @@ enforcement:
 
 Both run where the `ci` marker check runs: `hooks/gate-commit.sh` (layer 1) and the git
 `pre-commit` hook (layer 2) call `gates tests check` right after it, so every
-commit-creating path the marker check covers is covered here too. It runs at commit, not
+commit-creating path the marker check covers is covered here too. The one exception is a
+ledger-grade commit (`unblock-authored-lock` D1): when `check-commit`'s verdict is
+`ledger`, read from the one-token file it writes under `--verdict-file`, both hooks skip
+the lock, because a staged diff of only `.gatedloop/runs/**` cannot change a test. That
+is what lets a halt row, a defect row and `gates merge`'s own step-1 and step-5 commits
+through on a branch whose lock would fail at the index. A ledger row staged with any
+other path is not ledger-grade, so the lock still runs on it. It runs at commit, not
 on Write/Edit, because a tool hook cannot tell the author from the implementer, and the
 author legitimately rewrites held tests on a defect; the commit is where the two roles'
 outputs join. With no handoff for the change — or on the merge target — the check passes,
