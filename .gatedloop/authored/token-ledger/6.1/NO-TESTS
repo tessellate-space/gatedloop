@@ -1,0 +1,1 @@
+Close-out: runs the existing gates (ci, openspec validate --strict) over the final tree; adds no behaviour.
