@@ -7166,6 +7166,41 @@ def recorded_usage(rows: list[dict]) -> int:
     return sum(usage_total(r.get("tokens")) for r in rows if r.get("gate") == USAGE_EVENT)
 
 
+def _usage_only_append(root: Path, rel: str) -> bool:
+    """Whether the working copy of ledger file `rel` differs from HEAD only
+    by appended `usage` rows -- what a commit-hook or stop flush leaves. Such
+    a tree is still at a task boundary: no task's work is in it."""
+    if not _is_ledger_path(rel):
+        return False
+    head = _git(root, "show", f"HEAD:{rel}")
+    if head.returncode != 0:
+        return False
+    try:
+        now = (root / rel).read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not now.startswith(head.stdout):
+        return False
+    for line in now[len(head.stdout):].splitlines():
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return False
+        if not isinstance(obj, dict) or obj.get("gate") != USAGE_EVENT:
+            return False
+    return True
+
+
+def _dirt_beyond_usage(root: Path, porcelain: str) -> list[str]:
+    """The `git status --porcelain` lines that are not a usage-only append to
+    a tracked ledger (`_usage_only_append`)."""
+    return [ln for ln in porcelain.splitlines()
+            if ln.strip() and not (ln[:2] in (" M", "M ", "MM")
+                                   and _usage_only_append(root, ln[3:]))]
+
+
 def cmd_usage(m: dict, root: Path, args) -> int:
     if args.usage_cmd == "record":
         return _usage_record(root, args)
@@ -10259,7 +10294,9 @@ def _cmd_discipline_other(m: dict, root: Path, args) -> int:
         status = subprocess.run(
             ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True,
         ).stdout
-        if status.strip():
+        # token-ledger D1: a usage row the commit hook or this stop's flush
+        # appended is not a task left mid-edit.
+        if _dirt_beyond_usage(root, status):
             return 1
         print(m.group(1).strip()[:120])
         return 0
@@ -11213,8 +11250,11 @@ def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: s
         print(f"gatedloop: could not read the working tree ({status.stderr.strip()}); "
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
+    # token-ledger D1: a usage-only ledger append (a stop flush) is not work;
+    # unblock-authored-lock D7: nor are the task's placed tests at their
+    # placed content.
     dirty, edited = _restart_dirt(root, change, rows, task,
-                                  [ln for ln in status.stdout.splitlines() if ln.strip()])
+                                  _dirt_beyond_usage(root, status.stdout))
     if edited:
         print(
             f"gatedloop: refusing to restart task {task}: its placed test(s) "
