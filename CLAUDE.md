@@ -227,7 +227,7 @@ it reads back (which is why the contract is an exit code and nothing else), and 
   implemented after the public move.
 - `role-commands`: `/gatedloop:planner` and `/gatedloop:orchestrator`, prompt commands over shipped
   primitives.
-- `remove-specloop-forwarders`: the 0.8.0 expiry of the earlier name's read-both and forwarder.
+- `remove-specloop-forwarders`: the 0.9.0 expiry of the earlier name's read-both and forwarder (moved from 0.8.0 by `defer-earlier-name-expiry`).
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 

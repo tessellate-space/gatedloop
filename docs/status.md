@@ -116,8 +116,8 @@ reinstalling it. [`AGENT_INSTALL.md`](../AGENT_INSTALL.md) says the same.
 
 ### The earlier plugin name still reads for one release — *shipped*
 
-The plugin was renamed in 0.7.0. Through 0.7.x the earlier names are read with a
-one-line warning, and they stop working in 0.8.0; `gates migrate-name` does the
+The plugin was renamed in 0.7.0. Through 0.8.x the earlier names are read with a
+one-line warning, and they stop working in 0.9.0; `gates migrate-name` does the
 migration. README's migration section has the steps.
 
 ## Upstream coupling

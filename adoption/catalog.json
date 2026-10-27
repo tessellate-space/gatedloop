@@ -150,15 +150,15 @@
       "id": "rename",
       "since": "0.7.0",
       "recurs": true,
-      "what": "This project still uses the plugin's earlier name, Specloop: a `.specloop/` state directory, `x-specloop-*` keys in an active change, or `specloop` markers in its git pre-commit hook. They are read, with a warning, until 0.8.0.",
+      "what": "This project still uses the plugin's earlier name, Specloop: a `.specloop/` state directory, `x-specloop-*` keys in an active change, or `specloop` markers in its git pre-commit hook. They are read, with a warning, until 0.9.0.",
       "question": "Move this project onto the gatedloop names now?",
       "options": [
         {"answer": "adopted", "label": "Yes: I run `gates migrate-name`, commit what it changed, and make the edits it prints (Recommended)"},
-        {"answer": "declined", "label": "Not at this version: keep the earlier names, which stop working in 0.8.0"}
+        {"answer": "declined", "label": "Not at this version: keep the earlier names, which stop working in 0.9.0"}
       ],
       "detector": {"kind": "earlier-name"},
       "applies_when": null,
-      "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which can wait because both contexts are posted until 0.8.0."}
+      "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which can wait because both contexts are posted until 0.9.0."}
     },
     {
       "id": "git-push-hook",

@@ -238,7 +238,7 @@ The 0.7.x releases carry the rename from Specloop (`rename-to-gatedloop`), and t
 
 - **A fourth version field.** `.claude-plugin/marketplace.json` lists a second plugin, the `specloop` forwarder at `forwarder/specloop/`, and its entry's `version` moves with the plugin's. `scripts/release check` reads it as a fourth field, and `cut` bumps it with the other three. Its version has to change on every release: an existing `specloop@specloop` install updates onto the forwarder only when its computed version changes.
 - **Where the forwarder ships from.** An existing install updates from the repository its marketplace was added from, `tessellate-space/specloop`. So the release that first carries the forwarder must reach that repository's `main` before `go-public-migration` makes it a private archive. A release cut only in `tessellate-space/gatedloop` reaches no existing install.
-- **The expiry.** `remove-specloop-forwarders` removes the forwarder, the read-both readers, the dual status posting and the earlier-name warnings in 0.8.0. `gates migrate-name` stays one release longer. Cut 0.8.0 only with that change archived.
+- **The expiry.** `remove-specloop-forwarders` removes the forwarder, the read-both readers, the dual status posting and the earlier-name warnings in 0.9.0 (`defer-earlier-name-expiry` moved it from 0.8.0, so the #56 fix could ship in 0.8.0). `gates migrate-name` stays one release longer. Cut 0.9.0 only with that change archived.
 
 ## A partial publish
 
