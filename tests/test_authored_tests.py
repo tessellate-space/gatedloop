@@ -470,7 +470,7 @@ class TestShow(unittest.TestCase):
         self.assertEqual(doc["tasks"]["1.1"],
                          {"tests": ["tests/test_calc.py"], "no_behaviour": None,
                           "characterization": None, "placed": True, "defects": 0,
-                          "defects_by_kind": {"assertion": 0, "setup": 0},
+                          "defects_by_kind": {"assertion": 0, "setup": 0, "green": 0},
                           "defect_log": []})
         self.assertEqual(doc["tasks"]["1.2"]["placed"], False)
         self.assertEqual(doc["tasks"]["1.2"]["defects"], 1)

@@ -114,7 +114,7 @@ class TestShowReportsDefectsByKind(unittest.TestCase):
         doc = json.loads(result.stdout)
         t = doc["tasks"]["1.2"]
         self.assertEqual(t["defects"], 3)
-        self.assertEqual(t["defects_by_kind"], {"assertion": 1, "setup": 2})
+        self.assertEqual(t["defects_by_kind"], {"assertion": 1, "setup": 2, "green": 0})
         self.assertEqual(t["defect_log"], [
             {"kind": "setup", "detail": "imports a module that moved"},
             {"kind": "setup", "detail": "fixture path is stale"},
@@ -122,7 +122,8 @@ class TestShowReportsDefectsByKind(unittest.TestCase):
         ])
         self.assertIsNone(t["characterization"])
         self.assertEqual(doc["tasks"]["1.1"]["characterization"], REASON)
-        self.assertEqual(doc["tasks"]["1.1"]["defects_by_kind"], {"assertion": 0, "setup": 0})
+        self.assertEqual(doc["tasks"]["1.1"]["defects_by_kind"],
+                         {"assertion": 0, "setup": 0, "green": 0})
 
     def test_table_names_each_defect_with_its_kind_and_the_declaration(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -150,8 +151,8 @@ class TestStatsReportsDefectsByKind(unittest.TestCase):
             table = _run_gates(root, "stats", "--outcomes", "--change", CHANGE).stdout
         (c,) = doc["changes"]
         self.assertEqual(c["test_defects"], 3)
-        self.assertEqual(c["test_defects_by_kind"], {"assertion": 1, "setup": 2})
-        self.assertRegex(table, r"test defects:\s+3 \(setup 2, assertion 1\)")
+        self.assertEqual(c["test_defects_by_kind"], {"assertion": 1, "setup": 2, "green": 0})
+        self.assertRegex(table, r"test defects:\s+3 \(setup 2, assertion 1, green 0\)")
 
     def test_pure_counter_reads_kindless_rows_as_assertion(self):
         rows = [
@@ -161,7 +162,7 @@ class TestStatsReportsDefectsByKind(unittest.TestCase):
              "change": CHANGE, "task": "1.1", "detail": "new", "kind": "setup"},
         ]
         out = gates.outcomes_from_rows(rows)
-        self.assertEqual(out["test_defects_by_kind"], {"assertion": 1, "setup": 1})
+        self.assertEqual(out["test_defects_by_kind"], {"assertion": 1, "setup": 1, "green": 0})
 
 
 if __name__ == "__main__":

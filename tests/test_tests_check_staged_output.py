@@ -100,7 +100,7 @@ class StagedCheckOutputTest(unittest.TestCase):
             "before green is required. Run `gates run unit --task 1.1` and read why it "
             "fails before implementing (a precondition failure, exit 75, is not a red run; "
             "placed tests that pass are a defect: `gates tests defect 1.1 --kind "
-            "setup|assertion --detail ...`)",
+            "green --detail ...`)",
         ])
 
     def test_implementing_before_placing(self):

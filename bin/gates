@@ -5997,11 +5997,122 @@ def _tests_place(m: dict, root: Path, args) -> int:
     return 0
 
 
-def _active_placements(rows: list[dict]) -> dict[str, tuple[int, dict]]:
+# unblock-authored-lock D2: whether a task was completed when a ledger row
+# was written is ordered by commits, never read from one tree. A task is
+# completed at row i when the commit that checks it in the change's
+# `tasks.md` comes strictly before the first commit carrying row i. A tick
+# staged with the row is in the same commit (or in none), so a halt in
+# flight cannot be carried past its void by ticking the task with it.
+
+_CHECKED_TASK_RE = re.compile(r"^\s*-\s*\[[xX]\]\s+(\d+(?:\.\d+)+)(?:\s|$)")
+
+
+class _LedgerRewritten(Exception):
+    """The change's ledger has fewer rows at a commit than at its first
+    parent: rows are append-only, so no order can be read from it."""
+
+
+def _blob_at(root: Path, commit: str, path: str) -> str | None:
+    """`path`'s content at `commit`, or `None` when it has none there. The
+    completion walk reads every blob through here -- two per commit."""
+    out = subprocess.run(["git", "cat-file", "blob", f"{commit}:{path}"],
+                         cwd=root, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
+def _checked_task_ids(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    return {mt.group(1) for mt in map(_CHECKED_TASK_RE.match, text.splitlines()) if mt}
+
+
+class _Completion:
+    """D2's two positions, computed once per evaluation: `tick_at[task]`, the
+    walk index of the commit that checked the task, and `row_at[i]`, the walk
+    index of the first commit carrying ledger row i. Index 0 is the
+    merge-base, so a task checked there was not completed on this branch."""
+
+    def __init__(self, tick_at: dict[str, int], row_at: list[int], checked_at_ref: set[str]):
+        self.tick_at, self.row_at, self.checked_at_ref = tick_at, row_at, checked_at_ref
+
+    def completed(self, task: str, row: int) -> bool:
+        tick = self.tick_at.get(task)
+        if tick is None:
+            return False
+        if row < len(self.row_at):
+            return tick < self.row_at[row]
+        # Not yet committed (or only in a lane's working tree): after the
+        # last commit, so judged against the checked state there.
+        return task in self.checked_at_ref
+
+
+def _task_completion(root: Path, change: str, ref: str) -> _Completion:
+    """Walk the change branch's first-parent commits from its merge-base with
+    the merge target up to `ref`, reading two blobs per commit: the ledger's
+    row count and the checked task ids. Raises `_LedgerRewritten`, naming the
+    commit, where the ledger shrinks."""
+    sha = _rev(root, ref)
+    if sha is None:
+        return _Completion({}, [], set())
+    commits = [sha]
+    target, _reason = _resolve_merge_target(root)
+    if target:
+        base = subprocess.run(["git", "merge-base", target, sha],
+                              cwd=root, capture_output=True, text=True)
+        if base.returncode == 0 and base.stdout.strip():
+            walk = subprocess.run(
+                ["git", "rev-list", "--first-parent", "--reverse", f"{base.stdout.strip()}..{sha}"],
+                cwd=root, capture_output=True, text=True,
+            )
+            if walk.returncode == 0:
+                commits = [base.stdout.strip()] + walk.stdout.split()
+    ledger_rel = f"{LEDGER_PREFIXES[0]}/{change}.jsonl"
+    for prefix in LEDGER_PREFIXES[1:]:
+        earlier = f"{prefix}/{change}.jsonl"
+        if (subprocess.run(["git", "cat-file", "-e", f"{sha}:{ledger_rel}"], cwd=root,
+                           capture_output=True).returncode != 0
+                and subprocess.run(["git", "cat-file", "-e", f"{sha}:{earlier}"], cwd=root,
+                                   capture_output=True).returncode == 0):
+            ledger_rel = earlier
+    tasks_rel = f"openspec/changes/{change}/tasks.md"
+    tick_at: dict[str, int] = {}
+    row_at: list[int] = []
+    checked: set[str] = set()
+    for k, commit in enumerate(commits):
+        text = _blob_at(root, commit, ledger_rel)
+        count = len(_parse_jsonl_rows(text)) if text else 0
+        now = _checked_task_ids(_blob_at(root, commit, tasks_rel))
+        if count < len(row_at):
+            raise _LedgerRewritten(
+                f"the ledger of '{change}' loses rows at {commit[:12]} ({len(row_at)} "
+                f"before, {count} there) — rows are append-only, so the lock cannot order "
+                "them against the task ticks; refusing rather than guessing"
+            )
+        row_at.extend([k] * (count - len(row_at)))
+        if k > 0:
+            for task in now - checked:
+                tick_at.setdefault(task, k)
+        checked = now
+    return _Completion(tick_at, row_at, checked)
+
+
+def _lock_completion(root: Path, change: str, rows: list[dict], ref: str) -> _Completion | None:
+    """D2's completion for the lock at `ref`, walked only when a row could
+    use it (a `halt` or `test-defect` naming a task); `None` otherwise.
+    Raises `_LedgerRewritten` where the ledger shrinks."""
+    if not any(r.get("task") and r.get("gate") in (HALT_EVENT, TEST_DEFECT_EVENT) for r in rows):
+        return None
+    return _task_completion(root, change, ref)
+
+
+def _active_placements(rows: list[dict], completion: _Completion | None = None
+                       ) -> dict[str, tuple[int, dict]]:
     """`{task: (row index, {path: blob})}` for each task's latest placement.
-    A later `test-defect` or `halt` row for the same task voids it: the
-    task's tests go back to the author, or the task restarts from a clean
-    boundary, and either way it is placed again before it is implemented."""
+    A later `test-defect` row for the same task voids it: the task's tests go
+    back to the author and are placed again before it is implemented. A later
+    `halt` voids it only at a task not completed at that row (D3, with
+    `completion` from D2): the restart that follows places again, while a
+    halt at a finished task means "wait" and says nothing about its tests."""
     latest: dict[str, tuple[int, dict]] = {}
     for i, r in enumerate(rows):
         gate, task = r.get("gate"), r.get("task")
@@ -6009,9 +6120,40 @@ def _active_placements(rows: list[dict]) -> dict[str, tuple[int, dict]]:
             continue
         if gate == TESTS_PLACED_EVENT:
             latest[task] = (i, dict((r.get("tests") or {}).get(task) or {}))
+        elif gate == HALT_EVENT and completion is not None and completion.completed(task, i):
+            continue
         elif gate in (TEST_DEFECT_EVENT, HALT_EVENT):
             latest.pop(task, None)
     return latest
+
+
+def _reopened_tasks(rows: list[dict], completion: _Completion | None
+                    ) -> dict[str, tuple[int, int, dict]]:
+    """D4: `{task: (first placement row, voided placement row, {path: blob})}`
+    for each task a `test-defect` reopened after it was completed. The defect
+    voids the placement, but the voided content is committed code's test, so
+    each path keeps it as the content it must hold until the re-handed-off
+    tests are placed; and the red run recorded after the task's first
+    placement stays the record for every later placement of it."""
+    first: dict[str, int] = {}
+    latest: dict[str, tuple[int, dict]] = {}
+    reopened: dict[str, tuple[int, int, dict]] = {}
+    for i, r in enumerate(rows):
+        gate, task = r.get("gate"), r.get("task")
+        if not task:
+            continue
+        if gate == TESTS_PLACED_EVENT:
+            first.setdefault(task, i)
+            latest[task] = (i, dict((r.get("tests") or {}).get(task) or {}))
+            if task in reopened:
+                reopened[task] = (first[task], i, {})
+        elif gate in (TEST_DEFECT_EVENT, HALT_EVENT):
+            placed = latest.pop(task, None)
+            if (gate == TEST_DEFECT_EVENT and completion is not None
+                    and task in first and completion.completed(task, i)):
+                index, paths = placed if placed is not None else reopened.get(task, (0, 0, {}))[1:]
+                reopened[task] = (first[task], index, paths)
+    return reopened
 
 
 def _staged_blobs(root: Path) -> dict[str, str] | None:
@@ -6080,7 +6222,12 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     `staged`, a `{path: blob}` map, and the change's ledger `rows`. With
     `at` (a commit sha) the map is that commit's tree: the wording names the
     commit, and the in-flight condition does not apply (nothing is staged)."""
-    active = _active_placements(rows)
+    try:
+        completion = _lock_completion(root, change, rows, at or "HEAD")
+    except _LedgerRewritten as rewritten:
+        return [str(rewritten)]
+    active = _active_placements(rows, completion)
+    reopened = _reopened_tasks(rows, completion)
     problems: list[str] = []
     short = at[:12] if at else None
 
@@ -6094,7 +6241,13 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
         for task, paths in (r.get("tests") or {}).items():
             for path in paths:
                 expected.setdefault(path, (state["base"].get(path), None))
-    for task, (_i, paths) in sorted(active.items(), key=lambda kv: kv[1][0]):
+    # A path whose placement a defect at a completed task voided keeps that
+    # content (D4) until the task is placed again, in row order with the
+    # placements in force.
+    in_force = [(i, task, paths) for task, (i, paths) in active.items()]
+    in_force += [(i, task, paths) for task, (_first, i, paths) in reopened.items()
+                 if task not in active]
+    for _i, task, paths in sorted(in_force, key=lambda t: t[0]):
         for path, blob in paths.items():
             expected[path] = (blob, task)
     for path, (blob, task) in sorted(expected.items()):
@@ -6221,13 +6374,16 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                     f"`gates tests defect {task} --kind setup|assertion --detail ...` for the author"
                 )
             continue
-        if not any(_is_red_unit_row(r, task) for r in rows[index + 1:]):
+        # D4: a task reopened after completion keeps the red run its first
+        # placement recorded; none can exist against its committed code.
+        since = reopened[task][0] if task in reopened else index
+        if not any(_is_red_unit_row(r, task) for r in rows[since + 1:]):
             problems.append(
                 f"task {task}: no failing `unit` run is recorded after its tests "
                 f"were placed — red before green is required. Run `gates run unit "
                 f"--task {task}` and read why it fails before implementing (a "
                 "precondition failure, exit 75, is not a red run; placed tests "
-                f"that pass are a defect: `gates tests defect {task} --kind setup|assertion --detail ...`)"
+                f"that pass are a defect: `gates tests defect {task} --kind green --detail ...`)"
             )
 
     # 3, the other half: the task in flight has its tests placed before any
@@ -6322,7 +6478,10 @@ def _lock_at_commit(root: Path, change: str, ref: str) -> _LockAtCommit:
             "rather than reporting a pass."
         )
     problems = _lock_problems(root, change, rows, state, blobs, None, at=sha)
-    active = _active_placements(rows)
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, sha))
+    except _LedgerRewritten:
+        active = _active_placements(rows)  # the refusal is already in `problems`
     tasks = set(state["tests"]) | set(state["no_behaviour"]) | set(active)
     return _LockAtCommit(change, sha, True, problems, sorted(active),
                          sorted(t for t in tasks if t not in active))
@@ -6393,9 +6552,14 @@ def _tests_check(m: dict, root: Path, args) -> int:
 # authored-test-kinds D3: each kind has its own cap per task, and past it its
 # own halt. `setup`: the test cannot run as written (path, import, fixture,
 # environment). `assertion`: it runs and asserts the wrong behaviour.
-TEST_DEFECT_KINDS = ("setup", "assertion")
-MAX_TEST_DEFECTS_BY_KIND = {"setup": 3, "assertion": 2}
-TEST_DEFECT_HALT_CAUSE = {"setup": "weak-spec", "assertion": "oracle-conflict"}
+# `green` (unblock-authored-lock D5): the placed tests passed before any
+# implementation -- an observation, not a claim that they are wrong; the
+# author re-declares the task or rewrites its tests, and a second one goes
+# to a human.
+TEST_DEFECT_KINDS = ("setup", "assertion", "green")
+MAX_TEST_DEFECTS_BY_KIND = {"setup": 3, "assertion": 2, "green": 1}
+TEST_DEFECT_HALT_CAUSE = {"setup": "weak-spec", "assertion": "oracle-conflict",
+                          "green": "oracle-conflict"}
 
 
 def test_defect_kind(row: dict) -> str:
@@ -6406,7 +6570,7 @@ def test_defect_kind(row: dict) -> str:
 
 
 def _tests_defect(m: dict, root: Path, args) -> int:
-    """`gates tests defect <N.M> --kind setup|assertion --detail` (design D5
+    """`gates tests defect <N.M> --kind setup|assertion|green --detail` (design D5
     of `split-test-author`, D3 of `authored-test-kinds`): the implementer's
     only move against an authored test it judges wrong. Each kind is capped
     per task; past a cap the defect is refused and names the halt instead."""
@@ -6417,9 +6581,10 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     if kind not in TEST_DEFECT_KINDS:
         return _tests_refuse(
             f"refusing a test defect for task {task} with no --kind — say "
-            "`--kind setup` (the test cannot run as written) or `--kind "
-            "assertion` (it asserts the wrong behaviour); the kind decides which "
-            "cap it spends."
+            "`--kind setup` (the test cannot run as written), `--kind "
+            "assertion` (it asserts the wrong behaviour) or `--kind green` (it "
+            "passed before any implementation); the kind decides which cap it "
+            "spends."
         )
     if not detail:
         return _tests_refuse(
@@ -6438,6 +6603,13 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     if len(earlier) >= cap:
         prior = "; ".join(str(r.get("detail")) for r in earlier)
         cause = TEST_DEFECT_HALT_CAUSE[kind]
+        if kind == "green":
+            return _tests_refuse(
+                f"refusing green test defect {cap + 1} for task {task} — its tests "
+                f"were green before implementation again after the author's answer "
+                f"({prior}). This goes to a human: `gates halt record {cause} --task "
+                f"{task} --detail \"test-defect {task}: still green after re-handoff\"`."
+            )
         if kind == "assertion":
             return _tests_refuse(
                 f"refusing assertion test defect {cap + 1} for task {task} — "
@@ -6470,7 +6642,10 @@ def _tests_defect(m: dict, root: Path, args) -> int:
 def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     rows = _read_ledger_rows(root, change)
     state = _authoring_state(rows)
-    active = _active_placements(rows)
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+    except _LedgerRewritten:
+        active = _active_placements(rows)
     # authored-test-kinds D3: each defect with its kind, so a mislabelled
     # one is visible; a kindless legacy row reads as `assertion`.
     defect_log: dict[str, list[dict]] = {}
@@ -7350,7 +7525,7 @@ def _outcomes_format_human(doc: dict, show_aggregate: bool,
         lines.append(f"authorship:     {c['authorship']}")
         by_kind = c["test_defects_by_kind"]
         lines.append(f"test defects:   {c['test_defects']} (setup {by_kind['setup']}, "
-                     f"assertion {by_kind['assertion']})")
+                     f"assertion {by_kind['assertion']}, green {by_kind['green']})")
         lines.append(f"restarts:       {c['restarts']} ({c['restart_recovered']} recovered)")
         lines.append(f"first activity: {c['first_ts'] or 'unknown'}")
         lines.append(_outcomes_dq_prose(c["data_quality"]))
@@ -9504,114 +9679,137 @@ def _check_push(m: dict, root: Path, sha: str, remote_ref: str | None) -> int:
     return 1
 
 
+def _write_verdict_token(args, token: str) -> None:
+    """unblock-authored-lock D1: `--verdict-file` gets exactly one token on
+    success -- `ledger`, `planning` or `marker` -- so the commit hooks branch
+    on the verdict, never on the human-readable line, which is free to
+    change. Without the flag nothing is written and nothing else differs."""
+    path = getattr(args, "verdict_file", None)
+    if path:
+        Path(path).write_text(token + "\n")
+
+
 def cmd_discipline(m: dict, root: Path, args) -> int:
     if args.discipline_cmd == "check-commit":
-        tree = args.tree
-        staged = _staged_diff_paths(root)
-        # A non-empty planning-only diff earns the lighter gate; an EMPTY
-        # diff is deliberately not treated as vacuously planning-only (design
-        # D2's own scope is "committing something that can only break
-        # planning artifacts" -- zero evidence should never be a free pass),
-        # so it falls through to the unchanged marker requirement below.
-        # Ledger rows may ride along (merge-pull-request D3: the archive
-        # commit carries the change's merge row): no marker can see them --
-        # they are stripped from every hashed tree -- so they neither earn
-        # nor cost anything. The planning part must still be non-empty.
-        planning_part = [p for p in (staged or []) if not _is_ledger_path(p)]
-        if planning_part and all(_is_planning_path(p, m) for p in planning_part):
-            # Planning-grade (design D2): manifest validation + per-staged-
-            # change-dir OpenSpec validation, instead of a green `ci` marker.
-            errs = _errors(m, root)
-            if errs:
-                print("gatedloop: commit denied — the manifest is invalid:", file=sys.stderr)
-                for e in errs:
-                    print(f"  - {e}", file=sys.stderr)
-                return 1
-            skipped: list[str] = []
-            fully_validated: list[str] = []
-            proposal_only: list[str] = []
-            for change in _staged_change_dirs(staged):
-                # The archive move's source half (design D4 of
-                # harden-hook-matching): the staged diff removed this change
-                # directory and it is no longer on the working tree -- its
-                # artifacts were validated across their whole life, the move
-                # is mechanical, and validating a directory that is no
-                # longer there can only fail for the wrong reason. Skip it,
-                # and announce the skip (fail-loud in both directions --
-                # never a silent skip).
-                if not (root / "openspec" / "changes" / change).exists():
-                    skipped.append(change)
-                    continue
-                # design D4 of worktree-native-loop: validate each staged
-                # change at the STAGE IT IS AT, not demand delta content a
-                # deliberately proposal-only backlog entry doesn't claim.
-                try:
-                    has_delta = _change_has_delta_content(root, change)
-                except _ChangeStageUnreadable as e:
+        rc, token = _check_commit_verdict(m, root, args.tree)
+        if rc == 0 and token:
+            _write_verdict_token(args, token)
+        return rc
+    return _cmd_discipline_other(m, root, args)
+
+
+def _check_commit_verdict(m: dict, root: Path, tree: str) -> tuple[int, str | None]:
+    """`discipline check-commit`'s verdict: `(exit, token)`, the token naming
+    the grade that allowed the commit (`None` on a denial)."""
+    staged = _staged_diff_paths(root)
+    # A non-empty planning-only diff earns the lighter gate; an EMPTY
+    # diff is deliberately not treated as vacuously planning-only (design
+    # D2's own scope is "committing something that can only break
+    # planning artifacts" -- zero evidence should never be a free pass),
+    # so it falls through to the unchanged marker requirement below.
+    # Ledger rows may ride along (merge-pull-request D3: the archive
+    # commit carries the change's merge row): no marker can see them --
+    # they are stripped from every hashed tree -- so they neither earn
+    # nor cost anything. The planning part must still be non-empty.
+    planning_part = [p for p in (staged or []) if not _is_ledger_path(p)]
+    if planning_part and all(_is_planning_path(p, m) for p in planning_part):
+        # Planning-grade (design D2): manifest validation + per-staged-
+        # change-dir OpenSpec validation, instead of a green `ci` marker.
+        errs = _errors(m, root)
+        if errs:
+            print("gatedloop: commit denied — the manifest is invalid:", file=sys.stderr)
+            for e in errs:
+                print(f"  - {e}", file=sys.stderr)
+            return 1, None
+        skipped: list[str] = []
+        fully_validated: list[str] = []
+        proposal_only: list[str] = []
+        for change in _staged_change_dirs(staged):
+            # The archive move's source half (design D4 of
+            # harden-hook-matching): the staged diff removed this change
+            # directory and it is no longer on the working tree -- its
+            # artifacts were validated across their whole life, the move
+            # is mechanical, and validating a directory that is no
+            # longer there can only fail for the wrong reason. Skip it,
+            # and announce the skip (fail-loud in both directions --
+            # never a silent skip).
+            if not (root / "openspec" / "changes" / change).exists():
+                skipped.append(change)
+                continue
+            # design D4 of worktree-native-loop: validate each staged
+            # change at the STAGE IT IS AT, not demand delta content a
+            # deliberately proposal-only backlog entry doesn't claim.
+            try:
+                has_delta = _change_has_delta_content(root, change)
+            except _ChangeStageUnreadable as e:
+                print(
+                    f"gatedloop: commit denied — change '{change}'s stage "
+                    f"could not be determined: {e}",
+                    file=sys.stderr,
+                )
+                return 1, None
+            if has_delta:
+                r = _openspec(["validate", change, "--type", "change", "--json"],
+                              root, capture_output=True, text=True)
+                if r.returncode != 0:
                     print(
-                        f"gatedloop: commit denied — change '{change}'s stage "
-                        f"could not be determined: {e}",
+                        f"gatedloop: commit denied — `openspec validate {change}` failed:\n"
+                        f"{r.stdout}{r.stderr}",
                         file=sys.stderr,
                     )
-                    return 1
-                if has_delta:
-                    r = _openspec(["validate", change, "--type", "change", "--json"],
-                                  root, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        print(
-                            f"gatedloop: commit denied — `openspec validate {change}` failed:\n"
-                            f"{r.stdout}{r.stderr}",
-                            file=sys.stderr,
-                        )
-                        return 1
-                    fully_validated.append(change)
-                else:
-                    r = _openspec(["status", "--change", change, "--json"],
-                                  root, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        print(
-                            f"gatedloop: commit denied — change '{change}' has no delta "
-                            f"content yet (proposal-only), and its status could not be "
-                            f"read (`openspec status --change {change} --json` failed):\n"
-                            f"{r.stdout}{r.stderr}",
-                            file=sys.stderr,
-                        )
-                        return 1
-                    proposal_only.append(change)
-            notes: list[str] = []
-            if fully_validated:
-                notes.append("full: " + ", ".join(fully_validated))
-            if proposal_only:
-                notes.append("proposal-only: " + ", ".join(proposal_only))
-            stage_note = f" ({'; '.join(notes)})" if notes else ""
-            skip_note = ""
-            if skipped:
-                names = ", ".join(skipped)
-                skip_note = (
-                    f" — skipped validation for archived-away change(s) "
-                    f"{names} (directory no longer present on the working tree)"
-                )
-            ledger_count = len(staged) - len(planning_part)
-            ledger_note = (
-                f" (with {ledger_count} ledger path(s), which no marker sees)" if ledger_count else ""
+                    return 1, None
+                fully_validated.append(change)
+            else:
+                r = _openspec(["status", "--change", change, "--json"],
+                              root, capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(
+                        f"gatedloop: commit denied — change '{change}' has no delta "
+                        f"content yet (proposal-only), and its status could not be "
+                        f"read (`openspec status --change {change} --json` failed):\n"
+                        f"{r.stdout}{r.stderr}",
+                        file=sys.stderr,
+                    )
+                    return 1, None
+                proposal_only.append(change)
+        notes: list[str] = []
+        if fully_validated:
+            notes.append("full: " + ", ".join(fully_validated))
+        if proposal_only:
+            notes.append("proposal-only: " + ", ".join(proposal_only))
+        stage_note = f" ({'; '.join(notes)})" if notes else ""
+        skip_note = ""
+        if skipped:
+            names = ", ".join(skipped)
+            skip_note = (
+                f" — skipped validation for archived-away change(s) "
+                f"{names} (directory no longer present on the working tree)"
             )
-            print(
-                f"gatedloop: planning-grade commit allowed{stage_note}{ledger_note} — {tree}{skip_note}"
-            )
-            return 0
-        if staged and all(_is_ledger_path(p) for p in staged):
-            # Ledger-grade (design D5): a non-empty, ledger-only staged diff
-            # is allowed outright -- the verdict is printed, never silent
-            # (fail-loud-gates). An EMPTY diff still falls through to the
-            # full requirement below (unchanged "zero evidence is never a
-            # free pass" stance); one non-ledger path anywhere removes this
-            # discount entirely.
-            print(f"gatedloop: ledger-grade commit allowed (staged diff is entirely "
-                  f"`.gatedloop/runs/**`) — {tree}")
-            return 0
-        # Mixed, empty, or the staged diff couldn't be read: the full
-        # requirement.
-        return _check_marker_and_report(root, "ci", tree)
+        ledger_count = len(staged) - len(planning_part)
+        ledger_note = (
+            f" (with {ledger_count} ledger path(s), which no marker sees)" if ledger_count else ""
+        )
+        print(
+            f"gatedloop: planning-grade commit allowed{stage_note}{ledger_note} — {tree}{skip_note}"
+        )
+        return 0, "planning"
+    if staged and all(_is_ledger_path(p) for p in staged):
+        # Ledger-grade (design D5): a non-empty, ledger-only staged diff
+        # is allowed outright -- the verdict is printed, never silent
+        # (fail-loud-gates). An EMPTY diff still falls through to the
+        # full requirement below (unchanged "zero evidence is never a
+        # free pass" stance); one non-ledger path anywhere removes this
+        # discount entirely.
+        print(f"gatedloop: ledger-grade commit allowed (staged diff is entirely "
+              f"`.gatedloop/runs/**`) — {tree}")
+        return 0, "ledger"
+    # Mixed, empty, or the staged diff couldn't be read: the full
+    # requirement.
+    rc = _check_marker_and_report(root, "ci", tree)
+    return rc, ("marker" if rc == 0 else None)
+
+
+def _cmd_discipline_other(m: dict, root: Path, args) -> int:
 
     if args.discipline_cmd == "check-propose":
         rel = args.path
@@ -10543,10 +10741,14 @@ def _is_failed_gate_row(r: dict, task: str) -> bool:
 
 def _attempt_state(rows: list[dict], task: str) -> tuple[bool, int]:
     """`(red_run_seen, failed_attempts)` for `task`, per design D1, from the
-    rows after its latest `task-start` (all rows when it has none)."""
+    rows after the later of its latest `task-start` and its latest test
+    placement (all rows when it has neither). Starting at the placement
+    (unblock-authored-lock D6) means a test-defect cycle's red runs, against
+    tests the author has since replaced, are not attempts: the first red run
+    against the re-placed tests is the task's red run."""
     start = 0
     for i, r in enumerate(rows):
-        if r.get("gate") == TASK_BASELINE_EVENT and r.get("task") == task:
+        if r.get("gate") in (TASK_BASELINE_EVENT, TESTS_PLACED_EVENT) and r.get("task") == task:
             start = i + 1
     red_seen, count = False, 0
     for r in rows[start:]:
@@ -10685,19 +10887,64 @@ def cmd_attempt(m: dict, root: Path, args) -> int:
     sys.exit(f"gatedloop: unknown attempt subcommand '{args.attempt_cmd}'")
 
 
+def _restart_dirt(root: Path, change: str, rows: list[dict], task: str,
+                  lines: list[str]) -> tuple[list[str], list[str]]:
+    """unblock-authored-lock D7: `(dirty, edited)` from `git status
+    --porcelain --no-renames` lines, minus what the task's placement made:
+    each of its placed paths holding exactly its placed blob (in the worktree,
+    and in the index when staged) and each removal of its holding files.
+    `edited` names a placed path holding anything else."""
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+    except _LedgerRewritten:
+        active = _active_placements(rows)
+    placed = active[task][1] if task in active else {}
+    holding = _state_rel(root, "authored", change, task) + "/"
+    staged = _staged_blobs(root) or {}
+    dirty: list[str] = []
+    edited: list[str] = []
+    for ln in lines:
+        code, path = ln[:2], ln[3:]
+        if path in placed:
+            blob = placed[path]
+            in_index = staged.get(path)
+            head = _git(root, "rev-parse", "--verify", "--quiet", f"HEAD:{path}").stdout.strip() or None
+            if _file_blob(root, path) == blob and in_index in (blob, head):
+                continue
+            edited.append(path)
+            continue
+        if path.startswith(holding) and "D" in code and not (root / path).exists():
+            continue
+        dirty.append(path)
+    return dirty, edited
+
+
 def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: str) -> int:
     """Design D4: one fresh start for the task, in a new agent context. It
     needs the halt discipline to hold already -- a clean tree at the task's
-    last commit -- and refuses once `loop.fresh-restarts` restarts are used.
-    Otherwise it records a `restart` row, which resets D1's count."""
-    status = _git(root, "status", "--porcelain", "--untracked-files=all")
+    last commit, where the task's placed tests at exactly their placed
+    content and their holding files' removal count as clean (D7 of
+    unblock-authored-lock) -- and refuses once `loop.fresh-restarts`
+    restarts are used. Otherwise it records a `restart` row, which resets
+    D1's count."""
+    status = _git(root, "status", "--porcelain", "--untracked-files=all", "--no-renames")
     if status.returncode != 0:
         print(f"gatedloop: could not read the working tree ({status.stderr.strip()}); "
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
-    dirty = [ln for ln in status.stdout.splitlines() if ln.strip()]
+    dirty, edited = _restart_dirt(root, change, rows, task,
+                                  [ln for ln in status.stdout.splitlines() if ln.strip()])
+    if edited:
+        print(
+            f"gatedloop: refusing to restart task {task}: its placed test(s) "
+            f"{', '.join(edited)} differ from their placed content. A placed test "
+            "changes only through its author (`gates tests defect`); restore it. "
+            "Nothing was written.",
+            file=sys.stderr,
+        )
+        return 1
     if dirty:
-        shown = ", ".join(ln[3:] for ln in dirty[:5]) + (" ..." if len(dirty) > 5 else "")
+        shown = ", ".join(dirty[:5]) + (" ..." if len(dirty) > 5 else "")
         print(
             f"gatedloop: refusing to restart task {task}: the working tree is not clean "
             f"({shown}). A restart begins at the task's last commit: commit the halt row "
@@ -11987,10 +12234,10 @@ def main() -> int:
     sp_tk.add_argument("--change", help="change name (default: current branch; with --ref, the branch the ref names)")
     sp_tk.add_argument("--ref", help="check this commit's tree and the ledger it carries, every task, instead of the staged index")
     sp_tk.set_defaults(fn=cmd_tests)
-    sp_td = tests_sub.add_parser("defect", help="record that a task's authored tests are wrong (a `test-defect` row; per task at most three `setup`, two `assertion`)")
+    sp_td = tests_sub.add_parser("defect", help="record that a task's authored tests are wrong, or green before implementation (a `test-defect` row; per task at most three `setup`, two `assertion`, one `green`)")
     sp_td.add_argument("task", help="task id (e.g. 1.2)")
     sp_td.add_argument("--kind", required=True, choices=TEST_DEFECT_KINDS,
-                       help="setup: the test cannot run as written; assertion: it asserts the wrong behaviour")
+                       help="setup: the test cannot run as written; assertion: it asserts the wrong behaviour; green: it passed before any implementation")
     sp_td.add_argument("--detail", required=True, help="why the test is wrong")
     sp_td.add_argument("--change", help="change name (default: current branch)")
     sp_td.set_defaults(fn=cmd_tests)
@@ -12143,6 +12390,8 @@ def main() -> int:
     disc_sub = sp.add_subparsers(dest="discipline_cmd", required=True)
     sp_commit = disc_sub.add_parser("check-commit", help="planning-grade for a planning-only staged diff (D2), else the full ci marker check")
     sp_commit.add_argument("tree")
+    sp_commit.add_argument("--verdict-file", dest="verdict_file", default=None,
+                           help="on success, write one token naming the grade that allowed the commit: ledger, planning or marker (unblock-authored-lock D1)")
     sp_commit.set_defaults(fn=cmd_discipline)
     sp_prop = disc_sub.add_parser("check-propose", help="exit 1 if <path> is a plan artifact of a change in implementation (off the target or a based plan/* branch); with --scaffold, if the branch is neither")
     sp_prop.add_argument("path", nargs="?", default=None, help="omit with --scaffold")

@@ -441,11 +441,17 @@ enforcement:
   whose staged index holds a placed test that differs from the blob placed for it, or a
   held test (`.gatedloop/authored/<change>/…`) that differs from the latest handoff. The
   only way to change an authored test is back through its author: `gates tests defect
-  --kind setup|assertion`, then a re-handoff for that task. The kind is required and each
-  has its own cap per task, enforced by refusing the next defect: three `setup` (the test
-  cannot run as written; past the cap, halt `weak-spec`), two `assertion` (it asserts the
-  wrong behaviour; past the cap, a human, `oracle-conflict`). A defect row from before
-  kinds existed counts as `assertion`.
+  --kind setup|assertion|green`, then a re-handoff for that task. The kind is required and
+  each has its own cap per task, enforced by refusing the next defect: three `setup` (the
+  test cannot run as written; past the cap, halt `weak-spec`), two `assertion` (it asserts
+  the wrong behaviour; past the cap, a human, `oracle-conflict`), one `green` (the placed
+  tests passed before any implementation, an observation rather than a claim they are
+  wrong; the author re-declares the task or rewrites the tests, and past the cap a human
+  decides, `oracle-conflict`). A defect row from before kinds existed counts as
+  `assertion`. A defect at a completed task reopens it: the re-handed-off tests are placed
+  and locked as usual, and the red run its first placement recorded stays the record. A
+  halt voids a placement only at a task not yet completed, completion being ordered by
+  the commits that tick the task and carry the row (`unblock-authored-lock` D2–D5).
 - **Red before green is a checked fact.** For every placed task with tests, the same
   check requires a `unit` run recorded after the placement that failed with an exit other
   than 75 (a precondition failure is not a red run), and it refuses implementation staged
@@ -456,7 +462,13 @@ enforcement:
 
 Both run where the `ci` marker check runs: `hooks/gate-commit.sh` (layer 1) and the git
 `pre-commit` hook (layer 2) call `gates tests check` right after it, so every
-commit-creating path the marker check covers is covered here too. It runs at commit, not
+commit-creating path the marker check covers is covered here too. The one exception is a
+ledger-grade commit (`unblock-authored-lock` D1): when `check-commit`'s verdict is
+`ledger`, read from the one-token file it writes under `--verdict-file`, both hooks skip
+the lock, because a staged diff of only `.gatedloop/runs/**` cannot change a test. That
+is what lets a halt row, a defect row and `gates merge`'s own step-1 and step-5 commits
+through on a branch whose lock would fail at the index. A ledger row staged with any
+other path is not ledger-grade, so the lock still runs on it. It runs at commit, not
 on Write/Edit, because a tool hook cannot tell the author from the implementer, and the
 author legitimately rewrites held tests on a defect; the commit is where the two roles'
 outputs join. With no handoff for the change — or on the merge target — the check passes,
