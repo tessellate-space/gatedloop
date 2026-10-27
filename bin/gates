@@ -6096,11 +6096,23 @@ def _task_completion(root: Path, change: str, ref: str) -> _Completion:
     return _Completion(tick_at, row_at, checked)
 
 
-def _active_placements(rows: list[dict]) -> dict[str, tuple[int, dict]]:
+def _lock_completion(root: Path, change: str, rows: list[dict], ref: str) -> _Completion | None:
+    """D2's completion for the lock at `ref`, walked only when a row could
+    use it (a `halt` or `test-defect` naming a task); `None` otherwise.
+    Raises `_LedgerRewritten` where the ledger shrinks."""
+    if not any(r.get("task") and r.get("gate") in (HALT_EVENT, TEST_DEFECT_EVENT) for r in rows):
+        return None
+    return _task_completion(root, change, ref)
+
+
+def _active_placements(rows: list[dict], completion: _Completion | None = None
+                       ) -> dict[str, tuple[int, dict]]:
     """`{task: (row index, {path: blob})}` for each task's latest placement.
-    A later `test-defect` or `halt` row for the same task voids it: the
-    task's tests go back to the author, or the task restarts from a clean
-    boundary, and either way it is placed again before it is implemented."""
+    A later `test-defect` row for the same task voids it: the task's tests go
+    back to the author and are placed again before it is implemented. A later
+    `halt` voids it only at a task not completed at that row (D3, with
+    `completion` from D2): the restart that follows places again, while a
+    halt at a finished task means "wait" and says nothing about its tests."""
     latest: dict[str, tuple[int, dict]] = {}
     for i, r in enumerate(rows):
         gate, task = r.get("gate"), r.get("task")
@@ -6108,6 +6120,8 @@ def _active_placements(rows: list[dict]) -> dict[str, tuple[int, dict]]:
             continue
         if gate == TESTS_PLACED_EVENT:
             latest[task] = (i, dict((r.get("tests") or {}).get(task) or {}))
+        elif gate == HALT_EVENT and completion is not None and completion.completed(task, i):
+            continue
         elif gate in (TEST_DEFECT_EVENT, HALT_EVENT):
             latest.pop(task, None)
     return latest
@@ -6179,7 +6193,11 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     `staged`, a `{path: blob}` map, and the change's ledger `rows`. With
     `at` (a commit sha) the map is that commit's tree: the wording names the
     commit, and the in-flight condition does not apply (nothing is staged)."""
-    active = _active_placements(rows)
+    try:
+        completion = _lock_completion(root, change, rows, at or "HEAD")
+    except _LedgerRewritten as rewritten:
+        return [str(rewritten)]
+    active = _active_placements(rows, completion)
     problems: list[str] = []
     short = at[:12] if at else None
 
@@ -6421,7 +6439,10 @@ def _lock_at_commit(root: Path, change: str, ref: str) -> _LockAtCommit:
             "rather than reporting a pass."
         )
     problems = _lock_problems(root, change, rows, state, blobs, None, at=sha)
-    active = _active_placements(rows)
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, sha))
+    except _LedgerRewritten:
+        active = _active_placements(rows)  # the refusal is already in `problems`
     tasks = set(state["tests"]) | set(state["no_behaviour"]) | set(active)
     return _LockAtCommit(change, sha, True, problems, sorted(active),
                          sorted(t for t in tasks if t not in active))
@@ -6569,7 +6590,10 @@ def _tests_defect(m: dict, root: Path, args) -> int:
 def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     rows = _read_ledger_rows(root, change)
     state = _authoring_state(rows)
-    active = _active_placements(rows)
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+    except _LedgerRewritten:
+        active = _active_placements(rows)
     # authored-test-kinds D3: each defect with its kind, so a mislabelled
     # one is visible; a kindless legacy row reads as `assertion`.
     defect_log: dict[str, list[dict]] = {}

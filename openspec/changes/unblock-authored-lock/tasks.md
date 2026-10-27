@@ -11,7 +11,7 @@
 
 ## 3. Halts and reopens (D3, D4)
 
-- [ ] 3.1 Stop a `halt` row from voiding a completed task's placement; verify with tests, both at the index and with `--ref`, that a completed `NO-TESTS` task followed by a committed halt passes the lock, and that a halt in flight still voids the placement
+- [x] 3.1 Stop a `halt` row from voiding a completed task's placement; verify with tests, both at the index and with `--ref`, that a completed `NO-TESTS` task followed by a committed halt passes the lock, and that a halt in flight still voids the placement
 - [ ] 3.2 Accept, for a task reopened by a defect after completion, a red `unit` run recorded after its first placement, while condition 1 checks the re-placed content; verify with tests for a reopened task placed again with no new red run (passes), a reopened test edited after re-placement (refused), and a `gates merge` step-1 head proof on a fixture shaped like #56 (a completed `NO-TESTS` task with a later halt, and a completed task reopened by a `green` defect and re-handed off as `CHARACTERIZATION`) that proves the head
 
 ## 4. The `green` defect kind (D5)
