@@ -7,7 +7,7 @@
 
 ## 2. The hooks write it
 
-- [ ] 2.1 `hooks/gate-commit.sh`: after `tests check` passes, pass the hook input's `transcript_path` to `usage record`; a failure of `usage record` never denies the commit. Test with a fake hook input through the existing hook test harness.
+- [x] 2.1 `hooks/gate-commit.sh`: after `tests check` passes, pass the hook input's `transcript_path` to `usage record`; a failure of `usage record` never denies the commit. Test with a fake hook input through the existing hook test harness.
 - [ ] 2.2 `hooks/continue-loop.sh`: flush the task in flight (or `task: null`) before the continue decision; test that a halt followed by a stop leaves a usage row.
 - [ ] 2.3 `templates/git-hooks/pre-commit`: record `source: no-transcript` per design D7; `gates hook install` reinstalls the stale copy through the existing recurring adoption item; test the template body.
 

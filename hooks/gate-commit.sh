@@ -85,6 +85,25 @@ if out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict
   # is checked -- a placed or held test edited, or no red run after
   # placement, denies the commit. Passes when no handoff exists.
   if tests_out="$("${GATES}" tests check 2>&1)"; then
+    # token-ledger D1: the commit is allowed, so cost the task it closes --
+    # the hook input's transcript, read by the shim, counts only. The row is
+    # staged so it lands in this commit. Nothing here can deny the commit:
+    # every outcome of the record, a failure included, falls through to the
+    # allow below.
+    transcript="$(printf '%s' "$input" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+p = d.get("transcript_path") if isinstance(d, dict) else None
+print(p if isinstance(p, str) else "")
+' 2>/dev/null)"
+    if [ -n "${transcript}" ]; then
+      "${GATES}" usage record --stage --transcript "${transcript}" >/dev/null 2>&1 || true
+    else
+      "${GATES}" usage record --stage >/dev/null 2>&1 || true
+    fi
     exit 0
   fi
   echo "${tests_out}" >&2
