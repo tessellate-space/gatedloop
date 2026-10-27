@@ -10887,19 +10887,64 @@ def cmd_attempt(m: dict, root: Path, args) -> int:
     sys.exit(f"gatedloop: unknown attempt subcommand '{args.attempt_cmd}'")
 
 
+def _restart_dirt(root: Path, change: str, rows: list[dict], task: str,
+                  lines: list[str]) -> tuple[list[str], list[str]]:
+    """unblock-authored-lock D7: `(dirty, edited)` from `git status
+    --porcelain --no-renames` lines, minus what the task's placement made:
+    each of its placed paths holding exactly its placed blob (in the worktree,
+    and in the index when staged) and each removal of its holding files.
+    `edited` names a placed path holding anything else."""
+    try:
+        active = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+    except _LedgerRewritten:
+        active = _active_placements(rows)
+    placed = active[task][1] if task in active else {}
+    holding = _state_rel(root, "authored", change, task) + "/"
+    staged = _staged_blobs(root) or {}
+    dirty: list[str] = []
+    edited: list[str] = []
+    for ln in lines:
+        code, path = ln[:2], ln[3:]
+        if path in placed:
+            blob = placed[path]
+            in_index = staged.get(path)
+            head = _git(root, "rev-parse", "--verify", "--quiet", f"HEAD:{path}").stdout.strip() or None
+            if _file_blob(root, path) == blob and in_index in (blob, head):
+                continue
+            edited.append(path)
+            continue
+        if path.startswith(holding) and "D" in code and not (root / path).exists():
+            continue
+        dirty.append(path)
+    return dirty, edited
+
+
 def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: str) -> int:
     """Design D4: one fresh start for the task, in a new agent context. It
     needs the halt discipline to hold already -- a clean tree at the task's
-    last commit -- and refuses once `loop.fresh-restarts` restarts are used.
-    Otherwise it records a `restart` row, which resets D1's count."""
-    status = _git(root, "status", "--porcelain", "--untracked-files=all")
+    last commit, where the task's placed tests at exactly their placed
+    content and their holding files' removal count as clean (D7 of
+    unblock-authored-lock) -- and refuses once `loop.fresh-restarts`
+    restarts are used. Otherwise it records a `restart` row, which resets
+    D1's count."""
+    status = _git(root, "status", "--porcelain", "--untracked-files=all", "--no-renames")
     if status.returncode != 0:
         print(f"gatedloop: could not read the working tree ({status.stderr.strip()}); "
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
-    dirty = [ln for ln in status.stdout.splitlines() if ln.strip()]
+    dirty, edited = _restart_dirt(root, change, rows, task,
+                                  [ln for ln in status.stdout.splitlines() if ln.strip()])
+    if edited:
+        print(
+            f"gatedloop: refusing to restart task {task}: its placed test(s) "
+            f"{', '.join(edited)} differ from their placed content. A placed test "
+            "changes only through its author (`gates tests defect`); restore it. "
+            "Nothing was written.",
+            file=sys.stderr,
+        )
+        return 1
     if dirty:
-        shown = ", ".join(ln[3:] for ln in dirty[:5]) + (" ..." if len(dirty) > 5 else "")
+        shown = ", ".join(dirty[:5]) + (" ..." if len(dirty) > 5 else "")
         print(
             f"gatedloop: refusing to restart task {task}: the working tree is not clean "
             f"({shown}). A restart begins at the task's last commit: commit the halt row "

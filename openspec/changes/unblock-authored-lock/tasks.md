@@ -22,7 +22,7 @@
 ## 5. Attempt budget and restart (D6, D7)
 
 - [x] 5.1 Start the failed-attempt window at the later of the task's latest `task-start` and its latest `tests-placed` row; verify with a test where a `setup` defect cycle's red runs are followed by a re-placement and a first red run, and the count is zero
-- [ ] 5.2 Make `gates attempt restart` treat the task's placed tests at exactly their placed content, and the removal of their holding files, as clean, while naming any other placed content in its refusal; verify with tests for the accepted case, an edited placed test (refused, path named) and an unrelated dirty file (refused)
+- [x] 5.2 Make `gates attempt restart` treat the task's placed tests at exactly their placed content, and the removal of their holding files, as clean, while naming any other placed content in its refusal; verify with tests for the accepted case, an edited placed test (refused, path named) and an unrelated dirty file (refused)
 
 ## 6. Integration
 
