@@ -87,8 +87,10 @@ merged.
 thing to build: `missing-oracle` → a gate that can decide the question; `weak-spec` →
 a sharper spec pattern; `oracle-conflict` → a rule for which verdict wins;
 `stalled` → a smaller task or a better attempt budget; `environment` → a
-`requires` precondition that boots what was missing. A large `other` share means the
-cause set itself needs a member.
+`requires` precondition that boots what was missing; `budget` → a cheaper gate shape
+(principles 1–5 above: every red run and every re-read of a long gate log is spent
+again in tokens) or a smaller change, since `loop.token-budget` caps the change, not
+the task. A large `other` share means the cause set itself needs a member.
 
 **Three blind spots.** The ledger cannot see what never reached it:
 

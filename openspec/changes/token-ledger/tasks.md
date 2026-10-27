@@ -21,7 +21,7 @@
 
 - [x] 4.1 `loop.token-budget` in the schema and `gates validate`; `budget` added to `HALT_CAUSES` and to `gates stats --outcomes` halts by cause; tests for the cause round trip.
 - [x] 4.2 The refusal in `cmd_run` per design D5: task-bearing `unit`/`ci` only, never `--full`, never a run with no task; message names budget, spend, the in-flight lag and the halt; tests for at-budget, below-budget, `--full`, and no-task.
-- [ ] 4.3 `agents/tdd-implementer.md` and `skills/tdd-apply/SKILL.md`: the cause table gains `budget` and the refusal's handling (halt, never retry); `gates stats --outcomes` playbook text in `docs/gate-economics.md` names what a budget halt points to.
+- [x] 4.3 `agents/tdd-implementer.md` and `skills/tdd-apply/SKILL.md`: the cause table gains `budget` and the refusal's handling (halt, never retry); `gates stats --outcomes` playbook text in `docs/gate-economics.md` names what a budget halt points to.
 
 ## 5. Adoption and docs
 
