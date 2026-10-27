@@ -30,4 +30,4 @@
 
 ## 6. Close
 
-- [ ] 6.1 `gates run ci` green on the final tree; `openspec validate token-ledger --strict` passes.
+- [x] 6.1 `gates run ci` green on the final tree; `openspec validate token-ledger --strict` passes.
