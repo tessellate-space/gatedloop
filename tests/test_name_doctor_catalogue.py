@@ -6,7 +6,7 @@ Both read one scan of what earlier names a project still holds: a
 the earlier markers in a composed git hook. The regressions caught here:
 
 - the scan missing an identifier `gates migrate-name` would move, so doctor
-  reads "ok" while the project still stops working in 0.8.0;
+  reads "ok" while the project still stops working in 0.9.0;
 - the scan counting an archived change, which nothing migrates, so the
   warning never clears;
 - doctor never showing the row, or showing it without naming the command;
