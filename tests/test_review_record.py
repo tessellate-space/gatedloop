@@ -52,6 +52,8 @@ LEDGER_FIELDS = {
     "author", "tests", "base", "no_behaviour", "note", "restart_available",
     # authored-test-kinds design D1/D3: authoring and defect rows only.
     "characterization", "kind",
+    # token-ledger design D1: usage rows only.
+    "tokens", "window", "messages", "source",
 }
 
 

@@ -60,6 +60,8 @@ LEDGER_FIELDS = {
     # authored-test-kinds design D3: a test defect's kind, on
     # `test-defect` rows only; `None` on every other row.
     "kind",
+    # token-ledger design D1: usage rows only.
+    "tokens", "window", "messages", "source",
 }
 
 NO_LIVE_CHECK_ANYWHERE = 'gatesVersion: 1\ngates:\n  ci: "true"\n'
