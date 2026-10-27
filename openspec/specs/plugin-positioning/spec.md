@@ -177,9 +177,9 @@ and the gate names SHALL keep their names.
 
 ### Requirement: The earlier name is read loudly for one release
 
-Through 0.7.x the shim SHALL read every earlier `specloop` identifier when the new one
+Through 0.8.x the shim SHALL read every earlier `specloop` identifier when the new one
 is absent, preferring the new, and SHALL warn once per command that the earlier name
-stops working in 0.8.0 and names `gates migrate-name`. Publishing a gate status SHALL
+stops working in 0.9.0 and names `gates migrate-name`. Publishing a gate status SHALL
 post both contexts. A project holding both state directories SHALL be refused, naming
 the command.
 
@@ -187,7 +187,7 @@ the command.
 
 - **WHEN** a project has only `.specloop/` and `x-specloop-*` keys
 - **THEN** every command works, reading the earlier names, and prints the one-line
-  migration warning
+  migration warning naming 0.9.0
 
 #### Scenario: Both state directories
 
