@@ -7,7 +7,7 @@
 
 ## 2. Completion is ordered by commits (D2)
 
-- [ ] 2.1 Compute, per evaluation, the first commit checking each task in the change's `tasks.md` and the first commit carrying each ledger row, over the branch's first-parent history from its merge-base, with uncommitted and lane-only rows placed after the last commit; verify with tests for a halt committed after the tick (completed), a halt staged with the tick (not completed), an uncommitted row, a ledger that shrinks (refused, naming the commit), and a pinned blob-read count per commit
+- [x] 2.1 Compute, per evaluation, the first commit checking each task in the change's `tasks.md` and the first commit carrying each ledger row, over the branch's first-parent history from its merge-base, with uncommitted and lane-only rows placed after the last commit; verify with tests for a halt committed after the tick (completed), a halt staged with the tick (not completed), an uncommitted row, a ledger that shrinks (refused, naming the commit), and a pinned blob-read count per commit
 
 ## 3. Halts and reopens (D3, D4)
 

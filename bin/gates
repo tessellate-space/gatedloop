@@ -5997,6 +5997,105 @@ def _tests_place(m: dict, root: Path, args) -> int:
     return 0
 
 
+# unblock-authored-lock D2: whether a task was completed when a ledger row
+# was written is ordered by commits, never read from one tree. A task is
+# completed at row i when the commit that checks it in the change's
+# `tasks.md` comes strictly before the first commit carrying row i. A tick
+# staged with the row is in the same commit (or in none), so a halt in
+# flight cannot be carried past its void by ticking the task with it.
+
+_CHECKED_TASK_RE = re.compile(r"^\s*-\s*\[[xX]\]\s+(\d+(?:\.\d+)+)(?:\s|$)")
+
+
+class _LedgerRewritten(Exception):
+    """The change's ledger has fewer rows at a commit than at its first
+    parent: rows are append-only, so no order can be read from it."""
+
+
+def _blob_at(root: Path, commit: str, path: str) -> str | None:
+    """`path`'s content at `commit`, or `None` when it has none there. The
+    completion walk reads every blob through here -- two per commit."""
+    out = subprocess.run(["git", "cat-file", "blob", f"{commit}:{path}"],
+                         cwd=root, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
+def _checked_task_ids(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    return {mt.group(1) for mt in map(_CHECKED_TASK_RE.match, text.splitlines()) if mt}
+
+
+class _Completion:
+    """D2's two positions, computed once per evaluation: `tick_at[task]`, the
+    walk index of the commit that checked the task, and `row_at[i]`, the walk
+    index of the first commit carrying ledger row i. Index 0 is the
+    merge-base, so a task checked there was not completed on this branch."""
+
+    def __init__(self, tick_at: dict[str, int], row_at: list[int], checked_at_ref: set[str]):
+        self.tick_at, self.row_at, self.checked_at_ref = tick_at, row_at, checked_at_ref
+
+    def completed(self, task: str, row: int) -> bool:
+        tick = self.tick_at.get(task)
+        if tick is None:
+            return False
+        if row < len(self.row_at):
+            return tick < self.row_at[row]
+        # Not yet committed (or only in a lane's working tree): after the
+        # last commit, so judged against the checked state there.
+        return task in self.checked_at_ref
+
+
+def _task_completion(root: Path, change: str, ref: str) -> _Completion:
+    """Walk the change branch's first-parent commits from its merge-base with
+    the merge target up to `ref`, reading two blobs per commit: the ledger's
+    row count and the checked task ids. Raises `_LedgerRewritten`, naming the
+    commit, where the ledger shrinks."""
+    sha = _rev(root, ref)
+    if sha is None:
+        return _Completion({}, [], set())
+    commits = [sha]
+    target, _reason = _resolve_merge_target(root)
+    if target:
+        base = subprocess.run(["git", "merge-base", target, sha],
+                              cwd=root, capture_output=True, text=True)
+        if base.returncode == 0 and base.stdout.strip():
+            walk = subprocess.run(
+                ["git", "rev-list", "--first-parent", "--reverse", f"{base.stdout.strip()}..{sha}"],
+                cwd=root, capture_output=True, text=True,
+            )
+            if walk.returncode == 0:
+                commits = [base.stdout.strip()] + walk.stdout.split()
+    ledger_rel = f"{LEDGER_PREFIXES[0]}/{change}.jsonl"
+    for prefix in LEDGER_PREFIXES[1:]:
+        earlier = f"{prefix}/{change}.jsonl"
+        if (subprocess.run(["git", "cat-file", "-e", f"{sha}:{ledger_rel}"], cwd=root,
+                           capture_output=True).returncode != 0
+                and subprocess.run(["git", "cat-file", "-e", f"{sha}:{earlier}"], cwd=root,
+                                   capture_output=True).returncode == 0):
+            ledger_rel = earlier
+    tasks_rel = f"openspec/changes/{change}/tasks.md"
+    tick_at: dict[str, int] = {}
+    row_at: list[int] = []
+    checked: set[str] = set()
+    for k, commit in enumerate(commits):
+        text = _blob_at(root, commit, ledger_rel)
+        count = len(_parse_jsonl_rows(text)) if text else 0
+        now = _checked_task_ids(_blob_at(root, commit, tasks_rel))
+        if count < len(row_at):
+            raise _LedgerRewritten(
+                f"the ledger of '{change}' loses rows at {commit[:12]} ({len(row_at)} "
+                f"before, {count} there) — rows are append-only, so the lock cannot order "
+                "them against the task ticks; refusing rather than guessing"
+            )
+        row_at.extend([k] * (count - len(row_at)))
+        if k > 0:
+            for task in now - checked:
+                tick_at.setdefault(task, k)
+        checked = now
+    return _Completion(tick_at, row_at, checked)
+
+
 def _active_placements(rows: list[dict]) -> dict[str, tuple[int, dict]]:
     """`{task: (row index, {path: blob})}` for each task's latest placement.
     A later `test-defect` or `halt` row for the same task voids it: the
