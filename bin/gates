@@ -7112,6 +7112,151 @@ def transcript_usage(path, window_from, window_to) -> dict:
             "detail": None}
 
 
+def _utc_key(value):
+    """`value` (an ISO timestamp) as a comparable UTC datetime, or `None`."""
+    ts = _stats_parse_ts(value)
+    return _outcomes_utc(ts) if ts is not None else None
+
+
+def usage_row_counted(r: dict) -> bool:
+    """A `usage` row that carries counts. A null-count row (no readable
+    transcript) records that a moment passed uncosted; it never bounds a
+    window, so the next readable record still covers that span (design D7)."""
+    return r.get("gate") == USAGE_EVENT and isinstance(r.get("tokens"), dict)
+
+
+def _usage_row_end(r: dict):
+    window = r.get("window") if isinstance(r.get("window"), dict) else {}
+    return window.get("to") or r.get("ts")
+
+
+def usage_window_start(rows: list[dict], task: str | None) -> str | None:
+    """Design D2: where a new usage record for `task` begins -- the later of
+    the task's latest `task-start` and the end of its latest counted usage
+    row. For `task: null` (no task in flight) the bounds are the change's
+    first ledger row, the latest `task-start` of any task, and the latest
+    counted null-task row, so the unattributed bucket never overlaps a task's
+    window. With no bound at all, `None` (an open start). Pure."""
+    bounds: list[str] = []
+    first = next((r.get("ts") for r in rows if _utc_key(r.get("ts")) is not None), None)
+    for r in rows:
+        g = r.get("gate")
+        if g == TASK_BASELINE_EVENT and (task is None or r.get("task") == task):
+            bounds.append(r.get("ts"))
+        elif usage_row_counted(r) and r.get("task") == task:
+            bounds.append(_usage_row_end(r))
+    if task is None or not bounds:
+        bounds.append(first)
+    keyed = [(_utc_key(b), b) for b in bounds if _utc_key(b) is not None]
+    return max(keyed, key=lambda kb: kb[0])[1] if keyed else None
+
+
+def usage_total(tokens) -> int:
+    """Every count in a usage row's `tokens` map: input, output, cache-read
+    and cache-write across every model (0 for `None`). Totals are derived by
+    readers, never stored (design D1)."""
+    if not isinstance(tokens, dict):
+        return 0
+    return sum(_count(c.get(f)) for c in tokens.values() if isinstance(c, dict)
+               for f in TOKEN_FIELDS)
+
+
+def recorded_usage(rows: list[dict]) -> int:
+    """Pure: the change's recorded tokens, summed over every usage row."""
+    return sum(usage_total(r.get("tokens")) for r in rows if r.get("gate") == USAGE_EVENT)
+
+
+def cmd_usage(m: dict, root: Path, args) -> int:
+    if args.usage_cmd == "record":
+        return _usage_record(root, args)
+    if args.usage_cmd == "show":
+        return _usage_show(root, args)
+    sys.exit(f"gatedloop: unknown usage subcommand '{args.usage_cmd}'")
+
+
+def _usage_record(root: Path, args) -> int:
+    """`gates usage record [--task] [--transcript] [--stage]` (design D1/D2).
+    Exit 0 whatever the source: a missing or unreadable transcript is a row
+    with null counts and the reason, never a failure of the commit or the
+    stop that asked. Only a ledger that cannot be written exits 1."""
+    change = _resolve_change_name(root, getattr(args, "change", None))
+    if change is None:
+        print("gatedloop: no change branch checked out — no usage recorded")
+        return 0
+    if not _ledger_path(root, change).exists():
+        print(f"gatedloop: change '{change}' has no ledger yet — no usage recorded "
+              "(usage is attributed once the loop has written a row)")
+        return 0
+    rows = _read_ledger_rows(root, change)
+    task = getattr(args, "task", None) or _current_task_after_handoff(rows)
+    start = usage_window_start(rows, task)
+    now = _now_iso()
+    got = transcript_usage(getattr(args, "transcript", None), start, now)
+    try:
+        _append_ledger_row(root, {
+            "ts": now, "gate": USAGE_EVENT, "exit": None, "duration_ms": None,
+            "change": change, "task": task, "tree": None, "attempt": None,
+            "approved_by": _read_approved_by(root, change), "sha": None,
+            "detail": got["detail"], "tokens": got["tokens"],
+            "window": {"from": start, "to": now}, "messages": got["messages"],
+            "source": got["source"],
+        })
+    except OSError as e:
+        print(f"gatedloop: could not append the usage row to {_ledger_path(root, change)}: {e}",
+              file=sys.stderr)
+        return 1
+    who = f"task {task}" if task else "no task (unattributed)"
+    if got["tokens"] is None:
+        print(f"gatedloop: recorded usage for {who} with null counts ({got['source']}: "
+              f"{got['detail']})")
+    else:
+        print(f"gatedloop: recorded usage for {who}: {got['messages']} message(s), "
+              f"{usage_total(got['tokens'])} token(s) since {start or 'the session began'}")
+    if getattr(args, "stage", False):
+        rel = _ledger_rel(change, root)
+        r = _git(root, "add", "--", rel)
+        if r.returncode != 0:
+            print(f"gatedloop: could not stage {rel}: {r.stderr.strip()}", file=sys.stderr)
+    return 0
+
+
+def _usage_show(root: Path, args) -> int:
+    change = _resolve_change_name(root, getattr(args, "change", None))
+    if change is None:
+        print("gatedloop: no change to show — pass `--change <name>` (the current "
+              "branch is not a change branch).", file=sys.stderr)
+        return 1
+    if not _ledger_path(root, change).exists():
+        print(f"gatedloop: no ledger for change '{change}' — {_ledger_path(root, change)} "
+              "does not exist.", file=sys.stderr)
+        return 1
+    usage = [r for r in _read_ledger_rows(root, change) if r.get("gate") == USAGE_EVENT]
+    by_task: dict[str, int] = {}
+    for r in usage:
+        key = r.get("task") or "(unattributed)"
+        by_task[key] = by_task.get(key, 0) + usage_total(r.get("tokens"))
+    total = sum(by_task.values())
+    if getattr(args, "json", False):
+        print(json.dumps({"change": change, "rows": usage, "tasks": by_task, "total": total},
+                         sort_keys=True))
+        return 0
+    lines = [f"=== usage: {change} ===",
+             f"{'recorded':<34} {'task':<15} {'source':<23} {'messages':>8}  {'tokens':>12}"]
+    for r in usage:
+        counted = r.get("tokens") is not None
+        lines.append(
+            f"{str(r.get('ts') or '?'):<34} {str(r.get('task') or '(unattributed)'):<15} "
+            f"{str(r.get('source') or '?'):<23} "
+            f"{(r.get('messages') if counted else '-'):>8}  "
+            f"{(usage_total(r.get('tokens')) if counted else '-'):>12}")
+    lines.append("")
+    for task in sorted(by_task):
+        lines.append(f"{task:<15} {by_task[task]:>12}")
+    lines.append(f"{'total':<15} {total:>12}")
+    print("\n".join(lines))
+    return 0
+
+
 # ---------- gate economics (`gates stats`, design gates-stats) ------------
 #
 # A pure reader over the durable ledger: turns the event rows `gates run` /
@@ -12332,6 +12477,19 @@ def main() -> int:
     sp_ar.add_argument("task", help="task id to restart (e.g. 1.2)")
     sp_ar.add_argument("--change", help="change name for the row (default: current branch)")
     sp_ar.set_defaults(fn=cmd_attempt)
+
+    sp = sub.add_parser("usage", help="token usage per task: `usage` ledger rows read from the host session's transcript (counts only)")
+    use_sub = sp.add_subparsers(dest="usage_cmd", required=True)
+    sp_ur = use_sub.add_parser("record", help="append a `usage` row for the task in flight, counting the transcript since the task's start or its last counted row; exit 0 whatever the source")
+    sp_ur.add_argument("--task", help="task id (default: the task in flight; none: unattributed)")
+    sp_ur.add_argument("--transcript", help="the session transcript (a hook input's `transcript_path`); omitted: a `no-transcript` row with null counts")
+    sp_ur.add_argument("--change", help="change name for the row (default: current branch)")
+    sp_ur.add_argument("--stage", action="store_true", help="stage the ledger after appending, so the row lands in the commit being made (the commit hook's form)")
+    sp_ur.set_defaults(fn=cmd_usage)
+    sp_us = use_sub.add_parser("show", help="print a change's usage rows and the tokens per task")
+    sp_us.add_argument("--change", help="change to show (default: current branch)")
+    sp_us.add_argument("--json", action="store_true", help='one document: {"change", "rows", "tasks", "total"}')
+    sp_us.set_defaults(fn=cmd_usage)
 
     sp = sub.add_parser("task", help="the per-task tree baseline: what has changed since a task began")
     task_sub = sp.add_subparsers(dest="task_cmd", required=True)

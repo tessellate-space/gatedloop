@@ -3,7 +3,7 @@
 ## 1. The usage row and its reader
 
 - [x] 1.1 Add `usage` to the ledger row vocabulary (`tokens`, `window`, `messages`, `source` fields in `LEDGER_ROW_FIELDS`, `usage` in `NON_GATE_EVENTS`) and the Claude Code transcript adapter per design D3, behind a fixture transcript in `tests/` that includes sidechain entries; tests cover the four token fields, a missing field, an unparsable file (`unreadable-transcript`), and sibling subagent files.
-- [ ] 1.2 Implement `gates usage record [--task <N.M>] [--transcript <path>]` with the window rule of design D2 and `gates usage show [--change]`; tests cover the window start (task-start vs previous usage row), zero-count second flush, `task: null` with no task start, and `no-transcript` exit 0.
+- [x] 1.2 Implement `gates usage record [--task <N.M>] [--transcript <path>]` with the window rule of design D2 and `gates usage show [--change]`; tests cover the window start (task-start vs previous usage row), zero-count second flush, `task: null` with no task start, and `no-transcript` exit 0.
 
 ## 2. The hooks write it
 
