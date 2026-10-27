@@ -90,7 +90,9 @@ echo "${commit_out}"
 
 # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row cannot
 # change a test, so the lock has nothing to judge in it (as in the tool hook).
+# Its usage is still recorded below (token-ledger D7).
 if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+  "${GATES}" usage record >/dev/null 2>&1 || true
   exit 0
 fi
 
@@ -101,5 +103,11 @@ if ! tests_out="$("${GATES}" tests check 2>&1)"; then
   echo "gatedloop: commit denied at the git layer — the authored tests are locked; see above." >&2
   exit 1
 fi
+
+# token-ledger D7: a commit at the git layer has no hook input, so no
+# transcript: record it as a `no-transcript` usage row (null counts). Such a
+# row never moves the task's window, so the next readable flush still covers
+# the span. Recording can never deny the commit.
+"${GATES}" usage record >/dev/null 2>&1 || true
 
 exit 0

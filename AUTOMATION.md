@@ -509,3 +509,33 @@ gate, so no hook is needed. What stays a prompt instruction is that the implemen
 halts on the refusal rather than switching to some other way of running the tests.
 The commit hooks still need a green `ci` on the staged tree, and `ci` is refused, so
 that route is closed too. See `openspec/changes/archive/2026-10-20-retry-budget/design.md` D1–D4.
+
+## Update (`token-ledger`): what a task cost, and a budget enforced in code
+
+The ledger recorded `duration_ms` and nothing else about spend. A team asking whether
+the loop paid for itself read a billing page instead. The host writes per-message
+usage next to the session, and the plugin's hooks already receive that transcript's
+path, so the gap was a reader:
+
+- **What the hooks now write.** `hooks/gate-commit.sh`, once it has allowed a commit,
+  runs `gates usage record --stage` with the hook input's `transcript_path`. The task's
+  `usage` row is staged into the commit it costs. `hooks/continue-loop.sh` runs the
+  same record at every `Stop`, re-invocations included, before the continue decision,
+  so a halted or abandoned task is costed too. The git-layer `pre-commit` hook has no
+  hook input; inside an agent session it records a `no-transcript` row with null
+  counts. Nothing the record does can deny a commit or fail a stop.
+- **Counts only.** A row stores, per model, input, output, cache-read and cache-write
+  token counts, the number of assistant messages and the window. No transcript text
+  is ever copied into the ledger.
+- **A flush is not work in progress.** A tree whose only change is appended `usage`
+  rows still counts as a clean task boundary, both for the `Stop` hook's continue
+  decision and for `gates attempt restart`. Any other change still stops the loop.
+- **The budget is enforced in code.** `loop.token-budget` is checked in `gates run`
+  beside the attempt cap. Once the change's recorded usage reaches it, a task-bearing
+  `unit` or `ci` run refuses with exit 1, names `gates halt record budget`, and runs
+  nothing. As with the attempt cap, no hook is needed: `gates run` is the only way
+  the loop runs a gate, and the commit hooks still need a green `ci`. What stays a
+  prompt instruction is halting on the refusal rather than retrying. The count lags
+  by the task in flight, which is recorded at its commit or the session stop.
+
+See the `token-ledger` change's design, D1–D8.

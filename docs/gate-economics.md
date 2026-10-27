@@ -66,6 +66,37 @@ sounds most appealing in the abstract.
 
 ---
 
+## Reading the tokens
+
+Since `token-ledger`, the same report prints what each task cost in tokens beside
+what it cost in time. The commit hook and the `Stop` hook append a `usage` row for
+the task in flight, counted from the session transcript (counts only, never its
+text). `gates stats` sums those rows per task and per model, then says what it could
+not see: the tasks with no counted usage row, and how much of the ledger's span no
+usage window covers. `--json` carries the same figures under each change's `tokens`
+key, and `--epic` totals them per child.
+
+**Tokens track gate shape too.** A red gate run is paid for twice: once in wall time,
+and again in the tokens the loop spends reading its output and trying a fix. A full
+suite where a scoped one would do, or a chatty gate log, shows up in both columns.
+The principles above lower both.
+
+**Prices are yours.** `gates stats --cost` multiplies the counts by `economics.prices`
+in `.gates.yaml` and names any recorded model you priced nothing for. The plugin ships
+no price list, because prices change and differ by contract; the tokens are the
+stored truth, and the prices only convert them.
+
+**A budget turns the number into a stopping rule.** `loop.token-budget` caps a
+change's recorded tokens. Past it, `gates run unit|ci` refuses and the loop halts
+with cause `budget`. Recording works without it, and the recommended first step is
+to record for a while and read the per-task spend before picking a number.
+
+What the tokens cannot answer: a session with no readable transcript (another host,
+a human's terminal) records null counts, and a task that never reached a commit or a
+stop since its last flush is not counted yet.
+
+---
+
 ## Reading the outcomes view
 
 `gates stats` measures what the loop *costs*; `gates stats --outcomes` measures how
@@ -87,8 +118,10 @@ merged.
 thing to build: `missing-oracle` → a gate that can decide the question; `weak-spec` →
 a sharper spec pattern; `oracle-conflict` → a rule for which verdict wins;
 `stalled` → a smaller task or a better attempt budget; `environment` → a
-`requires` precondition that boots what was missing. A large `other` share means the
-cause set itself needs a member.
+`requires` precondition that boots what was missing; `budget` → a cheaper gate shape
+(principles 1–5 above: every red run and every re-read of a long gate log is spent
+again in tokens) or a smaller change, since `loop.token-budget` caps the change, not
+the task. A large `other` share means the cause set itself needs a member.
 
 **Three blind spots.** The ledger cannot see what never reached it:
 

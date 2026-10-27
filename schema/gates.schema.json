@@ -196,6 +196,39 @@
           "type": "integer",
           "minimum": 0,
           "default": 1
+        },
+        "token-budget": {
+          "description": "Tokens a change may spend, counted from its recorded `usage` rows (token-ledger design D5): input, output, cache-read and cache-write across every model. Optional, no default: absent, no budget applies. Once the recorded total reaches it, task-bearing `gates run unit|ci` refuses with exit 1 and names `gates halt record budget`. The task in flight is counted at its commit or the session stop, so the refusal lags by at most that.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "economics": {
+      "description": "Prices for `gates stats --cost` (token-ledger design D4): the adopter's binding, as a gate body is. Optional: absent, `--cost` prints tokens only and says no prices are declared. The shim ships no price list and checks the shape only, never the model names.",
+      "type": "object",
+      "additionalProperties": false,
+      "dependentRequired": { "prices": ["currency"] },
+      "properties": {
+        "currency": {
+          "description": "The one currency every price is in (e.g. USD). Required when `prices` is declared.",
+          "type": "string",
+          "minLength": 1
+        },
+        "prices": {
+          "description": "Model name, as usage rows record it -> its prices per million tokens. A recorded model with no entry is named by `--cost` with its tokens, beside the priced subtotal.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["input", "output", "cache-read", "cache-write"],
+            "properties": {
+              "input": { "type": "number", "minimum": 0 },
+              "output": { "type": "number", "minimum": 0 },
+              "cache-read": { "type": "number", "minimum": 0 },
+              "cache-write": { "type": "number", "minimum": 0 }
+            }
+          }
         }
       }
     },

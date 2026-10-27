@@ -75,16 +75,40 @@ if [ -z "${verdict_file}" ]; then
 fi
 trap 'rm -f "${verdict_file}"' EXIT
 
+# token-ledger D1: an allowed commit costs the task it closes -- the hook
+# input's transcript, read by the shim, counts only. The row is staged so it
+# lands in this commit. Nothing here can deny the commit: every outcome of the
+# record, a failure included, falls through to the allow that follows it.
+record_usage() {
+  transcript="$(printf '%s' "$input" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+p = d.get("transcript_path") if isinstance(d, dict) else None
+print(p if isinstance(p, str) else "")
+' 2>/dev/null)"
+  if [ -n "${transcript}" ]; then
+    "${GATES}" usage record --stage --transcript "${transcript}" >/dev/null 2>&1 || true
+  else
+    "${GATES}" usage record --stage >/dev/null 2>&1 || true
+  fi
+}
+
 if out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict_file}" 2>&1)"; then
   # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row
-  # cannot change a test, so the lock has nothing to judge in it.
+  # cannot change a test, so the lock has nothing to judge in it. Its usage
+  # is still recorded; the staged row keeps the commit ledger-only.
   if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+    record_usage
     exit 0
   fi
   # split-test-author D4: the authored tests are locked wherever the marker
   # is checked -- a placed or held test edited, or no red run after
   # placement, denies the commit. Passes when no handoff exists.
   if tests_out="$("${GATES}" tests check 2>&1)"; then
+    record_usage
     exit 0
   fi
   echo "${tests_out}" >&2

@@ -48,6 +48,26 @@ cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || true
 # the taint it records blocks the merge regardless of whether stderr is surfaced).
 "${GATES}" audit >/dev/null || true
 
+# token-ledger D1: cost the task in flight (or, with none, the unattributed
+# bucket) up to this stop, so a halted or abandoned task is costed too. On
+# every stop, re-invocations included, and before the continue decision: the
+# usage row it appends never counts as a dirty tree there. Counts only, read
+# from the hook input's transcript; nothing here can block or fail the stop.
+transcript="$(printf '%s' "$input" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+p = d.get("transcript_path") if isinstance(d, dict) else None
+print(p if isinstance(p, str) else "")
+' 2>/dev/null)"
+if [ -n "${transcript}" ]; then
+  "${GATES}" usage record --transcript "${transcript}" >/dev/null 2>&1 || true
+else
+  "${GATES}" usage record >/dev/null 2>&1 || true
+fi
+
 if [ "${stop_hook_active:-false}" = "true" ]; then
   exit 0
 fi

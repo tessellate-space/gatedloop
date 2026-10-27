@@ -524,7 +524,24 @@ def _scalar(v: str):
     try:
         return int(v)
     except ValueError:
-        return v
+        pass
+    # token-ledger D4: a plain decimal (`0.3`, `-1.25`) is a float, as PyYAML
+    # reads it -- `economics.prices` are per-million-token prices. Nothing
+    # looser: a version string (`0.7.0`) or an exponent stays a string.
+    if _DECIMAL_RE.fullmatch(v):
+        return float(v)
+    return v
+
+
+_DECIMAL_RE = re.compile(r"-?\d+\.\d+")
+
+
+def _yaml_key(k: str) -> str:
+    """A mapping key with surrounding quotes removed (`"model-a": ...`), as
+    PyYAML reads a quoted key."""
+    if len(k) >= 2 and k[0] == k[-1] and k[0] in ("'", '"'):
+        return k[1:-1]
+    return k
 
 
 def _mini_yaml(text: str) -> dict:
@@ -542,8 +559,11 @@ def _mini_yaml(text: str) -> dict:
 
     def _kv(entry, own_indent):
         nonlocal i
-        key, _, val = entry.partition(":")
-        key, val = key.strip(), val.strip()
+        # token-ledger D4: a quoted key (`"model-a.v2": ...`) is split at the
+        # first colon outside its quotes and unquoted, as PyYAML reads it.
+        split = _partition_quote_aware(entry, ":") if entry[:1] in ("'", '"') else None
+        key, _, val = (split[0], ":", split[1]) if split is not None else entry.partition(":")
+        key, val = _yaml_key(key.strip()), val.strip()
         if val != "":
             return key, _scalar(val)
         if i < n and rows[i][0] > own_indent:
@@ -899,11 +919,65 @@ def _errors(m: dict, root: Path) -> list[str]:
                     v = loop.get(key)
                     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                         errs.append(f"loop.{key} must be a non-negative integer (got {v!r})")
+            # token-ledger D5: a change's token budget -- a positive integer,
+            # no default (absent: no budget).
+            if "token-budget" in loop:
+                v = loop.get("token-budget")
+                if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                    errs.append(f"loop.token-budget must be a positive integer of tokens "
+                                f"per change (got {v!r})")
+
+    # token-ledger D4: prices are the adopter's binding. The shape is checked,
+    # never the model names; the shim ships no price list.
+    if "economics" in m:
+        errs.extend(_economics_errors(m.get("economics")))
+    return errs
+
+
+ECONOMICS_KEYS = ("currency", "prices")
+PRICE_KEYS = ("input", "output", "cache-read", "cache-write")
+# A price key -> the usage row's count it multiplies (TOKEN_FIELDS).
+PRICE_FIELDS = dict(zip(PRICE_KEYS, ("input", "output", "cache_read", "cache_write")))
+
+
+def _economics_errors(econ) -> list[str]:
+    shape = ("the accepted shape is `economics: { currency: <code>, prices: { "
+             "\"<model>\": { input: <n>, output: <n>, cache-read: <n>, cache-write: <n> } } }`, "
+             "prices per million tokens")
+    if not isinstance(econ, dict):
+        return [f"economics must be a mapping — {shape}"]
+    errs = [f"economics has an unknown key '{k}' (known: {', '.join(ECONOMICS_KEYS)})"
+            for k in econ if k not in ECONOMICS_KEYS]
+    if "currency" in econ or "prices" in econ:
+        cur = econ.get("currency")
+        if not isinstance(cur, str) or not cur.strip():
+            errs.append(f"economics.currency must be a non-empty string naming the "
+                        f"currency the prices are in (got {cur!r})")
+    if "prices" in econ:
+        prices = econ.get("prices")
+        if not isinstance(prices, dict):
+            errs.append(f"economics.prices must be a mapping of model name to prices — {shape}")
+            return errs
+        for model, entry in prices.items():
+            where = f"economics.prices['{model}']"
+            if not isinstance(entry, dict):
+                errs.append(f"{where} must be a mapping of {', '.join(PRICE_KEYS)} — {shape}")
+                continue
+            for k in entry:
+                if k not in PRICE_KEYS:
+                    errs.append(f"{where} has an unknown key '{k}' (known: {', '.join(PRICE_KEYS)})")
+            for k in PRICE_KEYS:
+                if k not in entry:
+                    errs.append(f"{where} is missing '{k}'")
+                    continue
+                v = entry[k]
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                    errs.append(f"{where}.{k} must be a non-negative number (got {v!r})")
     return errs
 
 
 TEST_AUTHOR_MODES = ("separate", "inline")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -4678,6 +4752,13 @@ LEDGER_ROW_FIELDS = (
     # `assertion`; `None` on every other row kind. A defect row written
     # before it reads as `assertion`. Appended per the union rule.
     "kind",
+    # token-ledger D1: on a `usage` row only -- `tokens` maps a model name to
+    # its `{input, output, cache_read, cache_write}` counts (`None` when the
+    # source had none), `window` is `{from, to}`, `messages` the assistant
+    # messages counted, `source` which reader produced the counts
+    # (USAGE_SOURCES). `None` on every other row kind. Appended per the
+    # union rule.
+    "tokens", "window", "messages", "source",
 )
 
 
@@ -5323,7 +5404,8 @@ REVIEW_SCOPES = ("authored",)
 # (`--detail` is required for it).
 HALT_CAUSES = (
     "missing-oracle", "weak-spec", "oracle-conflict", "stalled",
-    "environment", "other",
+    # token-ledger D5: the change's token budget was reached.
+    "environment", "budget", "other",
 )
 
 
@@ -6978,6 +7060,313 @@ def cmd_tests(m: dict, root: Path, args) -> int:
     return handler(m, root, args)
 
 
+# ---------- token accounting (token-ledger D1-D3) ---------------------------
+#
+# What the host session spent on a task, as counts in the durable ledger. The
+# host writes per-message usage next to the session, and the plugin's hooks
+# already receive that transcript's path, so the gap was a reader, not a
+# source. A `usage` row stores counts only -- never a line of transcript text
+# -- and names the reader that produced them (`source`). One reader exists, for
+# the Claude Code transcript; a session with none records null counts and the
+# reason, never a failure.
+
+USAGE_EVENT = "usage"
+USAGE_SOURCE_CLAUDE = "claude-code-transcript"
+USAGE_SOURCE_NONE = "no-transcript"
+USAGE_SOURCE_UNREADABLE = "unreadable-transcript"
+USAGE_SOURCES = (USAGE_SOURCE_CLAUDE, USAGE_SOURCE_NONE, USAGE_SOURCE_UNREADABLE)
+TOKEN_FIELDS = ("input", "output", "cache_read", "cache_write")
+# The Claude Code transcript's usage keys, in TOKEN_FIELDS order.
+_CLAUDE_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                      "cache_creation_input_tokens")
+
+
+def _usage_none(source: str, detail: str) -> dict:
+    return {"source": source, "messages": None, "tokens": None, "detail": detail}
+
+
+def _jsonl_objects(path: Path) -> tuple[list[dict], int]:
+    """Every JSON object line of `path`, and how many non-empty lines were
+    not one. Raises OSError / UnicodeDecodeError on a file that cannot be read."""
+    objects: list[dict] = []
+    bad = 0
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                bad += 1
+                continue
+            if isinstance(obj, dict):
+                objects.append(obj)
+            else:
+                bad += 1
+    return objects, bad
+
+
+def _count(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def transcript_usage(path, window_from, window_to) -> dict:
+    """The Claude Code adapter (design D3): `{"source", "messages", "tokens",
+    "detail"}` for the session transcript at `path`, counting the assistant
+    messages whose `timestamp` is after `window_from` (`None`: open) and at or
+    before `window_to`.
+
+    Subagent turns count with the session: sidechain entries in the main file,
+    and every `*.jsonl` under the session's own directory (`<stem>/`) whose
+    entries carry the same `sessionId`. The host writes one entry per content
+    block, each repeating the message's usage, so a message id counts once.
+    A missing usage field reads as zero; a line that does not parse (a live
+    writer's truncated tail) is skipped. No path or no file is
+    `no-transcript`; a file with nothing readable in it is
+    `unreadable-transcript`. Never raises."""
+    if not path:
+        return _usage_none(USAGE_SOURCE_NONE, "the hook input carried no transcript path")
+    main = Path(path)
+    if not main.is_file():
+        return _usage_none(USAGE_SOURCE_NONE, f"no transcript file at {main}")
+    try:
+        entries, bad = _jsonl_objects(main)
+    except (OSError, UnicodeDecodeError) as e:
+        return _usage_none(USAGE_SOURCE_UNREADABLE, f"could not read {main}: {e}")
+    if not entries and bad:
+        return _usage_none(USAGE_SOURCE_UNREADABLE,
+                           f"no line of {main} parsed as a JSON object ({bad} line(s) tried)")
+
+    lo = _stats_parse_ts(window_from) if window_from else None
+    hi = _stats_parse_ts(window_to) if window_to else None
+    lo = _outcomes_utc(lo) if lo is not None else None
+    hi = _outcomes_utc(hi) if hi is not None else None
+
+    session = next((e.get("sessionId") for e in entries if e.get("sessionId")), None) or main.stem
+    sources = [(entries, False)]
+    sibling_dir = main.parent / main.stem
+    if sibling_dir.is_dir():
+        for sib in sorted(sibling_dir.rglob("*.jsonl")):
+            try:
+                sib_entries, _bad = _jsonl_objects(sib)
+            except (OSError, UnicodeDecodeError):
+                continue
+            sources.append((sib_entries, True))
+
+    tokens: dict[str, dict] = {}
+    seen: set = set()
+    messages = 0
+    for batch, sibling in sources:
+        for e in batch:
+            if sibling and e.get("sessionId") != session:
+                continue
+            msg = e.get("message")
+            if e.get("type") != "assistant" or not isinstance(msg, dict):
+                continue
+            usage = msg.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            ts = _stats_parse_ts(e.get("timestamp"))
+            if ts is None:
+                continue
+            ts = _outcomes_utc(ts)
+            if (lo is not None and ts <= lo) or (hi is not None and ts > hi):
+                continue
+            mid = msg.get("id")
+            if mid:
+                if mid in seen:
+                    continue
+                seen.add(mid)
+            model = msg.get("model") if isinstance(msg.get("model"), str) and msg.get("model") else "unknown"
+            bucket = tokens.setdefault(model, {f: 0 for f in TOKEN_FIELDS})
+            for field, key in zip(TOKEN_FIELDS, _CLAUDE_USAGE_KEYS):
+                bucket[field] += _count(usage.get(key))
+            messages += 1
+    return {"source": USAGE_SOURCE_CLAUDE, "messages": messages, "tokens": tokens,
+            "detail": None}
+
+
+def _utc_key(value):
+    """`value` (an ISO timestamp) as a comparable UTC datetime, or `None`."""
+    ts = _stats_parse_ts(value)
+    return _outcomes_utc(ts) if ts is not None else None
+
+
+def usage_row_counted(r: dict) -> bool:
+    """A `usage` row that carries counts. A null-count row (no readable
+    transcript) records that a moment passed uncosted; it never bounds a
+    window, so the next readable record still covers that span (design D7)."""
+    return r.get("gate") == USAGE_EVENT and isinstance(r.get("tokens"), dict)
+
+
+def _usage_row_end(r: dict):
+    window = r.get("window") if isinstance(r.get("window"), dict) else {}
+    return window.get("to") or r.get("ts")
+
+
+def usage_window_start(rows: list[dict], task: str | None) -> str | None:
+    """Design D2: where a new usage record for `task` begins -- the later of
+    the task's latest `task-start` and the end of its latest counted usage
+    row. For `task: null` (no task in flight) the bounds are the change's
+    first ledger row, the latest `task-start` of any task, and the latest
+    counted null-task row, so the unattributed bucket never overlaps a task's
+    window. With no bound at all, `None` (an open start). Pure."""
+    bounds: list[str] = []
+    first = next((r.get("ts") for r in rows if _utc_key(r.get("ts")) is not None), None)
+    for r in rows:
+        g = r.get("gate")
+        if g == TASK_BASELINE_EVENT and (task is None or r.get("task") == task):
+            bounds.append(r.get("ts"))
+        elif usage_row_counted(r) and r.get("task") == task:
+            bounds.append(_usage_row_end(r))
+    if task is None or not bounds:
+        bounds.append(first)
+    keyed = [(_utc_key(b), b) for b in bounds if _utc_key(b) is not None]
+    return max(keyed, key=lambda kb: kb[0])[1] if keyed else None
+
+
+def usage_total(tokens) -> int:
+    """Every count in a usage row's `tokens` map: input, output, cache-read
+    and cache-write across every model (0 for `None`). Totals are derived by
+    readers, never stored (design D1)."""
+    if not isinstance(tokens, dict):
+        return 0
+    return sum(_count(c.get(f)) for c in tokens.values() if isinstance(c, dict)
+               for f in TOKEN_FIELDS)
+
+
+def recorded_usage(rows: list[dict]) -> int:
+    """Pure: the change's recorded tokens, summed over every usage row."""
+    return sum(usage_total(r.get("tokens")) for r in rows if r.get("gate") == USAGE_EVENT)
+
+
+def _usage_only_append(root: Path, rel: str) -> bool:
+    """Whether the working copy of ledger file `rel` differs from HEAD only
+    by appended `usage` rows -- what a commit-hook or stop flush leaves. Such
+    a tree is still at a task boundary: no task's work is in it."""
+    if not _is_ledger_path(rel):
+        return False
+    head = _git(root, "show", f"HEAD:{rel}")
+    if head.returncode != 0:
+        return False
+    try:
+        now = (root / rel).read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not now.startswith(head.stdout):
+        return False
+    for line in now[len(head.stdout):].splitlines():
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return False
+        if not isinstance(obj, dict) or obj.get("gate") != USAGE_EVENT:
+            return False
+    return True
+
+
+def _dirt_beyond_usage(root: Path, porcelain: str) -> list[str]:
+    """The `git status --porcelain` lines that are not a usage-only append to
+    a tracked ledger (`_usage_only_append`)."""
+    return [ln for ln in porcelain.splitlines()
+            if ln.strip() and not (ln[:2] in (" M", "M ", "MM")
+                                   and _usage_only_append(root, ln[3:]))]
+
+
+def cmd_usage(m: dict, root: Path, args) -> int:
+    if args.usage_cmd == "record":
+        return _usage_record(root, args)
+    if args.usage_cmd == "show":
+        return _usage_show(root, args)
+    sys.exit(f"gatedloop: unknown usage subcommand '{args.usage_cmd}'")
+
+
+def _usage_record(root: Path, args) -> int:
+    """`gates usage record [--task] [--transcript] [--stage]` (design D1/D2).
+    Exit 0 whatever the source: a missing or unreadable transcript is a row
+    with null counts and the reason, never a failure of the commit or the
+    stop that asked. Only a ledger that cannot be written exits 1."""
+    change = _resolve_change_name(root, getattr(args, "change", None))
+    if change is None:
+        print("gatedloop: no change branch checked out — no usage recorded")
+        return 0
+    if not _ledger_path(root, change).exists():
+        print(f"gatedloop: change '{change}' has no ledger yet — no usage recorded "
+              "(usage is attributed once the loop has written a row)")
+        return 0
+    rows = _read_ledger_rows(root, change)
+    task = getattr(args, "task", None) or _current_task_after_handoff(rows)
+    start = usage_window_start(rows, task)
+    now = _now_iso()
+    got = transcript_usage(getattr(args, "transcript", None), start, now)
+    try:
+        _append_ledger_row(root, {
+            "ts": now, "gate": USAGE_EVENT, "exit": None, "duration_ms": None,
+            "change": change, "task": task, "tree": None, "attempt": None,
+            "approved_by": _read_approved_by(root, change), "sha": None,
+            "detail": got["detail"], "tokens": got["tokens"],
+            "window": {"from": start, "to": now}, "messages": got["messages"],
+            "source": got["source"],
+        })
+    except OSError as e:
+        print(f"gatedloop: could not append the usage row to {_ledger_path(root, change)}: {e}",
+              file=sys.stderr)
+        return 1
+    who = f"task {task}" if task else "no task (unattributed)"
+    if got["tokens"] is None:
+        print(f"gatedloop: recorded usage for {who} with null counts ({got['source']}: "
+              f"{got['detail']})")
+    else:
+        print(f"gatedloop: recorded usage for {who}: {got['messages']} message(s), "
+              f"{usage_total(got['tokens'])} token(s) since {start or 'the session began'}")
+    if getattr(args, "stage", False):
+        rel = _ledger_rel(change, root)
+        r = _git(root, "add", "--", rel)
+        if r.returncode != 0:
+            print(f"gatedloop: could not stage {rel}: {r.stderr.strip()}", file=sys.stderr)
+    return 0
+
+
+def _usage_show(root: Path, args) -> int:
+    change = _resolve_change_name(root, getattr(args, "change", None))
+    if change is None:
+        print("gatedloop: no change to show — pass `--change <name>` (the current "
+              "branch is not a change branch).", file=sys.stderr)
+        return 1
+    if not _ledger_path(root, change).exists():
+        print(f"gatedloop: no ledger for change '{change}' — {_ledger_path(root, change)} "
+              "does not exist.", file=sys.stderr)
+        return 1
+    usage = [r for r in _read_ledger_rows(root, change) if r.get("gate") == USAGE_EVENT]
+    by_task: dict[str, int] = {}
+    for r in usage:
+        key = r.get("task") or "(unattributed)"
+        by_task[key] = by_task.get(key, 0) + usage_total(r.get("tokens"))
+    total = sum(by_task.values())
+    if getattr(args, "json", False):
+        print(json.dumps({"change": change, "rows": usage, "tasks": by_task, "total": total},
+                         sort_keys=True))
+        return 0
+    lines = [f"=== usage: {change} ===",
+             f"{'recorded':<34} {'task':<15} {'source':<23} {'messages':>8}  {'tokens':>12}"]
+    for r in usage:
+        counted = r.get("tokens") is not None
+        lines.append(
+            f"{str(r.get('ts') or '?'):<34} {str(r.get('task') or '(unattributed)'):<15} "
+            f"{str(r.get('source') or '?'):<23} "
+            f"{(r.get('messages') if counted else '-'):>8}  "
+            f"{(usage_total(r.get('tokens')) if counted else '-'):>12}")
+    lines.append("")
+    for task in sorted(by_task):
+        lines.append(f"{task:<15} {by_task[task]:>12}")
+    lines.append(f"{'total':<15} {total:>12}")
+    print("\n".join(lines))
+    return 0
+
+
 # ---------- gate economics (`gates stats`, design gates-stats) ------------
 #
 # A pure reader over the durable ledger: turns the event rows `gates run` /
@@ -7013,6 +7402,8 @@ NON_GATE_EVENTS = frozenset({
     READY_EVENT,
     # retry-budget D3/D4: a lesson and a fresh restart, never a gate run.
     "attempt-note", "restart",
+    # token-ledger D1: what the session spent on a task, never a gate run.
+    USAGE_EVENT,
 })
 
 DEFAULT_IDLE_GAP_MINUTES = 30
@@ -7057,6 +7448,10 @@ def stats_from_rows(rows: list[dict], idle_gap_ms: int) -> dict:
     `rows_without_ts` (design D4: disclosed, never a crash, never a silent
     drop).
     """
+    # token-ledger D6: usage rows are reported by `tokens_from_rows`, beside
+    # time -- never inside it, so the time figures are byte-identical with or
+    # without them (a stop flush would otherwise lengthen an interval).
+    rows = [r for r in rows if r.get("gate") != USAGE_EVENT]
     usable: list[tuple] = []
     rows_without_ts = 0
     for r in rows:
@@ -7378,6 +7773,128 @@ def outcomes_aggregate(per_change: list[dict], acceptance_policy: str | None = N
     }
 
 
+def _token_bucket() -> dict:
+    return {"total": 0, "models": {}}
+
+
+def _token_add(bucket: dict, tokens: dict) -> None:
+    for model, c in tokens.items():
+        if not isinstance(c, dict):
+            continue
+        mb = bucket["models"].setdefault(model, dict({f: 0 for f in TOKEN_FIELDS}, total=0))
+        for f in TOKEN_FIELDS:
+            n = _count(c.get(f))
+            mb[f] += n
+            mb["total"] += n
+            bucket["total"] += n
+
+
+def _uncovered_ms(span: tuple, windows: list[tuple]) -> int:
+    """How much of `span` (a `(start, end)` pair of datetimes) no window in
+    `windows` covers, in milliseconds."""
+    lo, hi = span
+    covered = 0
+    cursor = lo
+    for a, b in sorted((max(a, lo), min(b, hi)) for a, b in windows):
+        if b <= cursor:
+            continue
+        a = max(a, cursor)
+        covered += (b - a).total_seconds()
+        cursor = b
+    return max(0, round(((hi - lo).total_seconds() - covered) * 1000))
+
+
+def tokens_from_rows(rows: list[dict]) -> dict:
+    """Pure (design D6): a change's usage rows summed into tokens per task,
+    per model and unattributed, with what is unrecorded disclosed -- the
+    tasks the ledger knows with no counted usage row, and how much of the
+    ledger's span (first row to last) no counted window covers."""
+    usage = [r for r in rows if r.get("gate") == USAGE_EVENT]
+    counted = [r for r in usage if usage_row_counted(r)]
+    whole = _token_bucket()
+    tasks: dict[str, dict] = {}
+    unattributed = _token_bucket()
+    for r in counted:
+        _token_add(whole, r["tokens"])
+        task = r.get("task")
+        _token_add(tasks.setdefault(task, _token_bucket()) if task else unattributed, r["tokens"])
+    known = {r.get("task") for r in rows if r.get("task") and r.get("gate") != USAGE_EVENT}
+    unrecorded = sorted(t for t in known if t not in tasks)
+    stamps = sorted(k for k in (_utc_key(r.get("ts")) for r in rows) if k is not None)
+    span_ms = uncovered = 0
+    if stamps:
+        span = (stamps[0], stamps[-1])
+        span_ms = round((span[1] - span[0]).total_seconds() * 1000)
+        windows = []
+        for r in counted:
+            w = r.get("window") if isinstance(r.get("window"), dict) else {}
+            a, b = _utc_key(w.get("from")) or span[0], _utc_key(w.get("to") or r.get("ts"))
+            if b is not None:
+                windows.append((a, b))
+        uncovered = _uncovered_ms(span, windows)
+    return {
+        "recorded": bool(counted),
+        "total": whole["total"],
+        "models": whole["models"],
+        "tasks": tasks,
+        "unattributed": unattributed,
+        "unrecorded": {"tasks": unrecorded, "count": len(unrecorded),
+                       "uncovered_ms": uncovered, "span_ms": span_ms},
+        "usage_rows": len(usage),
+    }
+
+
+def cost_from_tokens(t: dict, m: dict) -> dict:
+    """Pure (design D4): `tokens_from_rows`' figures priced with the
+    manifest's `economics.prices` -- per-million-token prices per model, in
+    one declared currency. A recorded model with no price is named with its
+    tokens and left out of the amounts; without prices nothing is priced."""
+    econ = m.get("economics") if isinstance(m, dict) else None
+    prices = econ.get("prices") if isinstance(econ, dict) else None
+    if not isinstance(prices, dict) or not prices:
+        return {"prices_declared": False, "currency": None, "total": None, "tasks": {},
+                "unattributed": None, "unpriced": {}}
+
+    def price(models: dict) -> tuple[float, dict]:
+        amount, unpriced = 0.0, {}
+        for model, mb in models.items():
+            p = prices.get(model)
+            if not isinstance(p, dict):
+                unpriced[model] = unpriced.get(model, 0) + mb["total"]
+                continue
+            for key, field in PRICE_FIELDS.items():
+                v = p.get(key)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    amount += mb[field] * v / 1_000_000
+        return amount, unpriced
+
+    total, unpriced = price(t["models"])
+    return {
+        "prices_declared": True,
+        "currency": econ.get("currency"),
+        "total": round(total, 6),
+        "tasks": {task: round(price(b["models"])[0], 6) for task, b in t["tasks"].items()},
+        "unattributed": round(price(t["unattributed"]["models"])[0], 6),
+        "unpriced": unpriced,
+    }
+
+
+def _cost_format_human(cost: dict) -> list[str]:
+    if not cost["prices_declared"]:
+        return ["cost: no prices declared (`economics.prices` in .gates.yaml) -- tokens only"]
+    cur = cost["currency"] or ""
+    scope = "priced models only" if cost["unpriced"] else "every recorded model priced"
+    lines = [f"cost ({cur}): {cost['total']:.4f} total ({scope})"]
+    for task in sorted(cost["tasks"]):
+        lines.append(f"  {task:<15} {cost['tasks'][task]:>12.4f}")
+    if cost["unattributed"]:
+        lines.append(f"  {'(unattributed)':<15} {cost['unattributed']:>12.4f}")
+    if cost["unpriced"]:
+        lines.append("unpriced (no `economics.prices` entry): " + ", ".join(
+            f"{model} ({n} tokens)" for model, n in sorted(cost["unpriced"].items())))
+    return lines
+
+
 def _read_ledger_rows_and_skipped(root: Path, change: str) -> tuple[list[dict], int]:
     """Like `_read_ledger_rows`, but also discloses how many lines could not
     be read as a JSON object (design D2) — a new function, not a change to
@@ -7409,6 +7926,7 @@ def _stats_change_report(root: Path, change: str, idle_gap_ms: int) -> dict:
     report = stats_from_rows(rows, idle_gap_ms)
     report["change"] = change
     report["skipped_lines"] = skipped
+    report["tokens"] = tokens_from_rows(rows)
     return report
 
 
@@ -7417,6 +7935,7 @@ def _stats_totals(reports: list[dict]) -> dict:
         "active_ms": sum(c["active_ms"] for c in reports),
         "gate_ms": sum(sum(g["total_ms"] for g in c["gates"].values()) for c in reports),
         "failed": sum(sum(g["failed"] for g in c["gates"].values()) for c in reports),
+        "tokens": sum(c["tokens"]["total"] for c in reports if "tokens" in c),
     }
 
 
@@ -7466,18 +7985,51 @@ def _stats_format_human(doc: dict) -> str:
             f"data quality: {c['skipped_lines']} unparseable line(s) skipped, "
             f"{c['rows_without_ts']} row(s) had no usable timestamp"
         )
+        if "tokens" in c:
+            lines.extend(_tokens_format_human(c["tokens"]))
+        if "cost" in c:
+            lines.extend(_cost_format_human(c["cost"]))
         lines.append("")
     lines.append(
         "limitations: the ledger records event timestamps and durations only "
         "-- it cannot say how time between events was spent (edit vs. think), "
-        "measure host contention, or account for a loop that predates the "
-        "ledger."
+        "measure host contention, count the tokens of a task with no usage "
+        "row, or account for a loop that predates the ledger."
     )
     lines.append(
         "next: see docs/gate-economics.md for how to restructure gates once "
         "the bottleneck is visible."
     )
     return "\n".join(lines) + "\n"
+
+
+def _tokens_format_human(t: dict) -> list[str]:
+    """The tokens section of one change's report (design D6). Every line of
+    it follows the time sections, and its first line starts `tokens`."""
+    if not t["recorded"]:
+        why = ("no usage rows" if not t["usage_rows"] else
+               f"{t['usage_rows']} usage row(s), none with counts")
+        return [f"tokens: not recorded for this change ({why})"]
+    u = t["unrecorded"]
+    known = len(t["tasks"]) + u["count"]
+    lines = [
+        f"tokens: {t['total']} total; {u['count']} of {known} task(s) unrecorded; "
+        f"{_stats_fmt_ms(u['uncovered_ms'])} of {_stats_fmt_ms(u['span_ms'])} not "
+        "covered by a usage window",
+        f"{'task':<15} {'tokens':>12}",
+    ]
+    for name in sorted(set(t["tasks"]) | set(u["tasks"])):
+        value = t["tasks"][name]["total"] if name in t["tasks"] else "unrecorded"
+        lines.append(f"{name:<15} {value:>12}")
+    if t["unattributed"]["total"]:
+        lines.append(f"{'(unattributed)':<15} {t['unattributed']['total']:>12}")
+    lines.append(f"{'model':<28} {'input':>11} {'output':>11} {'cache-read':>12} "
+                 f"{'cache-write':>12} {'total':>12}")
+    for model in sorted(t["models"]):
+        mb = t["models"][model]
+        lines.append(f"{model:<28} {mb['input']:>11} {mb['output']:>11} "
+                     f"{mb['cache_read']:>12} {mb['cache_write']:>12} {mb['total']:>12}")
+    return lines
 
 
 _OUTCOMES_DQ_KEYS = (
@@ -7660,6 +8212,10 @@ def cmd_stats(m: dict, root: Path, args) -> int:
         )
 
     reports = [_stats_change_report(root, c, idle_gap_ms) for c in changes]
+    if getattr(args, "cost", False):
+        # token-ledger D4: priced only on request, from the adopter's binding.
+        for report in reports:
+            report["cost"] = cost_from_tokens(report["tokens"], m)
     doc = {
         "idle_gap_ms": idle_gap_ms,
         "changes": reports,
@@ -9473,7 +10029,7 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
         return 1
     children = []
     totals = {"tasks": {"done": 0, "total": 0}, "gate_runs": 0, "gate_ms": 0,
-              "red_runs": 0, "halts": {c: 0 for c in HALT_CAUSES}}
+              "red_runs": 0, "halts": {c: 0 for c in HALT_CAUSES}, "tokens": 0}
     for kid in kids:
         rows, _skipped = _read_ledger_rows_and_skipped(root, kid["change"])
         gates_ = stats_from_rows(rows, idle_gap_ms)["gates"].values()
@@ -9482,11 +10038,12 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
                      gate_runs=sum(g["runs"] for g in gates_),
                      gate_ms=sum(g["total_ms"] for g in gates_),
                      red_runs=sum(g["failed"] for g in gates_),
-                     halts=halts)
+                     halts=halts,
+                     tokens=recorded_usage(rows))  # token-ledger D6
         children.append(entry)
         for k in ("done", "total"):
             totals["tasks"][k] += kid["tasks"][k]
-        for k in ("gate_runs", "gate_ms", "red_runs"):
+        for k in ("gate_runs", "gate_ms", "red_runs", "tokens"):
             totals[k] += entry[k]
         for cause, n in halts.items():
             totals["halts"][cause] = totals["halts"].get(cause, 0) + n
@@ -9499,13 +10056,15 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
         return ", ".join(f"{c}: {n}" for c, n in h.items() if n) or "-"
 
     lines = [f"=== epic {epic} ===",
-             f"{'child':<28} {'state':<22} {'tasks':>7}  {'runs':>4}  {'red':>4}  {'gate time':>9}  halts"]
+             f"{'child':<28} {'state':<22} {'tasks':>7}  {'runs':>4}  {'red':>4}  {'gate time':>9}  "
+             f"{'tokens':>12}  halts"]
     for c in children + [dict(totals, change="(total)", state="", halt_cause=None)]:
         t = c["tasks"]
         label = _epic_child_label(c) if c["state"] else ""
         lines.append(
             f"{c['change']:<28} {label:<22} {t['done']:>3}/{t['total']:<3}  {c['gate_runs']:>4}  "
-            f"{c['red_runs']:>4}  {_stats_fmt_ms(c['gate_ms']):>9}  {_halts(c['halts'])}"
+            f"{c['red_runs']:>4}  {_stats_fmt_ms(c['gate_ms']):>9}  {c['tokens']:>12}  "
+            f"{_halts(c['halts'])}"
         )
     print("\n".join(lines))
     return 0
@@ -9978,7 +10537,9 @@ def _cmd_discipline_other(m: dict, root: Path, args) -> int:
         status = subprocess.run(
             ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True,
         ).stdout
-        if status.strip():
+        # token-ledger D1: a usage row the commit hook or this stop's flush
+        # appended is not a task left mid-edit.
+        if _dirt_beyond_usage(root, status):
             return 1
         print(m.group(1).strip()[:120])
         return 0
@@ -10492,7 +11053,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
         if task is None:
             task = _current_task_after_handoff(rows)
         if task is not None:
-            refusal = _budget_refusal(m, rows, task)
+            refusal = _budget_refusal(m, rows, task) or _token_budget_refusal(m, rows, change, task)
             if refusal:
                 print(refusal, file=sys.stderr)
                 return 1
@@ -10801,6 +11362,35 @@ def _budget_refusal(m: dict, rows: list[dict], task: str) -> str | None:
     return "\n".join(lines)
 
 
+def token_budget(m: dict) -> int | None:
+    """The declared `loop.token-budget`, or `None` (absent or malformed --
+    a malformed value is `gates validate`'s business, and is no budget)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    v = loop.get("token-budget") if isinstance(loop, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
+
+def _token_budget_refusal(m: dict, rows: list[dict], change: str, task: str) -> str | None:
+    """token-ledger D5: the refusal once the change's recorded usage reaches
+    `loop.token-budget`, else `None`. Recorded rows only: the task in flight
+    is counted at its commit or the session stop, and the message says so."""
+    budget = token_budget(m)
+    if budget is None:
+        return None
+    spent = recorded_usage(rows)
+    if spent < budget:
+        return None
+    return "\n".join([
+        f"gatedloop: change '{change}' has reached its token budget: {spent} tokens "
+        f"recorded, loop.token-budget is {budget}. The gate was not run.",
+        "  The count is recorded usage only: the task in flight is counted at its "
+        "commit or the session stop, so it may have spent more than this says.",
+        f"  Halt with cause `budget` (`gates halt record budget --task {task} --detail "
+        "\"<what remains>\"`) and never retry: a human decides whether to raise the "
+        "budget, cheapen the gates, or split the change.",
+    ])
+
+
 # ---------- attempt notes and fresh restarts (retry-budget D3, D4) ---------
 #
 # The ledger recorded outcomes, not lessons: a resuming agent got `tasks.md`
@@ -10932,8 +11522,11 @@ def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: s
         print(f"gatedloop: could not read the working tree ({status.stderr.strip()}); "
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
+    # token-ledger D1: a usage-only ledger append (a stop flush) is not work;
+    # unblock-authored-lock D7: nor are the task's placed tests at their
+    # placed content.
     dirty, edited = _restart_dirt(root, change, rows, task,
-                                  [ln for ln in status.stdout.splitlines() if ln.strip()])
+                                  _dirt_beyond_usage(root, status.stdout))
     if edited:
         print(
             f"gatedloop: refusing to restart task {task}: its placed test(s) "
@@ -12197,6 +12790,19 @@ def main() -> int:
     sp_ar.add_argument("--change", help="change name for the row (default: current branch)")
     sp_ar.set_defaults(fn=cmd_attempt)
 
+    sp = sub.add_parser("usage", help="token usage per task: `usage` ledger rows read from the host session's transcript (counts only)")
+    use_sub = sp.add_subparsers(dest="usage_cmd", required=True)
+    sp_ur = use_sub.add_parser("record", help="append a `usage` row for the task in flight, counting the transcript since the task's start or its last counted row; exit 0 whatever the source")
+    sp_ur.add_argument("--task", help="task id (default: the task in flight; none: unattributed)")
+    sp_ur.add_argument("--transcript", help="the session transcript (a hook input's `transcript_path`); omitted: a `no-transcript` row with null counts")
+    sp_ur.add_argument("--change", help="change name for the row (default: current branch)")
+    sp_ur.add_argument("--stage", action="store_true", help="stage the ledger after appending, so the row lands in the commit being made (the commit hook's form)")
+    sp_ur.set_defaults(fn=cmd_usage)
+    sp_us = use_sub.add_parser("show", help="print a change's usage rows and the tokens per task")
+    sp_us.add_argument("--change", help="change to show (default: current branch)")
+    sp_us.add_argument("--json", action="store_true", help='one document: {"change", "rows", "tasks", "total"}')
+    sp_us.set_defaults(fn=cmd_usage)
+
     sp = sub.add_parser("task", help="the per-task tree baseline: what has changed since a task began")
     task_sub = sp.add_subparsers(dest="task_cmd", required=True)
     sp_ts = task_sub.add_parser("start", help="record the tree at task start (a `task-start` ledger row)")
@@ -12260,6 +12866,10 @@ def main() -> int:
     sp.add_argument(
         "--outcomes", action="store_true",
         help="report autonomy instead of cost: terminal state, hands-off verdict, halts by cause, interventions by kind",
+    )
+    sp.add_argument(
+        "--cost", action="store_true",
+        help="price the recorded tokens with `economics.prices` (per million tokens, one currency); unpriced models are named, and without prices tokens are printed alone",
     )
     sp.add_argument(
         "--idle-gap", type=float, default=DEFAULT_IDLE_GAP_MINUTES, dest="idle_gap",
