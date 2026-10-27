@@ -6127,6 +6127,35 @@ def _active_placements(rows: list[dict], completion: _Completion | None = None
     return latest
 
 
+def _reopened_tasks(rows: list[dict], completion: _Completion | None
+                    ) -> dict[str, tuple[int, int, dict]]:
+    """D4: `{task: (first placement row, voided placement row, {path: blob})}`
+    for each task a `test-defect` reopened after it was completed. The defect
+    voids the placement, but the voided content is committed code's test, so
+    each path keeps it as the content it must hold until the re-handed-off
+    tests are placed; and the red run recorded after the task's first
+    placement stays the record for every later placement of it."""
+    first: dict[str, int] = {}
+    latest: dict[str, tuple[int, dict]] = {}
+    reopened: dict[str, tuple[int, int, dict]] = {}
+    for i, r in enumerate(rows):
+        gate, task = r.get("gate"), r.get("task")
+        if not task:
+            continue
+        if gate == TESTS_PLACED_EVENT:
+            first.setdefault(task, i)
+            latest[task] = (i, dict((r.get("tests") or {}).get(task) or {}))
+            if task in reopened:
+                reopened[task] = (first[task], i, {})
+        elif gate in (TEST_DEFECT_EVENT, HALT_EVENT):
+            placed = latest.pop(task, None)
+            if (gate == TEST_DEFECT_EVENT and completion is not None
+                    and task in first and completion.completed(task, i)):
+                index, paths = placed if placed is not None else reopened.get(task, (0, 0, {}))[1:]
+                reopened[task] = (first[task], index, paths)
+    return reopened
+
+
 def _staged_blobs(root: Path) -> dict[str, str] | None:
     """`{path: blob}` for every stage-0 index entry, or `None` if git could
     not list the index."""
@@ -6198,6 +6227,7 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     except _LedgerRewritten as rewritten:
         return [str(rewritten)]
     active = _active_placements(rows, completion)
+    reopened = _reopened_tasks(rows, completion)
     problems: list[str] = []
     short = at[:12] if at else None
 
@@ -6211,7 +6241,13 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
         for task, paths in (r.get("tests") or {}).items():
             for path in paths:
                 expected.setdefault(path, (state["base"].get(path), None))
-    for task, (_i, paths) in sorted(active.items(), key=lambda kv: kv[1][0]):
+    # A path whose placement a defect at a completed task voided keeps that
+    # content (D4) until the task is placed again, in row order with the
+    # placements in force.
+    in_force = [(i, task, paths) for task, (i, paths) in active.items()]
+    in_force += [(i, task, paths) for task, (_first, i, paths) in reopened.items()
+                 if task not in active]
+    for _i, task, paths in sorted(in_force, key=lambda t: t[0]):
         for path, blob in paths.items():
             expected[path] = (blob, task)
     for path, (blob, task) in sorted(expected.items()):
@@ -6338,7 +6374,10 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                     f"`gates tests defect {task} --kind setup|assertion --detail ...` for the author"
                 )
             continue
-        if not any(_is_red_unit_row(r, task) for r in rows[index + 1:]):
+        # D4: a task reopened after completion keeps the red run its first
+        # placement recorded; none can exist against its committed code.
+        since = reopened[task][0] if task in reopened else index
+        if not any(_is_red_unit_row(r, task) for r in rows[since + 1:]):
             problems.append(
                 f"task {task}: no failing `unit` run is recorded after its tests "
                 f"were placed — red before green is required. Run `gates run unit "
