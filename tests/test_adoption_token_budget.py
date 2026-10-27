@@ -1,7 +1,7 @@
 """The shipped `token-budget` adoption item, end to end through `gates adoption
 status` (openspec change `token-ledger`, design D8).
 
-The item offers `loop.token-budget` from 0.8.0, and its recommended answer is
+The item offers `loop.token-budget` from 0.9.0, and its recommended answer is
 deliberately the decline: usage is recorded either way, and a budget is the
 adopter's number to choose. Declining records the decision and leaves the
 manifest as it was.
@@ -65,13 +65,13 @@ def _listed(plugin, project):
 
 class TestTokenBudgetItem(unittest.TestCase):
     def test_listed_from_0_8_0_while_no_budget_is_declared(self):
-        with installed("0.8.0", BASE) as (plugin, project):
+        with installed("0.9.0", BASE) as (plugin, project):
             self.assertIn(ITEM, _listed(plugin, project))
-        with installed("0.7.0", BASE) as (plugin, project):
+        with installed("0.8.0", BASE) as (plugin, project):
             self.assertNotIn(ITEM, _listed(plugin, project))
 
     def test_not_listed_once_a_budget_is_declared(self):
-        with installed("0.8.0", BASE + "loop:\n  token-budget: 5000000\n") as (plugin, project):
+        with installed("0.9.0", BASE + "loop:\n  token-budget: 5000000\n") as (plugin, project):
             self.assertNotIn(ITEM, _listed(plugin, project))
 
     def test_the_recommended_answer_records_only_and_leaves_the_manifest(self):
@@ -79,7 +79,7 @@ class TestTokenBudgetItem(unittest.TestCase):
         item = next(i for i in items if i["id"] == ITEM)
         self.assertEqual(item["options"][0]["answer"], "declined",
                          "record only, no budget, is the recommended answer")
-        with installed("0.8.0", BASE) as (plugin, project):
+        with installed("0.9.0", BASE) as (plugin, project):
             r = _gates(plugin, project, "adoption", "record", ITEM, "declined")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertNotIn(ITEM, _listed(plugin, project))
