@@ -6383,7 +6383,7 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                 f"were placed — red before green is required. Run `gates run unit "
                 f"--task {task}` and read why it fails before implementing (a "
                 "precondition failure, exit 75, is not a red run; placed tests "
-                f"that pass are a defect: `gates tests defect {task} --kind setup|assertion --detail ...`)"
+                f"that pass are a defect: `gates tests defect {task} --kind green --detail ...`)"
             )
 
     # 3, the other half: the task in flight has its tests placed before any
@@ -6552,9 +6552,14 @@ def _tests_check(m: dict, root: Path, args) -> int:
 # authored-test-kinds D3: each kind has its own cap per task, and past it its
 # own halt. `setup`: the test cannot run as written (path, import, fixture,
 # environment). `assertion`: it runs and asserts the wrong behaviour.
-TEST_DEFECT_KINDS = ("setup", "assertion")
-MAX_TEST_DEFECTS_BY_KIND = {"setup": 3, "assertion": 2}
-TEST_DEFECT_HALT_CAUSE = {"setup": "weak-spec", "assertion": "oracle-conflict"}
+# `green` (unblock-authored-lock D5): the placed tests passed before any
+# implementation -- an observation, not a claim that they are wrong; the
+# author re-declares the task or rewrites its tests, and a second one goes
+# to a human.
+TEST_DEFECT_KINDS = ("setup", "assertion", "green")
+MAX_TEST_DEFECTS_BY_KIND = {"setup": 3, "assertion": 2, "green": 1}
+TEST_DEFECT_HALT_CAUSE = {"setup": "weak-spec", "assertion": "oracle-conflict",
+                          "green": "oracle-conflict"}
 
 
 def test_defect_kind(row: dict) -> str:
@@ -6565,7 +6570,7 @@ def test_defect_kind(row: dict) -> str:
 
 
 def _tests_defect(m: dict, root: Path, args) -> int:
-    """`gates tests defect <N.M> --kind setup|assertion --detail` (design D5
+    """`gates tests defect <N.M> --kind setup|assertion|green --detail` (design D5
     of `split-test-author`, D3 of `authored-test-kinds`): the implementer's
     only move against an authored test it judges wrong. Each kind is capped
     per task; past a cap the defect is refused and names the halt instead."""
@@ -6576,9 +6581,10 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     if kind not in TEST_DEFECT_KINDS:
         return _tests_refuse(
             f"refusing a test defect for task {task} with no --kind — say "
-            "`--kind setup` (the test cannot run as written) or `--kind "
-            "assertion` (it asserts the wrong behaviour); the kind decides which "
-            "cap it spends."
+            "`--kind setup` (the test cannot run as written), `--kind "
+            "assertion` (it asserts the wrong behaviour) or `--kind green` (it "
+            "passed before any implementation); the kind decides which cap it "
+            "spends."
         )
     if not detail:
         return _tests_refuse(
@@ -6597,6 +6603,13 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     if len(earlier) >= cap:
         prior = "; ".join(str(r.get("detail")) for r in earlier)
         cause = TEST_DEFECT_HALT_CAUSE[kind]
+        if kind == "green":
+            return _tests_refuse(
+                f"refusing green test defect {cap + 1} for task {task} — its tests "
+                f"were green before implementation again after the author's answer "
+                f"({prior}). This goes to a human: `gates halt record {cause} --task "
+                f"{task} --detail \"test-defect {task}: still green after re-handoff\"`."
+            )
         if kind == "assertion":
             return _tests_refuse(
                 f"refusing assertion test defect {cap + 1} for task {task} — "
@@ -7512,7 +7525,7 @@ def _outcomes_format_human(doc: dict, show_aggregate: bool,
         lines.append(f"authorship:     {c['authorship']}")
         by_kind = c["test_defects_by_kind"]
         lines.append(f"test defects:   {c['test_defects']} (setup {by_kind['setup']}, "
-                     f"assertion {by_kind['assertion']})")
+                     f"assertion {by_kind['assertion']}, green {by_kind['green']})")
         lines.append(f"restarts:       {c['restarts']} ({c['restart_recovered']} recovered)")
         lines.append(f"first activity: {c['first_ts'] or 'unknown'}")
         lines.append(_outcomes_dq_prose(c["data_quality"]))
@@ -12172,10 +12185,10 @@ def main() -> int:
     sp_tk.add_argument("--change", help="change name (default: current branch; with --ref, the branch the ref names)")
     sp_tk.add_argument("--ref", help="check this commit's tree and the ledger it carries, every task, instead of the staged index")
     sp_tk.set_defaults(fn=cmd_tests)
-    sp_td = tests_sub.add_parser("defect", help="record that a task's authored tests are wrong (a `test-defect` row; per task at most three `setup`, two `assertion`)")
+    sp_td = tests_sub.add_parser("defect", help="record that a task's authored tests are wrong, or green before implementation (a `test-defect` row; per task at most three `setup`, two `assertion`, one `green`)")
     sp_td.add_argument("task", help="task id (e.g. 1.2)")
     sp_td.add_argument("--kind", required=True, choices=TEST_DEFECT_KINDS,
-                       help="setup: the test cannot run as written; assertion: it asserts the wrong behaviour")
+                       help="setup: the test cannot run as written; assertion: it asserts the wrong behaviour; green: it passed before any implementation")
     sp_td.add_argument("--detail", required=True, help="why the test is wrong")
     sp_td.add_argument("--change", help="change name (default: current branch)")
     sp_td.set_defaults(fn=cmd_tests)

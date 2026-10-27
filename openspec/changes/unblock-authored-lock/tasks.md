@@ -16,7 +16,7 @@
 
 ## 4. The `green` defect kind (D5)
 
-- [ ] 4.1 Add `green` to the defect kinds with a cap of 1 and halt cause `oracle-conflict`, with the refusal naming that halt; verify with tests that `green` spends neither other cap, that a second `green` is refused, and that `gates stats --outcomes` and `gates tests show` report it by kind
+- [x] 4.1 Add `green` to the defect kinds with a cap of 1 and halt cause `oracle-conflict`, with the refusal naming that halt; verify with tests that `green` spends neither other cap, that a second `green` is refused, and that `gates stats --outcomes` and `gates tests show` report it by kind
 - [ ] 4.2 Teach `agents/tdd-implementer.md` and `skills/tdd-apply/SKILL.md` to record `green` for placed tests that pass before implementation, and `agents/test-author.md` to answer a `green` defect (re-declare or rewrite) and a reopened completed task, stating the interim rule that a file the `unit` gate never runs is declared `CHARACTERIZATION` until `task-oracle`; update SETUP.md's defect table and command list and AUTOMATION.md's defect paragraph; verify that the convention review of the `prompts` surface reports no `stack-agnostic-prompts` finding and that `scripts/release docs` reports no gap
 
 ## 5. Attempt budget and restart (D6, D7)
