@@ -7440,6 +7440,10 @@ def stats_from_rows(rows: list[dict], idle_gap_ms: int) -> dict:
     `rows_without_ts` (design D4: disclosed, never a crash, never a silent
     drop).
     """
+    # token-ledger D6: usage rows are reported by `tokens_from_rows`, beside
+    # time -- never inside it, so the time figures are byte-identical with or
+    # without them (a stop flush would otherwise lengthen an interval).
+    rows = [r for r in rows if r.get("gate") != USAGE_EVENT]
     usable: list[tuple] = []
     rows_without_ts = 0
     for r in rows:
@@ -7761,6 +7765,77 @@ def outcomes_aggregate(per_change: list[dict], acceptance_policy: str | None = N
     }
 
 
+def _token_bucket() -> dict:
+    return {"total": 0, "models": {}}
+
+
+def _token_add(bucket: dict, tokens: dict) -> None:
+    for model, c in tokens.items():
+        if not isinstance(c, dict):
+            continue
+        mb = bucket["models"].setdefault(model, dict({f: 0 for f in TOKEN_FIELDS}, total=0))
+        for f in TOKEN_FIELDS:
+            n = _count(c.get(f))
+            mb[f] += n
+            mb["total"] += n
+            bucket["total"] += n
+
+
+def _uncovered_ms(span: tuple, windows: list[tuple]) -> int:
+    """How much of `span` (a `(start, end)` pair of datetimes) no window in
+    `windows` covers, in milliseconds."""
+    lo, hi = span
+    covered = 0
+    cursor = lo
+    for a, b in sorted((max(a, lo), min(b, hi)) for a, b in windows):
+        if b <= cursor:
+            continue
+        a = max(a, cursor)
+        covered += (b - a).total_seconds()
+        cursor = b
+    return max(0, round(((hi - lo).total_seconds() - covered) * 1000))
+
+
+def tokens_from_rows(rows: list[dict]) -> dict:
+    """Pure (design D6): a change's usage rows summed into tokens per task,
+    per model and unattributed, with what is unrecorded disclosed -- the
+    tasks the ledger knows with no counted usage row, and how much of the
+    ledger's span (first row to last) no counted window covers."""
+    usage = [r for r in rows if r.get("gate") == USAGE_EVENT]
+    counted = [r for r in usage if usage_row_counted(r)]
+    whole = _token_bucket()
+    tasks: dict[str, dict] = {}
+    unattributed = _token_bucket()
+    for r in counted:
+        _token_add(whole, r["tokens"])
+        task = r.get("task")
+        _token_add(tasks.setdefault(task, _token_bucket()) if task else unattributed, r["tokens"])
+    known = {r.get("task") for r in rows if r.get("task") and r.get("gate") != USAGE_EVENT}
+    unrecorded = sorted(t for t in known if t not in tasks)
+    stamps = sorted(k for k in (_utc_key(r.get("ts")) for r in rows) if k is not None)
+    span_ms = uncovered = 0
+    if stamps:
+        span = (stamps[0], stamps[-1])
+        span_ms = round((span[1] - span[0]).total_seconds() * 1000)
+        windows = []
+        for r in counted:
+            w = r.get("window") if isinstance(r.get("window"), dict) else {}
+            a, b = _utc_key(w.get("from")) or span[0], _utc_key(w.get("to") or r.get("ts"))
+            if b is not None:
+                windows.append((a, b))
+        uncovered = _uncovered_ms(span, windows)
+    return {
+        "recorded": bool(counted),
+        "total": whole["total"],
+        "models": whole["models"],
+        "tasks": tasks,
+        "unattributed": unattributed,
+        "unrecorded": {"tasks": unrecorded, "count": len(unrecorded),
+                       "uncovered_ms": uncovered, "span_ms": span_ms},
+        "usage_rows": len(usage),
+    }
+
+
 def _read_ledger_rows_and_skipped(root: Path, change: str) -> tuple[list[dict], int]:
     """Like `_read_ledger_rows`, but also discloses how many lines could not
     be read as a JSON object (design D2) — a new function, not a change to
@@ -7792,6 +7867,7 @@ def _stats_change_report(root: Path, change: str, idle_gap_ms: int) -> dict:
     report = stats_from_rows(rows, idle_gap_ms)
     report["change"] = change
     report["skipped_lines"] = skipped
+    report["tokens"] = tokens_from_rows(rows)
     return report
 
 
@@ -7800,6 +7876,7 @@ def _stats_totals(reports: list[dict]) -> dict:
         "active_ms": sum(c["active_ms"] for c in reports),
         "gate_ms": sum(sum(g["total_ms"] for g in c["gates"].values()) for c in reports),
         "failed": sum(sum(g["failed"] for g in c["gates"].values()) for c in reports),
+        "tokens": sum(c["tokens"]["total"] for c in reports if "tokens" in c),
     }
 
 
@@ -7849,18 +7926,49 @@ def _stats_format_human(doc: dict) -> str:
             f"data quality: {c['skipped_lines']} unparseable line(s) skipped, "
             f"{c['rows_without_ts']} row(s) had no usable timestamp"
         )
+        if "tokens" in c:
+            lines.extend(_tokens_format_human(c["tokens"]))
         lines.append("")
     lines.append(
         "limitations: the ledger records event timestamps and durations only "
         "-- it cannot say how time between events was spent (edit vs. think), "
-        "measure host contention, or account for a loop that predates the "
-        "ledger."
+        "measure host contention, count the tokens of a task with no usage "
+        "row, or account for a loop that predates the ledger."
     )
     lines.append(
         "next: see docs/gate-economics.md for how to restructure gates once "
         "the bottleneck is visible."
     )
     return "\n".join(lines) + "\n"
+
+
+def _tokens_format_human(t: dict) -> list[str]:
+    """The tokens section of one change's report (design D6). Every line of
+    it follows the time sections, and its first line starts `tokens`."""
+    if not t["recorded"]:
+        why = ("no usage rows" if not t["usage_rows"] else
+               f"{t['usage_rows']} usage row(s), none with counts")
+        return [f"tokens: not recorded for this change ({why})"]
+    u = t["unrecorded"]
+    known = len(t["tasks"]) + u["count"]
+    lines = [
+        f"tokens: {t['total']} total; {u['count']} of {known} task(s) unrecorded; "
+        f"{_stats_fmt_ms(u['uncovered_ms'])} of {_stats_fmt_ms(u['span_ms'])} not "
+        "covered by a usage window",
+        f"{'task':<15} {'tokens':>12}",
+    ]
+    for name in sorted(set(t["tasks"]) | set(u["tasks"])):
+        value = t["tasks"][name]["total"] if name in t["tasks"] else "unrecorded"
+        lines.append(f"{name:<15} {value:>12}")
+    if t["unattributed"]["total"]:
+        lines.append(f"{'(unattributed)':<15} {t['unattributed']['total']:>12}")
+    lines.append(f"{'model':<28} {'input':>11} {'output':>11} {'cache-read':>12} "
+                 f"{'cache-write':>12} {'total':>12}")
+    for model in sorted(t["models"]):
+        mb = t["models"][model]
+        lines.append(f"{model:<28} {mb['input']:>11} {mb['output']:>11} "
+                     f"{mb['cache_read']:>12} {mb['cache_write']:>12} {mb['total']:>12}")
+    return lines
 
 
 _OUTCOMES_DQ_KEYS = (
@@ -9856,7 +9964,7 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
         return 1
     children = []
     totals = {"tasks": {"done": 0, "total": 0}, "gate_runs": 0, "gate_ms": 0,
-              "red_runs": 0, "halts": {c: 0 for c in HALT_CAUSES}}
+              "red_runs": 0, "halts": {c: 0 for c in HALT_CAUSES}, "tokens": 0}
     for kid in kids:
         rows, _skipped = _read_ledger_rows_and_skipped(root, kid["change"])
         gates_ = stats_from_rows(rows, idle_gap_ms)["gates"].values()
@@ -9865,11 +9973,12 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
                      gate_runs=sum(g["runs"] for g in gates_),
                      gate_ms=sum(g["total_ms"] for g in gates_),
                      red_runs=sum(g["failed"] for g in gates_),
-                     halts=halts)
+                     halts=halts,
+                     tokens=recorded_usage(rows))  # token-ledger D6
         children.append(entry)
         for k in ("done", "total"):
             totals["tasks"][k] += kid["tasks"][k]
-        for k in ("gate_runs", "gate_ms", "red_runs"):
+        for k in ("gate_runs", "gate_ms", "red_runs", "tokens"):
             totals[k] += entry[k]
         for cause, n in halts.items():
             totals["halts"][cause] = totals["halts"].get(cause, 0) + n
@@ -9882,13 +9991,15 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
         return ", ".join(f"{c}: {n}" for c, n in h.items() if n) or "-"
 
     lines = [f"=== epic {epic} ===",
-             f"{'child':<28} {'state':<22} {'tasks':>7}  {'runs':>4}  {'red':>4}  {'gate time':>9}  halts"]
+             f"{'child':<28} {'state':<22} {'tasks':>7}  {'runs':>4}  {'red':>4}  {'gate time':>9}  "
+             f"{'tokens':>12}  halts"]
     for c in children + [dict(totals, change="(total)", state="", halt_cause=None)]:
         t = c["tasks"]
         label = _epic_child_label(c) if c["state"] else ""
         lines.append(
             f"{c['change']:<28} {label:<22} {t['done']:>3}/{t['total']:<3}  {c['gate_runs']:>4}  "
-            f"{c['red_runs']:>4}  {_stats_fmt_ms(c['gate_ms']):>9}  {_halts(c['halts'])}"
+            f"{c['red_runs']:>4}  {_stats_fmt_ms(c['gate_ms']):>9}  {c['tokens']:>12}  "
+            f"{_halts(c['halts'])}"
         )
     print("\n".join(lines))
     return 0
