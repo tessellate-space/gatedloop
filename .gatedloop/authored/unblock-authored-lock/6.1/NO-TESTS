@@ -1,1 +1,0 @@
-Runs the existing gates (ci on the finished branch, tests check --ref on the #56-shaped fixture already covered by task 3.2's test_reopened_task); adds no behaviour.

@@ -26,7 +26,7 @@
 
 ## 6. Integration
 
-- [ ] 6.1 Run `./bin/gates run ci` on the finished branch and `gates tests check --ref HEAD` on the #56-shaped fixture, and verify both exit 0
+- [x] 6.1 Run `./bin/gates run ci` on the finished branch and `gates tests check --ref HEAD` on the #56-shaped fixture, and verify both exit 0
 
 ## Workflow follow-up
 
