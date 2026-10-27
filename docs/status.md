@@ -68,19 +68,28 @@ a fully invisible install.
 The enforcement hooks load at session start. Install or update the plugin, then start
 a new session; until then the old hooks, or none, are in force.
 
-### The git layer only enforces inside Claude Code — *planned*
+### The git layer enforces only inside a declared agent session — *shipped, by design*
 
-The optional git `pre-commit` hook (`gates hook install`) is a no-op unless
-`CLAUDECODE` is set, so an agent on another host commits ungated. There is no
-git-layer check on a push to the merge target at all. `git-layer-enforcement` makes
-the agent environment declarable and adds a `pre-push` gate.
+The git hooks (`gates hook install`) act only where the agent host's variable is set:
+`discipline.agent-env` in `.gates.yaml`, `CLAUDECODE` by default. A human's own
+commits and pushes pass untouched, and an agent on another host is gated only once
+its variable is declared. The `pre-push` gate on the merge target is opt-in, and
+`--commit-only` declines it until `--push`. A hook installed before 0.8.0 is an old
+copy: re-run `gates hook install`, and `gates doctor` reports it as `stale-copy`
+until you do.
 
-### The authored-test lock is checked at commit time only — *planned*
+### The test author infers each task's kind from prose — *shipped limitation*
 
-The commit hooks refuse an edited locked test in the staged index. Nothing re-checks
-the lock at the merge head or in CI, so a test edited through a path the hooks didn't
-see (a `--no-verify`, a hand edit) reaches the merge with the lock broken.
-`test-lock-remote-check` adds the check at any commit.
+The authored-test lock is checked at every commit, again at the merge head
+(`gates merge` step 1) and at the forge (`gatedloop/tests`). Since 0.8.0 it no longer
+blocks ledger-only commits, halts at a finished task, or a finished task reopened by
+a defect, which had left finished changes unable to merge (#56, #49). What remains:
+the author decides from the plan's prose whether a task is red-then-green,
+`CHARACTERIZATION` or `NO-TESTS`, and a wrong guess shows only when the placed tests
+pass on their first run. The implementer then records a `green` defect and the author
+re-declares or rewrites. A file the `unit` gate never runs, such as an e2e step file,
+can only be declared `CHARACTERIZATION` for now. `task-oracle`, which lets the plan
+declare each task's oracle, is the next change to be proposed.
 
 ### Statuses posted from a laptop are self-reported — *shipped, by design*
 

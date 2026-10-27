@@ -220,14 +220,16 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.7.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.8.0. Read a change's
 `design.md` before touching the area it covers:
 
-- `git-layer-enforcement`, `token-ledger`: approved plans from the competitive survey (specloop PR 142),
-  implemented after the public move.
+- `token-ledger`: usage rows per task, `economics.prices`, `loop.token-budget`. Implemented
+  (draft PR #67), held for 0.9.0 because it adds manifest keys.
 - `role-commands`: `/gatedloop:planner` and `/gatedloop:orchestrator`, prompt commands over shipped
   primitives.
-- `remove-specloop-forwarders`: the 0.9.0 expiry of the earlier name's read-both and forwarder (moved from 0.8.0 by `defer-earlier-name-expiry`).
+- `remove-specloop-forwarders`: the 0.9.0 expiry of the earlier name's read-both and forwarder
+  (moved from 0.8.0 by `defer-earlier-name-expiry`); re-attest it before implementing, since
+  that move edited it.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 
