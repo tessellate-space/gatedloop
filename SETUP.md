@@ -1120,7 +1120,10 @@ Layer 2 is **opt-in** — `gates hook install` (offered by `/gatedloop:gates-ini
 wires a git `pre-commit` hook that runs the same `gates discipline check-commit` as layer
 1 at the layer where the commit object is created, regardless of how it was phrased, so a
 ledger-only or planning-only commit is allowed at its grade on every path and anything
-else needs the `ci` marker. The same install adds a git `pre-push` hook: a push that
+else needs the `ci` marker. With `--verdict-file <path>`, `check-commit` also writes one
+token to that path on success, naming the grade that allowed the commit (`ledger`,
+`planning` or `marker`); its exit status and printed text are unchanged, so a caller
+branches on the token rather than on the wording. The same install adds a git `pre-push` hook: a push that
 updates the merge target is denied unless `gates discipline check-push <sha>
 --remote-ref <ref>` finds the pushed commit proven — a `merge` ledger row records it
 (what `gates merge` writes before its one push), or the merge gate's incoming-tree

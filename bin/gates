@@ -9504,114 +9504,137 @@ def _check_push(m: dict, root: Path, sha: str, remote_ref: str | None) -> int:
     return 1
 
 
+def _write_verdict_token(args, token: str) -> None:
+    """unblock-authored-lock D1: `--verdict-file` gets exactly one token on
+    success -- `ledger`, `planning` or `marker` -- so the commit hooks branch
+    on the verdict, never on the human-readable line, which is free to
+    change. Without the flag nothing is written and nothing else differs."""
+    path = getattr(args, "verdict_file", None)
+    if path:
+        Path(path).write_text(token + "\n")
+
+
 def cmd_discipline(m: dict, root: Path, args) -> int:
     if args.discipline_cmd == "check-commit":
-        tree = args.tree
-        staged = _staged_diff_paths(root)
-        # A non-empty planning-only diff earns the lighter gate; an EMPTY
-        # diff is deliberately not treated as vacuously planning-only (design
-        # D2's own scope is "committing something that can only break
-        # planning artifacts" -- zero evidence should never be a free pass),
-        # so it falls through to the unchanged marker requirement below.
-        # Ledger rows may ride along (merge-pull-request D3: the archive
-        # commit carries the change's merge row): no marker can see them --
-        # they are stripped from every hashed tree -- so they neither earn
-        # nor cost anything. The planning part must still be non-empty.
-        planning_part = [p for p in (staged or []) if not _is_ledger_path(p)]
-        if planning_part and all(_is_planning_path(p, m) for p in planning_part):
-            # Planning-grade (design D2): manifest validation + per-staged-
-            # change-dir OpenSpec validation, instead of a green `ci` marker.
-            errs = _errors(m, root)
-            if errs:
-                print("gatedloop: commit denied — the manifest is invalid:", file=sys.stderr)
-                for e in errs:
-                    print(f"  - {e}", file=sys.stderr)
-                return 1
-            skipped: list[str] = []
-            fully_validated: list[str] = []
-            proposal_only: list[str] = []
-            for change in _staged_change_dirs(staged):
-                # The archive move's source half (design D4 of
-                # harden-hook-matching): the staged diff removed this change
-                # directory and it is no longer on the working tree -- its
-                # artifacts were validated across their whole life, the move
-                # is mechanical, and validating a directory that is no
-                # longer there can only fail for the wrong reason. Skip it,
-                # and announce the skip (fail-loud in both directions --
-                # never a silent skip).
-                if not (root / "openspec" / "changes" / change).exists():
-                    skipped.append(change)
-                    continue
-                # design D4 of worktree-native-loop: validate each staged
-                # change at the STAGE IT IS AT, not demand delta content a
-                # deliberately proposal-only backlog entry doesn't claim.
-                try:
-                    has_delta = _change_has_delta_content(root, change)
-                except _ChangeStageUnreadable as e:
+        rc, token = _check_commit_verdict(m, root, args.tree)
+        if rc == 0 and token:
+            _write_verdict_token(args, token)
+        return rc
+    return _cmd_discipline_other(m, root, args)
+
+
+def _check_commit_verdict(m: dict, root: Path, tree: str) -> tuple[int, str | None]:
+    """`discipline check-commit`'s verdict: `(exit, token)`, the token naming
+    the grade that allowed the commit (`None` on a denial)."""
+    staged = _staged_diff_paths(root)
+    # A non-empty planning-only diff earns the lighter gate; an EMPTY
+    # diff is deliberately not treated as vacuously planning-only (design
+    # D2's own scope is "committing something that can only break
+    # planning artifacts" -- zero evidence should never be a free pass),
+    # so it falls through to the unchanged marker requirement below.
+    # Ledger rows may ride along (merge-pull-request D3: the archive
+    # commit carries the change's merge row): no marker can see them --
+    # they are stripped from every hashed tree -- so they neither earn
+    # nor cost anything. The planning part must still be non-empty.
+    planning_part = [p for p in (staged or []) if not _is_ledger_path(p)]
+    if planning_part and all(_is_planning_path(p, m) for p in planning_part):
+        # Planning-grade (design D2): manifest validation + per-staged-
+        # change-dir OpenSpec validation, instead of a green `ci` marker.
+        errs = _errors(m, root)
+        if errs:
+            print("gatedloop: commit denied — the manifest is invalid:", file=sys.stderr)
+            for e in errs:
+                print(f"  - {e}", file=sys.stderr)
+            return 1, None
+        skipped: list[str] = []
+        fully_validated: list[str] = []
+        proposal_only: list[str] = []
+        for change in _staged_change_dirs(staged):
+            # The archive move's source half (design D4 of
+            # harden-hook-matching): the staged diff removed this change
+            # directory and it is no longer on the working tree -- its
+            # artifacts were validated across their whole life, the move
+            # is mechanical, and validating a directory that is no
+            # longer there can only fail for the wrong reason. Skip it,
+            # and announce the skip (fail-loud in both directions --
+            # never a silent skip).
+            if not (root / "openspec" / "changes" / change).exists():
+                skipped.append(change)
+                continue
+            # design D4 of worktree-native-loop: validate each staged
+            # change at the STAGE IT IS AT, not demand delta content a
+            # deliberately proposal-only backlog entry doesn't claim.
+            try:
+                has_delta = _change_has_delta_content(root, change)
+            except _ChangeStageUnreadable as e:
+                print(
+                    f"gatedloop: commit denied — change '{change}'s stage "
+                    f"could not be determined: {e}",
+                    file=sys.stderr,
+                )
+                return 1, None
+            if has_delta:
+                r = _openspec(["validate", change, "--type", "change", "--json"],
+                              root, capture_output=True, text=True)
+                if r.returncode != 0:
                     print(
-                        f"gatedloop: commit denied — change '{change}'s stage "
-                        f"could not be determined: {e}",
+                        f"gatedloop: commit denied — `openspec validate {change}` failed:\n"
+                        f"{r.stdout}{r.stderr}",
                         file=sys.stderr,
                     )
-                    return 1
-                if has_delta:
-                    r = _openspec(["validate", change, "--type", "change", "--json"],
-                                  root, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        print(
-                            f"gatedloop: commit denied — `openspec validate {change}` failed:\n"
-                            f"{r.stdout}{r.stderr}",
-                            file=sys.stderr,
-                        )
-                        return 1
-                    fully_validated.append(change)
-                else:
-                    r = _openspec(["status", "--change", change, "--json"],
-                                  root, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        print(
-                            f"gatedloop: commit denied — change '{change}' has no delta "
-                            f"content yet (proposal-only), and its status could not be "
-                            f"read (`openspec status --change {change} --json` failed):\n"
-                            f"{r.stdout}{r.stderr}",
-                            file=sys.stderr,
-                        )
-                        return 1
-                    proposal_only.append(change)
-            notes: list[str] = []
-            if fully_validated:
-                notes.append("full: " + ", ".join(fully_validated))
-            if proposal_only:
-                notes.append("proposal-only: " + ", ".join(proposal_only))
-            stage_note = f" ({'; '.join(notes)})" if notes else ""
-            skip_note = ""
-            if skipped:
-                names = ", ".join(skipped)
-                skip_note = (
-                    f" — skipped validation for archived-away change(s) "
-                    f"{names} (directory no longer present on the working tree)"
-                )
-            ledger_count = len(staged) - len(planning_part)
-            ledger_note = (
-                f" (with {ledger_count} ledger path(s), which no marker sees)" if ledger_count else ""
+                    return 1, None
+                fully_validated.append(change)
+            else:
+                r = _openspec(["status", "--change", change, "--json"],
+                              root, capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(
+                        f"gatedloop: commit denied — change '{change}' has no delta "
+                        f"content yet (proposal-only), and its status could not be "
+                        f"read (`openspec status --change {change} --json` failed):\n"
+                        f"{r.stdout}{r.stderr}",
+                        file=sys.stderr,
+                    )
+                    return 1, None
+                proposal_only.append(change)
+        notes: list[str] = []
+        if fully_validated:
+            notes.append("full: " + ", ".join(fully_validated))
+        if proposal_only:
+            notes.append("proposal-only: " + ", ".join(proposal_only))
+        stage_note = f" ({'; '.join(notes)})" if notes else ""
+        skip_note = ""
+        if skipped:
+            names = ", ".join(skipped)
+            skip_note = (
+                f" — skipped validation for archived-away change(s) "
+                f"{names} (directory no longer present on the working tree)"
             )
-            print(
-                f"gatedloop: planning-grade commit allowed{stage_note}{ledger_note} — {tree}{skip_note}"
-            )
-            return 0
-        if staged and all(_is_ledger_path(p) for p in staged):
-            # Ledger-grade (design D5): a non-empty, ledger-only staged diff
-            # is allowed outright -- the verdict is printed, never silent
-            # (fail-loud-gates). An EMPTY diff still falls through to the
-            # full requirement below (unchanged "zero evidence is never a
-            # free pass" stance); one non-ledger path anywhere removes this
-            # discount entirely.
-            print(f"gatedloop: ledger-grade commit allowed (staged diff is entirely "
-                  f"`.gatedloop/runs/**`) — {tree}")
-            return 0
-        # Mixed, empty, or the staged diff couldn't be read: the full
-        # requirement.
-        return _check_marker_and_report(root, "ci", tree)
+        ledger_count = len(staged) - len(planning_part)
+        ledger_note = (
+            f" (with {ledger_count} ledger path(s), which no marker sees)" if ledger_count else ""
+        )
+        print(
+            f"gatedloop: planning-grade commit allowed{stage_note}{ledger_note} — {tree}{skip_note}"
+        )
+        return 0, "planning"
+    if staged and all(_is_ledger_path(p) for p in staged):
+        # Ledger-grade (design D5): a non-empty, ledger-only staged diff
+        # is allowed outright -- the verdict is printed, never silent
+        # (fail-loud-gates). An EMPTY diff still falls through to the
+        # full requirement below (unchanged "zero evidence is never a
+        # free pass" stance); one non-ledger path anywhere removes this
+        # discount entirely.
+        print(f"gatedloop: ledger-grade commit allowed (staged diff is entirely "
+              f"`.gatedloop/runs/**`) — {tree}")
+        return 0, "ledger"
+    # Mixed, empty, or the staged diff couldn't be read: the full
+    # requirement.
+    rc = _check_marker_and_report(root, "ci", tree)
+    return rc, ("marker" if rc == 0 else None)
+
+
+def _cmd_discipline_other(m: dict, root: Path, args) -> int:
 
     if args.discipline_cmd == "check-propose":
         rel = args.path
@@ -12143,6 +12166,8 @@ def main() -> int:
     disc_sub = sp.add_subparsers(dest="discipline_cmd", required=True)
     sp_commit = disc_sub.add_parser("check-commit", help="planning-grade for a planning-only staged diff (D2), else the full ci marker check")
     sp_commit.add_argument("tree")
+    sp_commit.add_argument("--verdict-file", dest="verdict_file", default=None,
+                           help="on success, write one token naming the grade that allowed the commit: ledger, planning or marker (unblock-authored-lock D1)")
     sp_commit.set_defaults(fn=cmd_discipline)
     sp_prop = disc_sub.add_parser("check-propose", help="exit 1 if <path> is a plan artifact of a change in implementation (off the target or a based plan/* branch); with --scaffold, if the branch is neither")
     sp_prop.add_argument("path", nargs="?", default=None, help="omit with --scaffold")

@@ -2,7 +2,7 @@
 
 ## 1. Ledger-grade commits skip the lock (D1)
 
-- [ ] 1.1 Add `--verdict-file <path>` to `gates discipline check-commit`, writing one token (`ledger`, `planning`, `marker`) on success with exit status and printed text unchanged; verify with tests that assert the token for each verdict and that output without the flag is byte-identical to today's
+- [x] 1.1 Add `--verdict-file <path>` to `gates discipline check-commit`, writing one token (`ledger`, `planning`, `marker`) on success with exit status and printed text unchanged; verify with tests that assert the token for each verdict and that output without the flag is byte-identical to today's
 - [ ] 1.2 Make `hooks/gate-commit.sh` and `templates/git-hooks/pre-commit` skip `gates tests check` when the token is `ledger`, and update AUTOMATION.md's lock description; verify with real-repo tests in which a ledger-only commit is allowed by both hooks while the lock would fail, and a ledger row staged with an edited placed test is still refused
 
 ## 2. Completion is ordered by commits (D2)
