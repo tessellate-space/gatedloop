@@ -1,9 +1,15 @@
 """`gates hook install` refreshes its own stale direct copy
-(openspec change `adoption-followups`, design D3; loop-enforcement delta).
+(openspec change `adoption-followups`, design D3; loop-enforcement delta), of
+either git-layer hook (`git-layer-enforcement`, design D2 and D4).
+
+A copy is stale when its body, with the recorded shim-path line normalized,
+differs from the shipped template — or when the shim path it records no
+longer exists and neither the plugin root nor PATH resolves the shim.
 
 Stdlib only, per `zero-dep-shim`. Black-box: the shim runs as a subprocess
-in throwaway git repos, the way gates-init calls it. Nothing here touches
-this repository's own `.git/hooks`.
+in throwaway git repos, the way gates-init calls it, in an environment where
+only a recorded path could resolve the shim. Nothing here touches this
+repository's own `.git/hooks`.
 
 Run with:  python3 -m unittest discover -s tests
 """
@@ -16,33 +22,40 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _hook_fixture import (EDITED_COPY, FOREIGN_HOOK, GATES_SHIM, OLDER_COPY,  # noqa: E402
-                           TEMPLATE, default_hook, init_repo, write_hook)
+                           OLDER_PUSH_COPY, PUSH_TEMPLATE, TEMPLATE, default_hook,
+                           env_without_gates, init_repo, normalized, recorded_path,
+                           with_recorded, write_hook)
+
+COPIES = (("pre-commit", TEMPLATE, OLDER_COPY), ("pre-push", PUSH_TEMPLATE, OLDER_PUSH_COPY))
 
 
 def _install(root):
     return subprocess.run([sys.executable, str(GATES_SHIM), "hook", "install"], cwd=root,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, env=env_without_gates())
 
 
-def _backup(root):
-    return root / ".git" / "hooks" / "pre-commit.gatedloop-prev"
+def _backup(root, name="pre-commit"):
+    return root / ".git" / "hooks" / f"{name}.gatedloop-prev"
 
 
 class TestRefreshAStaleCopy(unittest.TestCase):
     """Scenario "A stale direct copy is present": back up, replace, keep it
-    executable, name both paths, exit 0."""
+    executable, name both paths, exit 0 — for either hook."""
 
     def test_stale_copy_is_replaced_and_backed_up(self):
         # Fails if the installer still answered "already installed" for an
         # older copy: the defect that made the upgrade's refresh a no-op.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            write_hook(default_hook(root), OLDER_COPY)
-            result = _install(root)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(default_hook(root).read_bytes(), TEMPLATE.read_bytes())
-            self.assertEqual(_backup(root).read_text(), OLDER_COPY)
+        for name, template, older in COPIES:
+            with self.subTest(hook=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                init_repo(root)
+                write_hook(default_hook(root, name), older)
+                result = _install(root)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                body = default_hook(root, name).read_text()
+                self.assertEqual(normalized(body), template.read_text())
+                self.assertEqual(recorded_path(body), str(GATES_SHIM.resolve()))
+                self.assertEqual(_backup(root, name).read_text(), older)
 
     def test_refreshed_hook_stays_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,7 +90,24 @@ class TestRefreshAStaleCopy(unittest.TestCase):
             second = _install(root)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual(_backup(root).read_text(), EDITED_COPY)
-            self.assertEqual(default_hook(root).read_bytes(), TEMPLATE.read_bytes())
+            self.assertEqual(normalized(default_hook(root).read_text()), TEMPLATE.read_text())
+
+    def test_a_copy_whose_recorded_shim_is_gone_is_refreshed_with_the_current_path(self):
+        # Scenario "The recorded shim path is gone": the body is current, but
+        # the one path that would find the shim outside a plugin no longer
+        # exists, so the hook could never enforce. The refresh records the
+        # installing shim instead.
+        for name, template, _older in COPIES:
+            with self.subTest(hook=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                init_repo(root)
+                gone = with_recorded(template.read_text(), Path(tmp) / "moved" / "bin" / "gates")
+                write_hook(default_hook(root, name), gone)
+                result = _install(root)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(recorded_path(default_hook(root, name).read_text()),
+                                 str(GATES_SHIM.resolve()))
+                self.assertEqual(_backup(root, name).read_text(), gone)
 
 
 class TestNothingElseIsReplaced(unittest.TestCase):
@@ -85,15 +115,19 @@ class TestNothingElseIsReplaced(unittest.TestCase):
     gatedloop's own stale copy: no rewrite, and no backup either."""
 
     def test_current_copy_is_nothing_to_do(self):
-        # Scenario "A current direct copy is present".
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            write_hook(default_hook(root), TEMPLATE.read_bytes())
-            result = _install(root)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("nothing to do", result.stdout)
-            self.assertFalse(_backup(root).exists(), "a current copy must not be backed up")
+        # Scenario "A current direct copy is present": the shipped body, its
+        # recorded path empty or naming a shim that exists.
+        for label, body in (("empty path", TEMPLATE.read_text()),
+                            ("existing path", with_recorded(TEMPLATE.read_text(), GATES_SHIM))):
+            with self.subTest(copy=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                init_repo(root)
+                write_hook(default_hook(root), body)
+                result = _install(root)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("nothing to do", result.stdout)
+                self.assertEqual(default_hook(root).read_text(), body)
+                self.assertFalse(_backup(root).exists(), "a current copy must not be backed up")
 
     def test_foreign_hook_is_still_refused_and_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,4 +1,5 @@
-"""Tests for `gates hook install` (enforce-at-the-effect §2, design D4).
+"""Tests for `gates hook install` (enforce-at-the-effect §2, design D4; both
+git-layer hooks since `git-layer-enforcement`, design D2 and D4).
 
 Stdlib only, per `zero-dep-shim`. The install logic is exercised two ways:
 black-box as a subprocess in throwaway git repos (matching how gates-init calls
@@ -18,13 +19,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-GATES_SHIM = REPO / "bin" / "gates"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _hook_fixture import (FOREIGN_HOOK, GATES_SHIM, PUSH_TEMPLATE, TEMPLATE,  # noqa: E402
+                           default_hook, env_without_gates, normalized, recorded_path,
+                           write_hook)
 
 _loader = importlib.machinery.SourceFileLoader("gates_shim", str(GATES_SHIM))
 _spec = importlib.util.spec_from_loader(_loader.name, _loader)
 gates = importlib.util.module_from_spec(_spec)
 _loader.exec_module(gates)
+
+HOOKS = (("pre-commit", TEMPLATE), ("pre-push", PUSH_TEMPLATE))
 
 
 def _git(cwd, *args):
@@ -34,7 +39,7 @@ def _git(cwd, *args):
 def _run_install(root):
     return subprocess.run(
         [sys.executable, str(GATES_SHIM), "hook", "install"],
-        cwd=root, capture_output=True, text=True,
+        cwd=root, capture_output=True, text=True, env=env_without_gates(), timeout=60,
     )
 
 
@@ -45,64 +50,81 @@ def _init_repo(root):
 
 
 class TestInstallNothingPresent(unittest.TestCase):
-    """Task 2.3: no hook and no manager → install the shipped template directly."""
+    """Task 2.3, and scenario "A fresh install": no hook and no manager →
+    both shipped templates are installed directly."""
 
-    def test_installs_template_executable(self):
+    def test_installs_both_templates_executable_with_the_shim_path(self):
+        # Fails if only the commit hook were installed, if a hook were not
+        # executable (git silently skips it), if the body drifted from the
+        # shipped template, or if the installing shim's path were not
+        # recorded (design D2: the last fallback outside a plugin).
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _init_repo(root)
             r = _run_install(root)
             self.assertEqual(r.returncode, 0, r.stderr)
-            hook = root / ".git" / "hooks" / "pre-commit"
-            self.assertTrue(hook.exists())
-            self.assertTrue(hook.stat().st_mode & 0o111, "hook must be executable")
-            body = hook.read_text()
-            self.assertIn("discipline check-commit", body)
-            self.assertIn("CLAUDECODE", body, "must be env-scoped (design D2)")
+            for name, template in HOOKS:
+                with self.subTest(hook=name):
+                    hook = default_hook(root, name)
+                    self.assertTrue(hook.exists())
+                    self.assertTrue(hook.stat().st_mode & 0o111, "hook must be executable")
+                    body = hook.read_text()
+                    self.assertEqual(normalized(body), template.read_text())
+                    self.assertEqual(recorded_path(body), str(GATES_SHIM.resolve()))
+                    self.assertIn("discipline agent-session", body,
+                                  "must be scoped to a declared agent session (D1)")
 
     def test_idempotent_second_run_no_op(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _init_repo(root)
             self.assertEqual(_run_install(root).returncode, 0)
-            first = (root / ".git" / "hooks" / "pre-commit").read_text()
+            first = {name: default_hook(root, name).read_text() for name, _t in HOOKS}
             r2 = _run_install(root)
             self.assertEqual(r2.returncode, 0, r2.stderr)
             self.assertIn("already installed", r2.stdout)
-            second = (root / ".git" / "hooks" / "pre-commit").read_text()
-            self.assertEqual(first, second, "a second install must not rewrite the hook")
+            second = {name: default_hook(root, name).read_text() for name, _t in HOOKS}
+            self.assertEqual(first, second, "a second install must not rewrite a hook")
 
 
 class TestComposeWithHusky(unittest.TestCase):
-    """Task 2.2 / 2.5: a manager present → composes, preserving existing content."""
+    """Task 2.2 / 2.5: a manager present → composes both hooks, preserving
+    existing content."""
 
-    def test_appends_to_existing_husky_hook_without_clobber(self):
+    BEGIN = {"pre-commit": gates.HOOK_BEGIN, "pre-push": gates.PUSH_HOOK_BEGIN}
+
+    def test_appends_to_existing_husky_hooks_without_clobber(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _init_repo(root)
             husky = root / ".husky"
             husky.mkdir()
-            hook = husky / "pre-commit"
-            hook.write_text("#!/usr/bin/env sh\necho existing-husky-step\n")
+            for name, _t in HOOKS:
+                (husky / name).write_text(f"#!/usr/bin/env sh\necho existing-{name}-step\n")
 
             r = _run_install(root)
             self.assertEqual(r.returncode, 0, r.stderr)
-            body = hook.read_text()
-            self.assertIn("echo existing-husky-step", body, "existing content preserved")
-            self.assertIn(gates.HOOK_BEGIN, body, "our block composed in")
-            # A manager owns the hook path; do not also write .git/hooks/pre-commit.
-            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
+            for name, _t in HOOKS:
+                with self.subTest(hook=name):
+                    body = (husky / name).read_text()
+                    self.assertIn(f"echo existing-{name}-step", body, "existing content preserved")
+                    self.assertIn(self.BEGIN[name], body, "our block composed in")
+                    # A manager owns the hook path; do not also write .git/hooks/<name>.
+                    self.assertFalse(default_hook(root, name).exists())
 
-    def test_creates_husky_hook_when_absent(self):
+    def test_creates_husky_hooks_when_absent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _init_repo(root)
             (root / ".husky").mkdir()  # manager present, no per-hook file yet
             r = _run_install(root)
             self.assertEqual(r.returncode, 0, r.stderr)
-            hook = root / ".husky" / "pre-commit"
-            self.assertTrue(hook.exists())
-            self.assertIn(gates.HOOK_BEGIN, hook.read_text())
+            for name, _t in HOOKS:
+                with self.subTest(hook=name):
+                    hook = root / ".husky" / name
+                    self.assertTrue(hook.exists())
+                    self.assertTrue(hook.stat().st_mode & 0o111)
+                    self.assertIn(self.BEGIN[name], hook.read_text())
 
     def test_idempotent_compose(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,34 +132,31 @@ class TestComposeWithHusky(unittest.TestCase):
             _init_repo(root)
             (root / ".husky").mkdir()
             self.assertEqual(_run_install(root).returncode, 0)
-            after_first = (root / ".husky" / "pre-commit").read_text()
+            after_first = {name: (root / ".husky" / name).read_text() for name, _t in HOOKS}
             r2 = _run_install(root)
             self.assertEqual(r2.returncode, 0)
             self.assertIn("already installed", r2.stdout)
-            self.assertEqual(after_first, (root / ".husky" / "pre-commit").read_text())
+            self.assertEqual(after_first,
+                             {name: (root / ".husky" / name).read_text() for name, _t in HOOKS})
 
 
 class TestRefuseAndInstruct(unittest.TestCase):
-    """Spec: an unclassifiable topology → refuse-and-instruct, never clobber."""
+    """Spec: an unclassifiable topology → refuse-and-instruct, never clobber;
+    one run instructs for both hooks."""
 
     def _assert_refuses_unchanged(self, root, guarded_file):
         before = guarded_file.read_text() if guarded_file.exists() else None
         r = _run_install(root)
         self.assertEqual(r.returncode, 1, "refuse must be a non-zero exit (fail-loud)")
         self.assertIn("refusing", r.stderr.lower())
-        # The instruction prints the exact block to add by hand.
+        # The instruction prints the exact block to add by hand, for each hook.
         self.assertIn(gates.HOOK_BEGIN, r.stderr)
+        self.assertIn(gates.PUSH_HOOK_BEGIN, r.stderr)
         if before is not None:
             self.assertEqual(before, guarded_file.read_text(), "must not modify the existing hook")
-
-    def test_bare_foreign_hook_is_not_touched(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _init_repo(root)
-            hook = root / ".git" / "hooks" / "pre-commit"
-            hook.write_text("#!/bin/sh\necho someone-elses-hook\nexit 0\n")
-            hook.chmod(0o755)
-            self._assert_refuses_unchanged(root, hook)
+        for name, _t in HOOKS:
+            self.assertFalse(default_hook(root, name).exists(),
+                             f"a manager owns the path; nothing goes in .git/hooks/{name}")
 
     def test_lefthook_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -145,7 +164,6 @@ class TestRefuseAndInstruct(unittest.TestCase):
             _init_repo(root)
             (root / "lefthook.yml").write_text("pre-commit:\n  commands:\n    lint:\n      run: echo hi\n")
             self._assert_refuses_unchanged(root, root / "lefthook.yml")
-            self.assertFalse((root / ".git" / "hooks" / "pre-commit").exists())
 
     def test_pre_commit_framework_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,7 +181,26 @@ class TestRefuseAndInstruct(unittest.TestCase):
             r = _run_install(root)
             self.assertEqual(r.returncode, 1, r.stdout)
             self.assertIn("refusing", r.stderr.lower())
-            self.assertFalse((root / "myhooks" / "pre-commit").exists())
+            for name, _t in HOOKS:
+                self.assertFalse((root / "myhooks" / name).exists())
+
+    def test_a_foreign_hook_is_refused_and_the_other_hook_still_installed(self):
+        # Owner detection is per hook path: a foreign bare hook of one kind
+        # is refused and left as it is, and the absent other hook is
+        # installed. Either way round, the run exits 1, because one check is
+        # not in place.
+        for foreign, other in (("pre-commit", "pre-push"), ("pre-push", "pre-commit")):
+            with self.subTest(foreign=foreign), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                _init_repo(root)
+                write_hook(default_hook(root, foreign), FOREIGN_HOOK)
+                r = _run_install(root)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("refusing", r.stderr.lower())
+                self.assertEqual(default_hook(root, foreign).read_text(), FOREIGN_HOOK)
+                template = dict(HOOKS)[other]
+                self.assertEqual(normalized(default_hook(root, other).read_text()),
+                                 template.read_text())
 
 
 class TestHookOwnerDetection(unittest.TestCase):
@@ -176,6 +213,17 @@ class TestHookOwnerDetection(unittest.TestCase):
             self.assertEqual(gates._detect_hook_owner(root)[0], "none")
             (root / ".husky").mkdir()
             self.assertEqual(gates._detect_hook_owner(root)[0], "husky")
+
+    def test_the_push_hook_path_follows_the_same_owner(self):
+        # Fails if the push hook were looked for at the commit hook's path.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_repo(root)
+            kind, path = gates._detect_hook_owner(root, "pre-push")
+            self.assertEqual((kind, path.name), ("none", "pre-push"))
+            (root / ".husky").mkdir()
+            kind, path = gates._detect_hook_owner(root, "pre-push")
+            self.assertEqual((kind, path), ("husky", root / ".husky" / "pre-push"))
 
     def test_a_copy_of_the_pre_0_5_template_is_still_ours(self):
         """lock-and-ledger-hygiene D4 changed the template's check from

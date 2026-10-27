@@ -11,27 +11,44 @@
 # planning-grade commits are allowed on every path, and anything else needs the
 # O(1) `ci` marker compare — it NEVER re-runs `ci` under a hook timeout.
 #
-# Env-scoped (design D2): enforces ONLY inside a Claude Code session
-# (`CLAUDECODE` set, inherited by every subprocess the session spawns). A human
-# terminal, IDE, or CI runner has the variable absent and sees a transparent
-# no-op — the gate exists to hold an autonomous loop to its invariant, and
-# outside a session no such loop is running the commit. This fails toward the
-# human no-op, never toward blocking a human (design Risks).
+# Scoped to a declared agent session (git-layer-enforcement D1): `gates
+# discipline agent-session` exits 0 when a variable `discipline.agent-env`
+# lists is set (default `[CLAUDECODE]`, inherited by every subprocess the
+# session spawns), else 1, and on 1 this hook is a transparent no-op. A human
+# terminal, IDE, or CI runner has no such variable — the gate exists to hold an
+# autonomous loop to its invariant, and outside a session no such loop is
+# running the commit. This fails toward the human no-op, never toward blocking
+# a human (design Risks). It is deliberate scope, not a silent skip of
+# `fail-loud-gates`.
 set -uo pipefail
 
-# Outside a session there is no loop to hold to the invariant — clean pass,
-# not a skipped-due check (design D2: this is deliberate scope, not a silent
-# skip of `fail-loud-gates`).
-[ -n "${CLAUDECODE:-}" ] || exit 0
-
-# Resolve the shim via ${CLAUDE_PLUGIN_ROOT} (plugin-relative-paths); the plugin
-# also puts bin/ on PATH, so `gates` is the fallback. This hook is a COPY under
-# .git/hooks — it is not inside the plugin, so a "../bin/gates" escape would not
-# resolve; only the env var or PATH can find the shim.
+# Resolve the shim (git-layer-enforcement D2): ${CLAUDE_PLUGIN_ROOT}
+# (plugin-relative-paths), then `gates` on PATH, then the path `gates hook
+# install` recorded on the line below — the one line it writes into this copy.
+# This hook is a COPY under .git/hooks, not inside the plugin, so a
+# "../bin/gates" escape would not resolve; the recorded path lets it find the
+# shim on a host with no plugin environment at all.
+GATES_INSTALLED=''
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/bin/gates" ]; then
   GATES="${CLAUDE_PLUGIN_ROOT}/bin/gates"
-else
+elif command -v gates >/dev/null 2>&1; then
   GATES="gates"
+elif [ -n "${GATES_INSTALLED}" ] && [ -x "${GATES_INSTALLED}" ]; then
+  GATES="${GATES_INSTALLED}"
+else
+  # Nothing finds the shim, so a session cannot be told from a human: fail
+  # toward the human (design Risks). `gates doctor` reports this copy stale.
+  echo "gatedloop: the pre-commit hook could not resolve the gates shim (no plugin root, no \`gates\` on PATH, no recorded path) — the commit is not gated. Run \`gates hook install\` to record the current path." >&2
+  exit 0
+fi
+
+"${GATES}" discipline agent-session </dev/null
+session=$?
+if [ "${session}" -eq 1 ]; then
+  exit 0
+elif [ "${session}" -ne 0 ]; then
+  echo "gatedloop: commit denied — \`gates discipline agent-session\` failed (exit ${session}), so whether this commit is gated cannot be decided." >&2
+  exit 1
 fi
 
 # hook-correctness D7: a branch another worktree also holds is refused before

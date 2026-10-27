@@ -66,7 +66,7 @@ the layer catches and what defeats it.
 | Layer | Mechanism | Catches | Defeated by |
 |---|---|---|---|
 | 1. `PreToolUse` string match (today) | `case "$cmd" in *"git commit"*` → `gate-marker check` | the honest direct `git commit` call | any indirection — `python -c`, a script, `sh -c`, a git library (**observed**, #2) |
-| 2. Git `pre-commit` hook | `gates discipline check-commit` at the git layer (layer 1's own check), **inside a session only** | **every** commit-creating path (python, scripts, libraries, `sh -c`) | `git commit --no-verify`; `env -u CLAUDECODE`; a stripped environment |
+| 2. Git `pre-commit` and `pre-push` hooks | `gates discipline check-commit` at the git layer (layer 1's own check), and `gates discipline check-push` for a push of the merge target, **inside a declared agent session only** | **every** commit-creating path (python, scripts, libraries, `sh -c`), on any host; a raw merge of the target pushed by hand | `--no-verify`; unsetting the `discipline.agent-env` variables; a stripped environment |
 | 3. Post-hoc reflog audit | `Stop` hook joins each new commit's tree to the ledger's green-`ci` rows | any commit with no green record — everything that slipped layers 1–2 | nothing *hides* it; it is detection, not prevention — it taints and blocks the merge but cannot un-create the commit |
 | 4. Forge branch protection | adopter-configured required checks/reviews on the default branch | `gh pr merge` and the forge-UI merge, which have no git-hook equivalent | a repo with no branch protection configured (documented adopter requirement) |
 
@@ -85,9 +85,19 @@ wall with one clearly-marked door that is then reported."
   `ci` marker compare). A planning diff that also carries ledger rows stays
   planning-grade (merge-pull-request D3): the ledger is invisible to every marker, so it
   neither earns nor costs the discount.
-  It enforces **only inside a Claude Code session** (`CLAUDECODE` present, inherited by
-  every subprocess including the #2 Python path); a human terminal, IDE, or CI runner
-  sees a transparent no-op. This is not a `fail-loud-gates` violation: outside a session
+  The same install adds a git `pre-push` hook (`git-layer-enforcement` D3): a push that
+  updates the merge target is denied unless `gates discipline check-push` finds the
+  pushed commit proven — a `merge` ledger row records it (or records a commit it
+  carries only ledger and planning paths beyond, which is what `gates merge`'s own
+  push is), or the merge gate's incoming-tree checks hold for its tree: a `live-check`
+  and a full `ci` marker, `verify` where declared, and for each change it carries in,
+  no unresolved taint, the authored-test lock and acceptance where a policy is
+  declared. A denial names each unmet check and `gates merge <change>` as the remedy.
+  Other branches and deletions pass silently, and no gate runs inside either hook.
+  Both hooks enforce **only inside a declared agent session**: `gates discipline
+  agent-session` exits 0 when a variable `discipline.agent-env` lists is set (default
+  `[CLAUDECODE]`, inherited by every subprocess including the #2 Python path); a human
+  terminal, IDE, or CI runner sees a transparent no-op. This is not a `fail-loud-gates` violation: outside a session
   the check is not *due* — the gate exists to hold an autonomous loop to its invariant,
   and no loop is running a human's commit. The installer composes with a hook manager
   (husky, lefthook, the pre-commit framework, a `core.hooksPath` redirect, or a bare hook)
@@ -102,6 +112,44 @@ wall with one clearly-marked door that is then reported."
   `integration.mode: pull-request`, the forge's own branch protection is the only thing
   covering `gh pr merge`; see `SETUP.md`'s "Branch protection is required for
   pull-request integration modes."
+
+### What holds where: enforcement per layer and host (`git-layer-enforcement`)
+
+The shim, the manifest and the ledger run on any host. Enforcement sits at three
+layers, and only the first is tied to Claude Code:
+
+- **Tool hook**: the `hooks/hooks.json` hooks. They fire only in a Claude Code session.
+- **Git layer**: the `pre-commit` and `pre-push` hooks `gates hook install` writes.
+  They fire on any host, inside a declared agent session: `discipline.agent-env` in
+  `.gates.yaml` lists the variables that mark one (default `[CLAUDECODE]`), and
+  `gates discipline agent-session` makes the decision for both hooks. An adopter on
+  another host adds that host's variable; it is the one binding another host needs.
+- **Forge**: branch protection requiring the `gatedloop/*` commit statuses
+  (`gates marker publish`), on any forge that has statuses.
+
+| Guarantee | Tool hook (Claude Code) | Git layer (any host, agent session) | Forge (branch protection, statuses) |
+|---|---|---|---|
+| A commit only on a green `ci` for its tree | `PreToolUse` on `git commit` | `pre-commit`: `discipline check-commit` | `gatedloop/ci` required |
+| Authored tests stay locked, and run red first | `PreToolUse` on `git commit` | `pre-commit`: `tests check` | `gatedloop/tests` required |
+| A merge into the target only on a proven head | merge gate (`gate-merge.sh`) | not gated: a raw `git merge` is caught at the push instead (`pre-merge-commit` misses fast-forwards) | required statuses on the PR head |
+| A push of the target only of a proven commit | none | `pre-push`: `discipline check-push` | branch protection on the target |
+| Implementation only after an approved plan | `PreToolUse` on `git checkout -b` | none | none |
+| A change scaffolded only on an allowed branch | `PreToolUse` on `openspec new change` | none | none |
+| No plan writes during implementation | `PreToolUse` on writes | none | none |
+| Ungated commits detected after the fact (audit, taint) | the `Stop` audit records the taint | a recorded taint refuses the push (`check-push`) | none |
+| Forge merges (`gh pr merge`, the web UI) | none | none | branch protection only |
+
+**On a host other than Claude Code** the shim, the ledger, the commit gate, the push
+gate and the forge statuses hold. The tool-hook denials do not: implement after
+approval, the scaffold and propose discipline, archive after merge, and the `Stop`
+audit that records a taint. A taint recorded elsewhere is still enforced at the push.
+
+Two failure directions are deliberate. A host that does not pass its environment
+variables to git's subprocesses makes both git-layer hooks a no-op (toward the
+human, never toward blocking one). A hook that cannot resolve the shim — no plugin
+root, no `gates` on PATH, and the path `gates hook install` recorded is gone — lets
+the commit or push through with a stderr note, and `gates doctor` reports that copy
+stale.
 
 ### 2. Keep the loop running with a `Stop` hook (shipped)
 

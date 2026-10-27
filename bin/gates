@@ -38,6 +38,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -831,6 +832,10 @@ def _errors(m: dict, root: Path) -> list[str]:
                             "discipline.propose-branches entries must be branch-"
                             f"name globs, not absolute paths (got {p!r})"
                         )
+        if isinstance(disc, dict) and "agent-env" in disc:
+            problem = _agent_env_problem(disc.get("agent-env"))
+            if problem:
+                errs.append(problem)
 
     # worktree-native-loop design D6: `concurrency.serialize` names gates
     # (or `live-check`, a declarable gate in the contract table though not a
@@ -1012,9 +1017,10 @@ ADOPTION_DETECTOR_KINDS = {"manifest-key": ("key",), "rules-target": ("target",)
                            "schema-key": ("key",), "decision-only": (),
                            "git-hook-current": (), "old-approval-keys": (),
                            "earlier-name": (),
-                           "file-contains": ("path", "text")}
+                           "file-contains": ("path", "text"),
+                           "git-push-hook-installed": ()}
 ADOPTION_PREDICATE_KINDS = ("manifest-key", "path-exists", "surface-key", "any",
-                            "git-hook-copy")
+                            "git-hook-copy", "git-commit-hook-wired")
 ADOPTION_ACTION_KINDS = {"manifest-key": ("key",), "onboarding-step": ("step",),
                          "confirm": ("detail",)}
 ADOPTION_REQUIRED_FIELDS = ("id", "since", "what", "question", "options", "detector",
@@ -1072,8 +1078,8 @@ def _check_predicate(where: str, pred) -> None:
             if sub is None:
                 raise AdoptionError(f"{where} `of` entry {n + 1} is null")
             _check_predicate(f"{where} `of` entry {n + 1}", sub)
-    elif pred["kind"] == "git-hook-copy":
-        return  # no fields: it reads facts["hook"] (adoption-followups D2)
+    elif pred["kind"] in ("git-hook-copy", "git-commit-hook-wired"):
+        return  # no fields: it reads the gathered hook facts (adoption-followups D2)
     elif not _nonempty_str(pred.get("glob")):
         raise AdoptionError(f"{where} of kind 'path-exists' needs a non-empty `glob`")
 
@@ -1142,6 +1148,9 @@ def load_adoption_catalog(data) -> list[dict]:
 #   hook            {"copy", "current"} for the pre-commit hook path, from the
 #                   same `_hook_copy_facts` `gates doctor` reads
 #                   (adoption-followups D2)
+#   push_hook       the same for the pre-push hook path (git-layer-enforcement D4)
+#   hook_states     {"pre-commit": state, "pre-push": state}, `_hook_state`'s
+#                   doctor vocabulary for each hook
 #   old_approval_changes
 #                   active changes still carrying 0.5.0-spelled approval keys,
 #                   from the same scan doctor's `approval-keys` row reads
@@ -1178,10 +1187,18 @@ def adoption_detector_acted(detector: dict, facts: dict) -> bool:
     if kind == "decision-only":
         return False
     if kind == "git-hook-current":
-        # Acted unless the hook path holds a direct copy that is not current;
-        # no hook, or a composed one, leaves nothing to refresh (D2).
-        hook = facts["hook"]
-        return not (hook["copy"] and not hook["current"])
+        # Acted unless either hook path holds a direct copy that is not
+        # current (D2; both hooks since git-layer-enforcement D4); no hook, or
+        # a composed one, leaves nothing to refresh.
+        for hook in (facts["hook"], facts.get("push_hook") or {}):
+            if hook.get("copy") and not hook.get("current"):
+                return False
+        return True
+    if kind == "git-push-hook-installed":
+        # Acted once the push hook is anything but absent (git-layer-
+        # enforcement D4): a stale or uncomposed one is the refresh's and
+        # the doctor's business, not this offer's.
+        return (facts.get("hook_states") or {}).get("pre-push", "absent") != "absent"
     if kind == "old-approval-keys":
         # Acted unless an active change still carries an earlier-spelled
         # approval key (openspec-1-14-compat D4a).
@@ -1216,7 +1233,9 @@ def adoption_applies(predicate, facts: dict) -> bool:
     if kind == "any":
         return any(adoption_applies(sub, facts) for sub in predicate["of"])
     if kind == "git-hook-copy":
-        return bool(facts["hook"]["copy"])
+        return bool(facts["hook"]["copy"] or (facts.get("push_hook") or {}).get("copy"))
+    if kind == "git-commit-hook-wired":
+        return (facts.get("hook_states") or {}).get("pre-commit") == "wired"
     raise AdoptionError(f"unknown applies_when kind '{kind}'")
 
 
@@ -1310,13 +1329,25 @@ def cmd_adoption_record(root: Path, args) -> int:
     if args.decision not in ADOPTION_DECISIONS:
         raise AdoptionError(f"unknown decision '{args.decision}' "
                             f"(one of: {', '.join(ADOPTION_DECISIONS)})")
+    path = _write_adoption_decision(root, args.id, args.decision)
+    print(f"gatedloop: recorded {args.id}: {args.decision} (gatedloop {_installed_plugin_version()}) in {path}. "
+          "Commit it, so the whole team shares the decision.")
+    return 0
+
+
+def _write_adoption_decision(root: Path, item_id: str, decision: str) -> Path:
+    """Write one decision to `.gatedloop/adoption.json` (design D2's record):
+    shared by `gates adoption record` and `gates hook install --commit-only /
+    --push` (git-layer-enforcement 6.2), so the record has one writer. The
+    write is a temp file then a rename, so a reader never sees half a
+    record."""
     version = _installed_plugin_version()
     decisions = _read_adoption_decisions(root)
     by = _local_git_identity(root)
     if not by:
         raise AdoptionError("no git identity configured (user.name/user.email); "
                             "set one so the record says who decided")
-    decisions[args.id] = {"decision": args.decision, "by": by, "at": _now_iso(),
+    decisions[item_id] = {"decision": decision, "by": by, "at": _now_iso(),
                           "version": version}
     path = _state_dir(root) / ADOPTION_RECORD_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1330,9 +1361,7 @@ def cmd_adoption_record(root: Path, args) -> int:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    print(f"gatedloop: recorded {args.id}: {args.decision} (gatedloop {version}) in {path}. "
-          "Commit it, so the whole team shares the decision.")
-    return 0
+    return path
 
 
 def _adoption_manifest(root: Path) -> dict:
@@ -1382,6 +1411,8 @@ def _adoption_project_facts(root: Path, manifest: dict, items: list[dict]) -> di
             files[detector["path"]] = _read_text_or_none(root / detector["path"])
     return {"manifest": manifest, "rules_doc": rules_doc, "schemas": schemas,
             "existing_globs": existing, "hook": _hook_copy_facts(root),
+            "push_hook": _hook_copy_facts(root, "pre-push"),
+            "hook_states": {hook: _hook_state(root, hook) for hook in GIT_HOOKS},
             "old_approval_changes": _changes_with_old_approval_keys(root),
             "earlier_names": _earlier_name_remnants(root),
             "files": files}
@@ -1499,7 +1530,7 @@ def _shim_location(shim_path) -> tuple:
 def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=None,
                   yaml_importable=None, forge_cli=None, old_approval_changes=None,
                   gates_on_path=_NOT_CHECKED, local_settings=_NOT_CHECKED,
-                  earlier_names=_NOT_CHECKED) -> list:
+                  earlier_names=_NOT_CHECKED, push_hook_state=None) -> list:
     """The pure diagnostic logic (design D3/D4). Returns a list of
     ``(level, title, detail)`` where `level` is 'ok' or 'warn' — never a
     blocking 'error', because doctor is advisory: nothing here fails validation
@@ -1513,6 +1544,9 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
     `yaml_importable` (schema-declared-flow D5) is whether PyYAML imports.
     `None` omits the row; a bool adds one advisory ok/warn row. Its absence is
     never a failure: every gate, hook and dispatch decision works without it.
+
+    `push_hook_state` (git-layer-enforcement D4) is the git pre-push hook's
+    state, from the same primitive; `None` omits its row.
 
     `old_approval_changes` (openspec-1-14-compat D4) lists the active changes
     still carrying 0.5.0-spelled approval keys. `None` omits the row.
@@ -1666,6 +1700,55 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
                 "or re-run `/gatedloop:gates-init`.",
             ))
 
+    # 4b. Git-layer push hook wiring (git-layer-enforcement D4): the commit
+    #     hook's five states, for the hook that gates a push of the merge
+    #     target. Omitted when not checked.
+    if push_hook_state is not None:
+        if push_hook_state == "declined":
+            checks.append((
+                "ok", "git-push-hook",
+                "The git pre-push hook is not installed: this project declined it (the "
+                "`git-push-hook` adoption item is recorded `declined`), so `gates hook "
+                "install` installs the commit hook only. Add it with `gates hook install "
+                "--push`.",
+            ))
+        elif push_hook_state == "wired":
+            checks.append((
+                "ok", "git-push-hook",
+                "The git pre-push hook (the merge target's push gate) is installed. It "
+                "enforces only inside a declared agent session and no-ops for humans.",
+            ))
+        elif push_hook_state == "stale-copy":
+            checks.append((
+                "warn", "git-push-hook",
+                "The git pre-push hook is a direct copy of an earlier (or locally edited) "
+                "gatedloop template, or the shim path it records is gone and nothing else "
+                "resolves the shim. Run `gates hook install`: it replaces the copy and keeps "
+                "the old body in `pre-push.gatedloop-prev` beside it.",
+            ))
+        elif push_hook_state == "manager-uncomposed":
+            checks.append((
+                "warn", "git-push-hook",
+                "A hook manager (husky/lefthook/pre-commit) owns the hook path but the "
+                "git-layer push gate is not composed into it. Run `gates hook install` "
+                "(it composes where safe, refuses-and-instructs otherwise) — without it, "
+                "a raw merge of the target pushed by hand is checked by nothing local.",
+            ))
+        elif push_hook_state == "unmanaged-hook":
+            checks.append((
+                "warn", "git-push-hook",
+                "An existing, unmanaged pre-push hook is present and the git-layer push "
+                "gate is not in it. `gates hook install` will refuse-and-instruct rather "
+                "than risk your hook; wire the printed block by hand.",
+            ))
+        else:  # absent
+            checks.append((
+                "warn", "git-push-hook",
+                "The git pre-push hook (the merge target's push gate) is not installed, so "
+                "a raw merge of the target pushed by hand reaches the shared history "
+                "unchecked. Run `gates hook install` or re-run `/gatedloop:gates-init`.",
+            ))
+
     # 5. The optional YAML dependency (schema-declared-flow D5).
     if yaml_importable is not None:
         if yaml_importable:
@@ -1778,6 +1861,18 @@ def _pyyaml_importable() -> bool:
     return True
 
 
+def _doctor_push_hook_state(root: Path) -> str:
+    """The push hook's doctor state, `declined` when it is absent because the
+    project declined it (git-layer-enforcement 6.2). An unreadable adoption
+    record leaves the plain state: the doctor is advisory and never fails."""
+    state = _hook_state(root, "pre-push")
+    if state == "absent":
+        with contextlib.suppress(AdoptionError):
+            if _push_hook_declined(root):
+                return "declined"
+    return state
+
+
 def cmd_doctor(_args) -> int:
     """gates doctor — the onboarding preflight (design D3). Special-cased in
     main() to run WITHOUT requiring a manifest, since it is gates-init's step 0
@@ -1804,7 +1899,8 @@ def cmd_doctor(_args) -> int:
                            gates_on_path=shutil.which("gates"),
                            local_settings=_read_text_or_none(
                                root / ".claude" / "settings.local.json"),
-                           earlier_names=_earlier_name_remnants(root))
+                           earlier_names=_earlier_name_remnants(root),
+                           push_hook_state=_doctor_push_hook_state(root))
 
     print("gatedloop: gates doctor — onboarding preflight\n")
     for level, title, detail in checks:
@@ -3881,37 +3977,84 @@ def cmd_marker(m: dict, root: Path, args) -> int:
 
 HOOK_BEGIN = f"# >>> {NAME} pre-commit (enforce-at-the-effect) >>>"
 HOOK_END = f"# <<< {NAME} pre-commit (enforce-at-the-effect) <<<"
+PUSH_HOOK_BEGIN = f"# >>> {NAME} pre-push (enforce-at-the-effect) >>>"
+PUSH_HOOK_END = f"# <<< {NAME} pre-push (enforce-at-the-effect) <<<"
 # The template's own header line — used to recognize an already-installed
 # direct copy (which carries no BEGIN sentinel). It is the header rather than
 # the check the body runs, because that check changed (lock-and-ledger-hygiene
 # D4: `gate-marker check ci` became `discipline check-commit`) and a copy of
 # either body is still one of ours, never a foreign one.
 _HOOK_TEMPLATE_MARK = f"# {NAME} git pre-commit hook (enforce-at-the-effect"
+_PUSH_HOOK_TEMPLATE_MARK = f"# {NAME} git pre-push hook (enforce-at-the-effect"
+
+# git-layer-enforcement D4: both git-layer hooks install, compose, refuse and
+# are diagnosed through one path, hook by hook.
+GIT_HOOKS = ("pre-commit", "pre-push")
+_HOOK_MARKERS = {
+    "pre-commit": (HOOK_BEGIN, HOOK_END, _HOOK_TEMPLATE_MARK),
+    "pre-push": (PUSH_HOOK_BEGIN, PUSH_HOOK_END, _PUSH_HOOK_TEMPLATE_MARK),
+}
+
+# git-layer-enforcement D2: the one line `gates hook install` writes into a
+# template — the installing shim's path, the hook's last fallback for finding
+# the shim outside a plugin environment. The shipped template holds it empty,
+# and a copy is compared with the template with this line emptied.
+_RECORDED_LINE_RE = re.compile(r"^GATES_INSTALLED=.*$", re.MULTILINE)
+_EMPTY_RECORDED_LINE = "GATES_INSTALLED=''"
 
 
-def _hook_template_path() -> Path:
+def _hook_template_path(hook: str = "pre-commit") -> Path:
     return (
         Path(__file__).resolve().parent.parent
-        / "templates" / "git-hooks" / "pre-commit"
+        / "templates" / "git-hooks" / hook
     )
 
 
-def _composed_hook_snippet() -> str:
+def _composed_hook_snippet(hook: str = "pre-commit") -> str:
     """The delegating block appended when composing into an existing hook.
-    It calls the shipped template (one source of truth for the check logic) and
-    is a transparent no-op outside a session or when the plugin root is
-    unavailable — so it never blocks a human commit."""
+    It calls the shipped template (one source of truth for the check logic,
+    the agent-session decision included: git-layer-enforcement D1) with the
+    hook's arguments and stdin, and is a transparent no-op when the plugin
+    root is unavailable — so it never blocks a human."""
+    begin, end, _mark = _HOOK_MARKERS[hook]
     return "\n".join([
-        HOOK_BEGIN,
-        "# Env-scoped git-layer commit gate. Delegates to the shipped template so",
-        "# there is a single source of truth; a transparent no-op outside a Claude",
-        "# Code session or when the plugin root is unavailable (never blocks a human).",
-        'if [ -n "${CLAUDECODE:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT:-}/templates/git-hooks/pre-commit" ]; then',
-        '  "${CLAUDE_PLUGIN_ROOT}/templates/git-hooks/pre-commit" || exit $?',
+        begin,
+        f"# Git-layer {hook} gate. Delegates to the shipped template so there is a",
+        "# single source of truth; the template decides whether this is an agent",
+        "# session (`gates discipline agent-session`) and is a transparent no-op",
+        "# otherwise, as this block is when the plugin root is unavailable.",
+        f'if [ -x "${{CLAUDE_PLUGIN_ROOT:-}}/templates/git-hooks/{hook}" ]; then',
+        f'  "${{CLAUDE_PLUGIN_ROOT}}/templates/git-hooks/{hook}" "$@" || exit $?',
         "fi",
-        HOOK_END,
+        end,
         "",
     ])
+
+
+def _hook_install_body(hook: str) -> str:
+    """The template with the installing shim's path recorded (D2)."""
+    line = "GATES_INSTALLED=" + shlex.quote(str(Path(__file__).resolve()))
+    return _RECORDED_LINE_RE.sub(lambda _m: line, _hook_template_path(hook).read_text(), count=1)
+
+
+def _hook_recorded_shim_gone(text: str) -> bool:
+    """Whether a copy records a shim path that no longer exists while
+    neither the plugin root nor PATH resolves the shim: then nothing the hook
+    tries finds it, and the copy is stale (git-layer-enforcement D2)."""
+    m = _RECORDED_LINE_RE.search(text)
+    if not m:
+        return False
+    try:
+        words = shlex.split(m.group(0)[len("GATES_INSTALLED="):])
+    except ValueError:
+        return True
+    recorded = words[0] if words else ""
+    if not recorded or os.access(recorded, os.X_OK):
+        return False
+    plugin = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if plugin and os.access(os.path.join(plugin, "bin", "gates"), os.X_OK):
+        return False
+    return shutil.which("gates") is None
 
 
 def _read_text_safe(p: Path) -> str:
@@ -4177,17 +4320,18 @@ def _hooks_dir(root: Path) -> Path:
     return p if p.is_absolute() else (root / p)
 
 
-def _detect_hook_owner(root: Path) -> tuple[str, Path | None]:
-    """Classify who owns the pre-commit hook path. Returns `(kind, path)`:
-    kind ∈ {husky, lefthook, pre-commit, hooksPath, bare-hook, none}. `path`
-    is the concrete pre-commit file our check lives in / would install to, when
-    meaningful. Managers are authority on the hook path, so they win over a
-    stray `.git/hooks/pre-commit`."""
+def _detect_hook_owner(root: Path, hook: str = "pre-commit") -> tuple[str, Path | None]:
+    """Classify who owns the `hook` path (`pre-commit` or `pre-push`). Returns
+    `(kind, path)`: kind ∈ {husky, lefthook, pre-commit, hooksPath, bare-hook,
+    none}. `path` is the concrete hook file our check lives in / would install
+    to, when meaningful. Managers are authority on the hook path, so they win
+    over a stray `.git/hooks/<hook>`; a manager owns every hook path at once
+    (git-layer-enforcement D4), a bare hook only its own."""
     if (root / ".husky").is_dir():
-        # husky v9 points core.hooksPath at .husky/_ and runs .husky/pre-commit;
+        # husky v9 points core.hooksPath at .husky/_ and runs .husky/<hook>;
         # older husky sources husky.sh from the same per-hook script. Either
-        # way .husky/pre-commit is the file to compose into.
-        return "husky", root / ".husky" / "pre-commit"
+        # way .husky/<hook> is the file to compose into.
+        return "husky", root / ".husky" / hook
     for name in ("lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml"):
         if (root / name).exists():
             return "lefthook", None
@@ -4196,64 +4340,71 @@ def _detect_hook_owner(root: Path) -> tuple[str, Path | None]:
             return "pre-commit", None
     hooks_path = _core_hooks_path(root)
     if hooks_path is not None:
-        return "hooksPath", hooks_path / "pre-commit"
-    default_hook = _hooks_dir(root) / "pre-commit"
+        return "hooksPath", hooks_path / hook
+    default_hook = _hooks_dir(root) / hook
     if default_hook.exists():
         return "bare-hook", default_hook
     return "none", default_hook
 
 
-def _hook_already_wired(path: Path | None) -> bool:
+def _hook_already_wired(path: Path | None, hook: str = "pre-commit") -> bool:
     if path is None or not path.exists():
         return False
     existing = _read_text_safe(path)
-    return (HOOK_BEGIN in existing or _HOOK_TEMPLATE_MARK in existing
-            or _hook_marks_earlier(existing))
+    begin, _end, mark = _HOOK_MARKERS[hook]
+    return (begin in existing or mark in existing
+            or (hook == "pre-commit" and _hook_marks_earlier(existing)))
 
 
-def _hook_copy_at(path: Path | None) -> dict:
+def _hook_copy_at(path: Path | None, hook: str = "pre-commit") -> dict:
     """Whether `path` holds a *direct copy* of a gatedloop hook template, and
     whether that copy is *current* (adoption-followups D1). A copy carries the
     template header and no composed-block marker, wherever it sits; it is
-    current when its bytes equal the shipped template's, so a local edit reads
-    as stale (the refresh keeps it in a backup, D3). A composed block delegates
+    current when its text, with the recorded shim-path line emptied, equals
+    the shipped template's and that path still resolves the shim, or
+    something else does (git-layer-enforcement D2). A local edit reads as
+    stale (the refresh keeps it in a backup, D3). A composed block delegates
     to the shipped template at run time and is never a copy."""
     if path is None or not path.is_file():
         return {"copy": False, "current": False}
     try:
-        body = path.read_bytes()
+        text = path.read_bytes().decode("utf-8", errors="replace")
     except OSError:
         return {"copy": False, "current": False}
-    text = body.decode("utf-8", errors="replace")
-    template = _HOOK_TEMPLATE_MARK in text or EARLIER_HOOK_TEMPLATE_MARK in text
-    if not template or HOOK_BEGIN in text or EARLIER_HOOK_BEGIN in text:
+    begin, _end, mark = _HOOK_MARKERS[hook]
+    earlier = hook == "pre-commit" and EARLIER_HOOK_TEMPLATE_MARK in text
+    template = mark in text or earlier
+    if not template or begin in text or (hook == "pre-commit" and EARLIER_HOOK_BEGIN in text):
         return {"copy": False, "current": False}
     try:
-        current = body == _hook_template_path().read_bytes()
+        shipped = _hook_template_path(hook).read_text()
     except OSError:
-        current = False
+        return {"copy": True, "current": False}
+    normalized = _RECORDED_LINE_RE.sub(lambda _m: _EMPTY_RECORDED_LINE, text, count=1)
+    current = normalized == shipped and not _hook_recorded_shim_gone(text)
     return {"copy": True, "current": current}
 
 
-def _hook_copy_facts(root: Path) -> dict:
-    """`{"copy", "current"}` for the repo's pre-commit hook path: the one fact
-    both `gates doctor` (via `_hook_state`) and the adoption evaluators read
+def _hook_copy_facts(root: Path, hook: str = "pre-commit") -> dict:
+    """`{"copy", "current"}` for the repo's `hook` path: the one fact both
+    `gates doctor` (via `_hook_state`) and the adoption evaluators read
     (adoption-followups D2), so the two never disagree about a hook."""
-    _kind, path = _detect_hook_owner(root)
-    return _hook_copy_at(path)
+    _kind, path = _detect_hook_owner(root, hook)
+    return _hook_copy_at(path, hook)
 
 
-def _hook_state(root: Path) -> str:
-    """A single primitive for `gates doctor`'s hook sub-check (task 2.4):
-    'wired' (installed or composed), 'stale-copy' (a direct copy of an earlier
-    or locally edited template; adoption-followups D7), 'manager-uncomposed'
-    (a manager owns the path but our check isn't in it), 'unmanaged-hook' (a
-    foreign bare hook), or 'absent' (nothing installed)."""
-    kind, path = _detect_hook_owner(root)
-    copy = _hook_copy_at(path)
+def _hook_state(root: Path, hook: str = "pre-commit") -> str:
+    """A single primitive for `gates doctor`'s hook sub-checks (task 2.4;
+    both hooks since git-layer-enforcement D4): 'wired' (installed or
+    composed), 'stale-copy' (a direct copy of an earlier or locally edited
+    template, or one whose recorded shim is gone; adoption-followups D7),
+    'manager-uncomposed' (a manager owns the path but our check isn't in it),
+    'unmanaged-hook' (a foreign bare hook), or 'absent' (nothing installed)."""
+    kind, path = _detect_hook_owner(root, hook)
+    copy = _hook_copy_at(path, hook)
     if copy["copy"] and not copy["current"]:
         return "stale-copy"
-    if _hook_already_wired(path):
+    if _hook_already_wired(path, hook):
         return "wired"
     if kind in ("husky", "lefthook", "pre-commit", "hooksPath"):
         return "manager-uncomposed"
@@ -4262,13 +4413,13 @@ def _hook_state(root: Path) -> str:
     return "absent"
 
 
-def _hook_refuse(kind: str, path: Path | None) -> int:
+def _hook_refuse(kind: str, path: Path | None, hook: str = "pre-commit") -> int:
     """Refuse-and-instruct: never clobber; print exactly how to wire it by
     hand. Non-zero exit — the check is NOT in place, and the caller
     (`gates-init`) must report that rather than treat it as done."""
     where = {
         "bare-hook": (
-            "an existing, unmanaged pre-commit hook is present and its exit "
+            f"an existing, unmanaged {hook} hook is present and its exit "
             "semantics are unknown — appending could silently never run"
         ),
         "lefthook": "lefthook manages hooks via its own config file",
@@ -4276,10 +4427,10 @@ def _hook_refuse(kind: str, path: Path | None) -> int:
         "hooksPath": "core.hooksPath redirects hooks to a path this installer does not recognize",
     }.get(kind, "the hook topology could not be classified safely")
     print(
-        f"gatedloop: refusing to modify the pre-commit hook — {where}.\n"
+        f"gatedloop: refusing to modify the {hook} hook — {where}.\n"
         "gatedloop: nothing was changed. Wire the git-layer check by hand by adding this "
-        "block to your pre-commit hook (or your manager's pre-commit entry):\n\n"
-        f"{_composed_hook_snippet()}",
+        f"block to your {hook} hook (or your manager's {hook} entry):\n\n"
+        f"{_composed_hook_snippet(hook)}",
         file=sys.stderr,
     )
     if path is not None:
@@ -4287,72 +4438,133 @@ def _hook_refuse(kind: str, path: Path | None) -> int:
     return 1
 
 
-def _hook_install(root: Path) -> int:
-    tmpl = _hook_template_path()
-    if not tmpl.exists():
-        sys.exit(f"gatedloop: hook template not found at {tmpl}")
-    kind, path = _detect_hook_owner(root)
+_HOOK_PURPOSE = {
+    "pre-commit": "commit enforcement",
+    "pre-push": "push enforcement (the merge target)",
+}
 
-    # adoption-followups D3: gatedloop's own direct copy whose body differs
-    # from the shipped template is the one file this installer may replace.
-    # Checked before the "already wired" return, which a stale copy would
-    # otherwise satisfy, leaving the old body in place forever.
-    copy = _hook_copy_at(path)
+
+def _hook_install_one(root: Path, hook: str) -> int:
+    tmpl = _hook_template_path(hook)
+    if not tmpl.exists():
+        print(f"gatedloop: hook template not found at {tmpl}", file=sys.stderr)
+        return 1
+    kind, path = _detect_hook_owner(root, hook)
+
+    # adoption-followups D3: gatedloop's own direct copy that is not current
+    # (a different body, or a recorded shim that is gone) is the one file
+    # this installer may replace. Checked before the "already wired" return,
+    # which a stale copy would otherwise satisfy, leaving it in place forever.
+    copy = _hook_copy_at(path, hook)
     if copy["copy"] and not copy["current"]:
         backup = path.with_name(path.name + f".{NAME}-prev")
         backup.write_bytes(path.read_bytes())
-        path.write_bytes(tmpl.read_bytes())
+        path.write_text(_hook_install_body(hook))
         path.chmod(0o755)
         print(
-            f"gatedloop: refreshed the git pre-commit hook at {path} to the shipped "
+            f"gatedloop: refreshed the git {hook} hook at {path} to the shipped "
             f"template. The previous body is saved at {backup}; any local edit you "
             "made to the old copy is there."
         )
         return 0
 
-    if _hook_already_wired(path):
+    if _hook_already_wired(path, hook):
         print(
-            f"gatedloop: git-layer commit enforcement is already installed "
+            f"gatedloop: git-layer {_HOOK_PURPOSE[hook]} is already installed "
             f"({kind}) at {path} — nothing to do."
         )
         return 0
 
     if kind == "none":
-        # Nothing present: install the shipped template directly (task 2.3).
+        # Nothing present: install the shipped template directly (task 2.3),
+        # with the installing shim's path recorded (git-layer-enforcement D2).
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tmpl.read_text())
+        path.write_text(_hook_install_body(hook))
         path.chmod(0o755)
         print(
-            f"gatedloop: installed the git pre-commit hook at {path}. It enforces "
-            "only inside a Claude Code session (CLAUDECODE set); a human commit is "
-            "unaffected."
+            f"gatedloop: installed the git {hook} hook at {path}. It enforces only "
+            "inside a declared agent session (`discipline.agent-env`, default "
+            "CLAUDECODE); a human's commit or push is unaffected."
         )
         return 0
 
     if kind == "husky":
-        # Compose: append the delegating snippet to .husky/pre-commit — a plain
+        # Compose: append the delegating snippet to .husky/<hook> — a plain
         # shell script husky runs. Appending is additive and preserves every
         # existing line (never clobbers).
-        snippet = _composed_hook_snippet()
+        snippet = _composed_hook_snippet(hook)
         if path.exists():
             content = _read_text_safe(path)
             if content and not content.endswith("\n"):
                 content += "\n"
             path.write_text(content + "\n" + snippet)
             print(
-                f"gatedloop: composed the git-layer check into the existing husky hook "
-                f"at {path} (existing content preserved)."
+                f"gatedloop: composed the git-layer check into the existing husky {hook} "
+                f"hook at {path} (existing content preserved)."
             )
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("#!/usr/bin/env sh\n" + snippet)
-            print(f"gatedloop: added a husky pre-commit hook at {path} with the git-layer check.")
+            print(f"gatedloop: added a husky {hook} hook at {path} with the git-layer check.")
         path.chmod(0o755)
         return 0
 
     # lefthook / pre-commit framework / an unrecognized core.hooksPath / a
     # foreign bare hook: no safe automatic composition — refuse and instruct.
-    return _hook_refuse(kind, path)
+    return _hook_refuse(kind, path, hook)
+
+
+PUSH_HOOK_ITEM = "git-push-hook"
+
+
+def _push_hook_declined(root: Path) -> bool:
+    """Whether the project declined the push hook: the `git-push-hook`
+    adoption item recorded `declined` in `.gatedloop/adoption.json` (by the
+    upgrade walk, or by `gates hook install --commit-only`). Raises
+    AdoptionError when the record cannot be read."""
+    record = _read_adoption_decisions(root).get(PUSH_HOOK_ITEM)
+    return isinstance(record, dict) and record.get("decision") == "declined"
+
+
+def _hook_install(root: Path, commit_only: bool = False, push: bool = False) -> int:
+    """Install the git-layer hooks (git-layer-enforcement D4), each under the
+    same owner detection; exit 1 when any is not in place. The push hook is
+    opt-in (task 6.2): `--commit-only` installs the commit hook alone and
+    records the `git-push-hook` item `declined`; while it is declined a plain
+    install skips the push hook and says so; `--push` installs it and records
+    `adopted`."""
+    try:
+        declined = _push_hook_declined(root)
+    except AdoptionError as e:
+        print(f"gatedloop: cannot tell whether this project declined the push hook — {e}",
+              file=sys.stderr)
+        return 1
+    if commit_only or (declined and not push):
+        hooks = ("pre-commit",)
+    else:
+        hooks = GIT_HOOKS
+    results = [_hook_install_one(root, hook) for hook in hooks]
+    if declined and not (commit_only or push):
+        print(
+            f"gatedloop: skipped the git pre-push hook — this project declined it (the "
+            f"`{PUSH_HOOK_ITEM}` adoption item is recorded `declined`). Add it with "
+            "`gates hook install --push`."
+        )
+    decision = "declined" if commit_only else "adopted" if push else None
+    if decision:
+        try:
+            path = _write_adoption_decision(root, PUSH_HOOK_ITEM, decision)
+        except AdoptionError as e:
+            print(f"gatedloop: the push-hook choice was not recorded — {e}", file=sys.stderr)
+            return 1
+        follow = (
+            "`gates hook install` now installs the commit hook only; add the push hook "
+            "with `gates hook install --push`." if commit_only
+            else "`gates hook install` installs both hooks again."
+        )
+        print(f"gatedloop: recorded {PUSH_HOOK_ITEM}: {decision} in {path}. Commit it, so the "
+              f"whole team shares the decision. {follow}")
+    return 1 if any(results) else 0
 
 
 def cmd_hook(args) -> int:
@@ -4360,7 +4572,7 @@ def cmd_hook(args) -> int:
         return _hook_git_cwd(args.kind)
     root = _repo_root()
     if args.hook_cmd == "install":
-        return _hook_install(root)
+        return _hook_install(root, commit_only=args.commit_only, push=args.push)
     sys.exit(f"gatedloop: unknown hook subcommand '{args.hook_cmd}'")
 
 
@@ -8483,6 +8695,56 @@ def _stale_plan_branch_advisory(root: Path, target: str) -> str:
     )
 
 
+DEFAULT_AGENT_ENV = ("CLAUDECODE",)
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _agent_env_problem(value) -> str | None:
+    """Why `discipline.agent-env` is not a non-empty list of environment
+    variable names (git-layer-enforcement D1), or None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(v, str) and _ENV_NAME_RE.match(v) for v in value)):
+        return ("discipline.agent-env must be a non-empty list of environment variable "
+                f"names (letters, digits and _, not starting with a digit); got {value!r}")
+    return None
+
+
+def _agent_env_names(root: Path) -> list[str]:
+    """The variables that mark an agent session: the manifest's
+    `discipline.agent-env` when it is valid, else the default `[CLAUDECODE]`.
+    Read without `load_manifest`, because the git hooks ask this in
+    repositories with no manifest yet. A malformed declaration falls back to
+    the default and says so on stderr -- never an error, which would make
+    every hook deny, a human's commit included; `gates validate` is where it
+    fails loud."""
+    path, _ignored = _find_manifest(root)
+    if path is None:
+        return list(DEFAULT_AGENT_ENV)
+    try:
+        data = _load(path) or {}
+    except Exception as e:
+        print(f"gatedloop: could not read {path.name} ({e}); deciding the agent session "
+              f"by the default discipline.agent-env {list(DEFAULT_AGENT_ENV)}", file=sys.stderr)
+        return list(DEFAULT_AGENT_ENV)
+    disc = data.get("discipline") if isinstance(data, dict) else None
+    if not isinstance(disc, dict) or "agent-env" not in disc:
+        return list(DEFAULT_AGENT_ENV)
+    problem = _agent_env_problem(disc.get("agent-env"))
+    if problem:
+        print(f"gatedloop: {problem} — deciding the agent session by the default "
+              f"{list(DEFAULT_AGENT_ENV)}; `gates validate` reports it", file=sys.stderr)
+        return list(DEFAULT_AGENT_ENV)
+    return list(disc["agent-env"])
+
+
+def cmd_agent_session(root: Path) -> int:
+    """`gates discipline agent-session` (git-layer-enforcement D1): exit 0
+    when any declared agent-env variable is set to a non-empty value, else 1.
+    The git-layer hooks are a no-op on 1, so the decision lives here, once."""
+    names = _agent_env_names(root)
+    return 0 if any(os.environ.get(n) for n in names) else 1
+
+
 def _declared_propose_branch_patterns(m: dict) -> list[str]:
     """The accepted non-target branch-name globs (design D3, worktree-
     native-loop): the manifest's `discipline.propose-branches` when present
@@ -9075,6 +9337,173 @@ def _epic_stats_report(root: Path, m: dict, epic: str, as_json: bool, idle_gap_m
 
 
 
+# ---------- the push gate (git-layer-enforcement D3) ------------------------
+#
+# `gates discipline check-push <sha> --remote-ref <ref>`: what the git
+# `pre-push` hook asks for each ref a push updates. Only an update of the
+# merge target's branch is checked; every other branch, and a deletion (the
+# zero sha), passes silently. The target passes when the pushed commit is
+# proven, two ways, and no gate runs in either:
+#
+#   1. a `merge` row in a ledger the pushed commit carries names it -- or
+#      names an ancestor S of it such that S..<sha> touches only ledger and
+#      planning paths. That is `gates merge`'s own push: its merge row names
+#      the squash commit, and the archive commit pushed on top carries only
+#      the move under `openspec/` and the row itself.
+#   2. the merge gate's incoming-tree checks hold for the pushed commit's
+#      tree (the same set `_merge_prove_head` applies to a change head).
+
+_ZERO_SHA_RE = re.compile(r"^0+$")
+
+
+def _ledger_rows_at(root: Path, sha: str) -> list[dict]:
+    """Every ledger row the commit `sha` carries, from every change's file."""
+    rows: list[dict] = []
+    for prefix in LEDGER_PREFIXES:
+        listed = _git(root, "ls-tree", "-r", "--name-only", sha, "--", prefix + "/")
+        if listed.returncode != 0:
+            continue
+        for rel in listed.stdout.splitlines():
+            if not rel.endswith(".jsonl"):
+                continue
+            blob = _git(root, "cat-file", "blob", f"{sha}:{rel}")
+            if blob.returncode == 0:
+                rows.extend(_parse_jsonl_rows(blob.stdout))
+    return rows
+
+
+def _push_merge_row(root: Path, m: dict, sha: str, rows: list[dict]) -> str | None:
+    """The squash commit a merge row names that vouches for `sha` (way 1)."""
+    for r in rows:
+        named = r.get("sha") if r.get("gate") == "merge" else None
+        if not isinstance(named, str) or not named.strip():
+            continue
+        named = _rev(root, named.strip())
+        if named is None:
+            continue
+        if named == sha:
+            return named
+        if not _is_ancestor(root, named, sha):
+            continue
+        diff = _git(root, "diff", "--name-only", named, sha)
+        if diff.returncode != 0:
+            continue
+        if all(_is_ledger_path(p) or _is_planning_path(p, m) for p in diff.stdout.splitlines() if p):
+            return named
+    return None
+
+
+def _push_changes(root: Path, sha: str, target_branch: str) -> list[str]:
+    """The changes a pushed commit carries in: local change branches whose tip
+    it contains and whose change is still active in its tree."""
+    out = _git(root, "for-each-ref", "--merged", sha, "--format=%(refname:short)", "refs/heads/")
+    names = []
+    for name in out.stdout.splitlines() if out.returncode == 0 else []:
+        name = name.strip()
+        if not name or name == target_branch or "/" in name:
+            continue
+        has = _git(root, "cat-file", "-e", f"{sha}:openspec/changes/{name}")
+        if has.returncode == 0:
+            names.append(name)
+    return sorted(names)
+
+
+def _push_tree_problems(m: dict, root: Path, sha: str, changes: list[str]) -> list[str]:
+    """The merge gate's incoming-tree checks against the pushed commit (way
+    2), each unmet one named: a `live-check` marker and a full `ci` marker for
+    its tree, `verify` where declared, and -- for each change it carries in --
+    no unresolved taint, the authored-test lock, and acceptance where a
+    policy is declared."""
+    tree = _commit_tree(root, sha)
+    if tree is None:
+        return [f"gatedloop: could not resolve the tree of {sha[:12]}."]
+    problems: list[str] = []
+    stores = [root]
+    for change in changes:
+        for store in _marker_stores(root, change):
+            if store not in stores:
+                stores.append(store)
+    for gate, scope in (("live-check", None), ("ci", "full")):
+        texts = []
+        for store in stores:
+            rc, _out, err = _captured(_check_marker_and_report, store, gate, tree, scope)
+            if rc == 0:
+                break
+            texts.append(err.strip())
+        else:
+            hint = ("run `gates run live-check` on the pushed commit" if gate == "live-check"
+                    else "run an unscoped `gates run ci` (nothing staged) on the pushed commit")
+            problems.append(f"{texts[0]}\n  -> {hint}.")
+    rows = _ledger_rows_at(root, sha)
+    change_rows = {c: _change_ledger_rows(root, c, sha) for c in changes}
+    if (m.get("gates") or {}).get("verify"):
+        norm = _normalize_tree(root, tree)
+        every = rows + [r for rs in change_rows.values() for r in rs]
+        if not any(r.get("gate") == "verify" and r.get("exit") == 0 and r.get("tree")
+                   and _normalize_tree(root, r["tree"]) == norm for r in every):
+            problems.append(
+                f"gatedloop: `verify` is declared, and no green `verify` is recorded for "
+                f"(ledger-normalized) tree {norm!r}.\n  -> run `gates run verify` on it.")
+    for change in changes:
+        if _taint_unresolved(change_rows[change]):
+            problems.append(_taint_refusal(change))
+        try:
+            lock = _lock_at_commit(root, change, sha)
+        except _ForgeRefusal as refusal:
+            problems.append(refusal.message)
+        else:
+            if lock.problems:
+                problems.append(lock.refusal())
+    if _acceptance_policy(m):
+        for change in changes or [None]:
+            rc, _out, err = _captured(_acceptance_check, m, root,
+                                      argparse.Namespace(tree=tree, change=change))
+            if rc != 0:
+                problems.append(err.strip())
+    return problems
+
+
+def _check_push(m: dict, root: Path, sha: str, remote_ref: str | None) -> int:
+    if _ZERO_SHA_RE.match(sha or ""):
+        return 0  # a deletion updates no tree
+    target, reason = _resolve_merge_target(root)
+    if target is None:
+        print(f"gatedloop: push denied — no merge target resolves ({reason}), so whether "
+              "this push updates it cannot be decided.", file=sys.stderr)
+        return 1
+    branch = _split_target(target)[1]
+    if remote_ref is not None and remote_ref != f"refs/heads/{branch}":
+        return 0  # not the merge target: passes untouched
+    full = _rev(root, sha)
+    if full is None:
+        print(f"gatedloop: push denied — {sha} is not a commit in this repository.",
+              file=sys.stderr)
+        return 1
+    rows = _ledger_rows_at(root, full)
+    vouched = _push_merge_row(root, m, full, rows)
+    if vouched is not None:
+        how = "it" if vouched == full else f"{vouched[:12]}, and only ledger and planning paths follow it"
+        print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — a merge row records {how}")
+        return 0
+    changes = _push_changes(root, full, branch)
+    problems = _push_tree_problems(m, root, full, changes)
+    if not problems:
+        print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — the merge gate's "
+              "incoming-tree checks hold for its tree")
+        return 0
+    name = changes[0] if len(changes) == 1 else "<change>"
+    print(
+        f"gatedloop: push to '{branch}' denied at the git layer — commit {full[:12]} is not "
+        f"proven: no merge row records it, and the incoming-tree checks fail:\n"
+        + "\n".join(problems)
+        + f"\ngatedloop: integrate through `gates merge {name}`: it proves the head, records "
+        "the merge row and pushes once. A raw merge pushed by hand reaches the shared "
+        "history unchecked, which is what this hook refuses.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_discipline(m: dict, root: Path, args) -> int:
     if args.discipline_cmd == "check-commit":
         tree = args.tree
@@ -9202,6 +9631,9 @@ def cmd_discipline(m: dict, root: Path, args) -> int:
 
     if args.discipline_cmd == "check-worktree":
         return _check_worktree(root)
+
+    if args.discipline_cmd == "check-push":
+        return _check_push(m, root, args.sha, args.remote_ref)
 
     if args.discipline_cmd == "merge-scope":
         # hook-correctness D2: the merge hook guards integration only. Prints
@@ -11448,7 +11880,10 @@ def main() -> int:
     sub.add_parser("migrate-name", help="move this project onto the gatedloop names: state directory, change metadata, hook markers; prints the edits it does not make")
     sp = sub.add_parser("hook", help="install the git-layer commit hook (composes with a manager, never clobbers)")
     hook_sub = sp.add_subparsers(dest="hook_cmd", required=True)
-    sp_inst = hook_sub.add_parser("install", help="install/compose the git pre-commit hook; refuses-and-instructs when unsafe")
+    sp_inst = hook_sub.add_parser("install", help="install/compose the git pre-commit and pre-push hooks; refuses-and-instructs when unsafe")
+    inst_which = sp_inst.add_mutually_exclusive_group()
+    inst_which.add_argument("--commit-only", action="store_true", help="install or refresh only the pre-commit hook, and record the `git-push-hook` adoption item as declined (a plain install then skips pre-push)")
+    inst_which.add_argument("--push", action="store_true", help="install both hooks even after a decline, and record the `git-push-hook` adoption item as adopted")
     sp_inst.set_defaults(fn=cmd_hook)
     sp_gcwd = hook_sub.add_parser("git-cwd", help="print the guarded command's effective directory, resolved from hook JSON on stdin (design D1)")
     sp_gcwd.add_argument("kind", nargs="?", default=None, choices=_GIT_CWD_KINDS, help="the invocation kind being guarded (omit for a non-command hook, e.g. a Write tool call)")
@@ -11713,6 +12148,10 @@ def main() -> int:
     sp_prop.add_argument("path", nargs="?", default=None, help="omit with --scaffold")
     sp_prop.add_argument("--scaffold", action="store_true", help="check the openspec-new-change step itself, before any file exists (design D4)")
     sp_prop.set_defaults(fn=cmd_discipline)
+    sp_push = disc_sub.add_parser("check-push", help="the pre-push hook's check: exit 1 unless an update of the merge target pushes a proven commit (a merge row records it, or the merge gate's incoming-tree checks hold); other refs and deletions pass")
+    sp_push.add_argument("sha", help="the local sha being pushed (all zeros: a deletion)")
+    sp_push.add_argument("--remote-ref", help="the remote ref it updates (refs/heads/<branch>); only the merge target's is checked. Omitted: the sha is checked as a push of the target")
+    sp_push.set_defaults(fn=cmd_discipline)
     sp_wt = disc_sub.add_parser("check-worktree", help="exit 1 if the current branch is checked out in more than one worktree, naming each")
     sp_wt.set_defaults(fn=cmd_discipline)
     sp_ms = disc_sub.add_parser("merge-scope", help="print 'integrating' if a merge here lands on the integration target (its branch, or a detached HEAD at its tip), else 'not-integrating'")
@@ -11727,8 +12166,17 @@ def main() -> int:
     sp_cont.set_defaults(fn=cmd_discipline)
     sp_next = disc_sub.add_parser("next-task", help="print '<change>\\t<next unchecked task>' regardless of tree state (PreCompact snapshot)")
     sp_next.set_defaults(fn=cmd_discipline)
+    disc_sub.add_parser(
+        "agent-session",
+        help="exit 0 if a variable `discipline.agent-env` lists (default CLAUDECODE) is set, else 1 -- the git-layer hooks no-op on 1",
+    )
 
     args = p.parse_args()
+    if args.cmd == "discipline" and args.discipline_cmd == "agent-session":
+        # Special-cased ahead of everything (git-layer-enforcement D1): the
+        # git hooks ask it first, in any repository, with or without a
+        # manifest, and it reads nothing but the manifest's one key.
+        return cmd_agent_session(_repo_root())
     if args.cmd not in ("doctor", "migrate-name"):
         # rename-to-gatedloop D2: both state directories would split the
         # ledger, so nothing that reads or writes state runs on them.
