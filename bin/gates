@@ -524,7 +524,24 @@ def _scalar(v: str):
     try:
         return int(v)
     except ValueError:
-        return v
+        pass
+    # token-ledger D4: a plain decimal (`0.3`, `-1.25`) is a float, as PyYAML
+    # reads it -- `economics.prices` are per-million-token prices. Nothing
+    # looser: a version string (`0.7.0`) or an exponent stays a string.
+    if _DECIMAL_RE.fullmatch(v):
+        return float(v)
+    return v
+
+
+_DECIMAL_RE = re.compile(r"-?\d+\.\d+")
+
+
+def _yaml_key(k: str) -> str:
+    """A mapping key with surrounding quotes removed (`"model-a": ...`), as
+    PyYAML reads a quoted key."""
+    if len(k) >= 2 and k[0] == k[-1] and k[0] in ("'", '"'):
+        return k[1:-1]
+    return k
 
 
 def _mini_yaml(text: str) -> dict:
@@ -542,8 +559,11 @@ def _mini_yaml(text: str) -> dict:
 
     def _kv(entry, own_indent):
         nonlocal i
-        key, _, val = entry.partition(":")
-        key, val = key.strip(), val.strip()
+        # token-ledger D4: a quoted key (`"model-a.v2": ...`) is split at the
+        # first colon outside its quotes and unquoted, as PyYAML reads it.
+        split = _partition_quote_aware(entry, ":") if entry[:1] in ("'", '"') else None
+        key, _, val = (split[0], ":", split[1]) if split is not None else entry.partition(":")
+        key, val = _yaml_key(key.strip()), val.strip()
         if val != "":
             return key, _scalar(val)
         if i < n and rows[i][0] > own_indent:
@@ -899,6 +919,53 @@ def _errors(m: dict, root: Path) -> list[str]:
                     v = loop.get(key)
                     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                         errs.append(f"loop.{key} must be a non-negative integer (got {v!r})")
+
+    # token-ledger D4: prices are the adopter's binding. The shape is checked,
+    # never the model names; the shim ships no price list.
+    if "economics" in m:
+        errs.extend(_economics_errors(m.get("economics")))
+    return errs
+
+
+ECONOMICS_KEYS = ("currency", "prices")
+PRICE_KEYS = ("input", "output", "cache-read", "cache-write")
+# A price key -> the usage row's count it multiplies (TOKEN_FIELDS).
+PRICE_FIELDS = dict(zip(PRICE_KEYS, ("input", "output", "cache_read", "cache_write")))
+
+
+def _economics_errors(econ) -> list[str]:
+    shape = ("the accepted shape is `economics: { currency: <code>, prices: { "
+             "\"<model>\": { input: <n>, output: <n>, cache-read: <n>, cache-write: <n> } } }`, "
+             "prices per million tokens")
+    if not isinstance(econ, dict):
+        return [f"economics must be a mapping — {shape}"]
+    errs = [f"economics has an unknown key '{k}' (known: {', '.join(ECONOMICS_KEYS)})"
+            for k in econ if k not in ECONOMICS_KEYS]
+    if "currency" in econ or "prices" in econ:
+        cur = econ.get("currency")
+        if not isinstance(cur, str) or not cur.strip():
+            errs.append(f"economics.currency must be a non-empty string naming the "
+                        f"currency the prices are in (got {cur!r})")
+    if "prices" in econ:
+        prices = econ.get("prices")
+        if not isinstance(prices, dict):
+            errs.append(f"economics.prices must be a mapping of model name to prices — {shape}")
+            return errs
+        for model, entry in prices.items():
+            where = f"economics.prices['{model}']"
+            if not isinstance(entry, dict):
+                errs.append(f"{where} must be a mapping of {', '.join(PRICE_KEYS)} — {shape}")
+                continue
+            for k in entry:
+                if k not in PRICE_KEYS:
+                    errs.append(f"{where} has an unknown key '{k}' (known: {', '.join(PRICE_KEYS)})")
+            for k in PRICE_KEYS:
+                if k not in entry:
+                    errs.append(f"{where} is missing '{k}'")
+                    continue
+                v = entry[k]
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                    errs.append(f"{where}.{k} must be a non-negative number (got {v!r})")
     return errs
 
 

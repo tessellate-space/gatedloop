@@ -13,7 +13,7 @@
 
 ## 3. Prices and stats
 
-- [ ] 3.1 `economics.currency` and `economics.prices` in `schema/gates.schema.json` and `gates validate` per design D4; tests for shape errors and an absent block.
+- [x] 3.1 `economics.currency` and `economics.prices` in `schema/gates.schema.json` and `gates validate` per design D4; tests for shape errors and an absent block.
 - [ ] 3.2 `gates stats`: tokens per task and per model, the unrecorded disclosure, `--json` `tokens` key, `--epic` rollup, per design D6; byte-identical output test with and without usage rows, and a ledger with no usage rows at all.
 - [ ] 3.3 `gates stats --cost`: priced subtotal, unpriced models named, tokens-only without prices; tests.
 

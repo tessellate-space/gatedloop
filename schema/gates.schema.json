@@ -199,6 +199,34 @@
         }
       }
     },
+    "economics": {
+      "description": "Prices for `gates stats --cost` (token-ledger design D4): the adopter's binding, as a gate body is. Optional: absent, `--cost` prints tokens only and says no prices are declared. The shim ships no price list and checks the shape only, never the model names.",
+      "type": "object",
+      "additionalProperties": false,
+      "dependentRequired": { "prices": ["currency"] },
+      "properties": {
+        "currency": {
+          "description": "The one currency every price is in (e.g. USD). Required when `prices` is declared.",
+          "type": "string",
+          "minLength": 1
+        },
+        "prices": {
+          "description": "Model name, as usage rows record it -> its prices per million tokens. A recorded model with no entry is named by `--cost` with its tokens, beside the priced subtotal.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["input", "output", "cache-read", "cache-write"],
+            "properties": {
+              "input": { "type": "number", "minimum": 0 },
+              "output": { "type": "number", "minimum": 0 },
+              "cache-read": { "type": "number", "minimum": 0 },
+              "cache-write": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
     "acceptance": {
       "description": "Where the project's acceptance scenarios live (acceptance-gate D5) -- the only thing the shim knows about acceptance artifacts. `gates acceptance brief` marks a spec scenario `covered` when a line in a matched file carries a scenario marker (`Scenario:`, `Scenario Outline:`, `#### Scenario:`, `- Scenario:`) followed by the same title, compared case-insensitively; otherwise `check by hand`. Optional: absent, every scenario is `check by hand`.",
       "type": "object",
