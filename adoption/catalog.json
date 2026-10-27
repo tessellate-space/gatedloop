@@ -172,6 +172,19 @@
       "detector": {"kind": "git-push-hook-installed"},
       "applies_when": {"kind": "git-commit-hook-wired"},
       "action": {"kind": "onboarding-step", "step": "/gatedloop:gates-init step 10, the git-layer hook install"}
+    },
+    {
+      "id": "token-budget",
+      "since": "0.8.0",
+      "what": "The ledger now records what each task cost in tokens: the commit hook and the Stop hook write a `usage` row from the session transcript (counts only, never its text), and `gates stats` reports tokens beside time. Optionally, `loop.token-budget` caps a change's recorded tokens: once reached, `gates run unit|ci` for a task refuses and names the `budget` halt. Recording happens either way; the budget is a number only you can choose.",
+      "question": "Cap a change's token spend?",
+      "options": [
+        {"answer": "declined", "label": "No budget: record only, and read the spend in `gates stats` (Recommended)"},
+        {"answer": "adopted", "value": 5000000, "label": "Yes: I set `loop.token-budget`, starting from `token-budget: 5000000`; edit it afterwards to your own number"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.token-budget"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.token-budget"}
     }
   ]
 }

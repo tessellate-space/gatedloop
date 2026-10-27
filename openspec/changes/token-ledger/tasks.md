@@ -25,7 +25,7 @@
 
 ## 5. Adoption and docs
 
-- [ ] 5.1 Add the `token-budget` catalogue item per design D8 with the record-only recommended answer; test.
+- [x] 5.1 Add the `token-budget` catalogue item per design D8 with the record-only recommended answer; test.
 - [ ] 5.2 Docs: SETUP (the `usage` subcommands, `economics`, `loop.token-budget`, the sources and the lag); AUTOMATION (the budget is enforced in code; what the Stop hook now writes; counts only, never transcript text); README (the stats line); `docs/gate-economics.md` (a tokens section). `python3 scripts/release docs` exits 0.
 
 ## 6. Close
