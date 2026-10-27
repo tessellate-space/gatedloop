@@ -2,11 +2,11 @@
 
 ## Why
 
-`rename-to-gatedloop` kept every earlier `specloop` name working, loudly, for exactly one release. Its design (D7) set the expiry at 0.8.0 and named this change, so the expiry has a plan rather than a memory. The precedent is `rename-to-gates` D3: a forwarder with no stated end is how an old name survives long enough to become a problem.
+`rename-to-gatedloop` kept every earlier `specloop` name working, loudly. Its design (D7) set the expiry at 0.8.0 and named this change; `defer-earlier-name-expiry` moved it to 0.9.0 so the #56 fix could ship in 0.8.0, so the expiry has a plan rather than a memory. The precedent is `rename-to-gates` D3: a forwarder with no stated end is how an old name survives long enough to become a problem.
 
 ## What Changes
 
-In 0.8.0:
+In 0.9.0:
 - **Read-both is removed.** The shim reads only the new spellings: `.gatedloop/`, `x-gatedloop-*`, `gatedloop/<gate>`, `gatedloop.*` rule ids, `gatedloop` hook markers and a schema's `gatedloop:` flow block. A project still holding `.specloop/` is refused, and the refusal names `gates migrate-name`.
 - **Dual status posting ends.** `gates marker publish` posts only `gatedloop/<gate>`.
 - **The forwarder plugin is removed.** That covers `forwarder/specloop/`, its marketplace entry and its version field in `scripts/release`.

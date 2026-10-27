@@ -77,6 +77,7 @@ ALLOWED = (
      ("section", "### Requirement: A project migrates to the new name by one command"),
      "the synced migration requirement, D3"),
     ("openspec/changes/remove-specloop-forwarders/*", None, "the expiry's plan, D7"),
+    ("openspec/changes/defer-earlier-name-expiry/*", None, "the expiry's move to 0.9.0"),
     ("openspec/changes/*/.openspec.yaml", ("lines", r"^x-specloop-"),
      "this repository's own change metadata, read under the earlier spelling until "
      "it runs `gates migrate-name` (D2)"),
