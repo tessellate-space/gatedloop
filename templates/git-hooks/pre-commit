@@ -90,7 +90,9 @@ echo "${commit_out}"
 
 # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row cannot
 # change a test, so the lock has nothing to judge in it (as in the tool hook).
+# Its usage is still recorded below (token-ledger D7).
 if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+  "${GATES}" usage record >/dev/null 2>&1 || true
   exit 0
 fi
 
