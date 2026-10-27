@@ -102,4 +102,10 @@ if ! tests_out="$("${GATES}" tests check 2>&1)"; then
   exit 1
 fi
 
+# token-ledger D7: a commit at the git layer has no hook input, so no
+# transcript: record it as a `no-transcript` usage row (null counts). Such a
+# row never moves the task's window, so the next readable flush still covers
+# the span. Recording can never deny the commit.
+"${GATES}" usage record >/dev/null 2>&1 || true
+
 exit 0
