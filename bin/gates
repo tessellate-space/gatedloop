@@ -108,11 +108,11 @@ def _find_manifest(root: Path) -> tuple[Path | None, Path | None]:
 # repository carries that name: the `.specloop/` state directory, the
 # `x-specloop-*` change-metadata keys, `specloop/<gate>` commit statuses, the
 # `specloop.*` built-in rule ids, the composed git-hook markers and a schema's
-# top-level `specloop:` flow block. Through 0.7.x every reader takes the new
+# top-level `specloop:` flow block. Through 0.8.x every reader takes the new
 # spelling first and the earlier one where the new is absent, and the first
 # earlier spelling a command reads prints one stderr line naming `gates
 # migrate-name`. Every literal of the earlier name in this shim lives in this
-# region, so `remove-specloop-forwarders` (0.8.0) deletes one block, and the
+# region, so `remove-specloop-forwarders` (0.9.0) deletes one block, and the
 # allow-list test (design D6) can hold the rest of the file to the new name.
 
 NAME = "gatedloop"
@@ -127,7 +127,7 @@ EARLIER_STATUS_CONTEXT_PREFIX = f"{EARLIER_NAME}/"
 EARLIER_HOOK_BEGIN = f"# >>> {EARLIER_NAME} pre-commit (enforce-at-the-effect) >>>"
 EARLIER_HOOK_END = f"# <<< {EARLIER_NAME} pre-commit (enforce-at-the-effect) <<<"
 EARLIER_HOOK_TEMPLATE_MARK = f"# {EARLIER_NAME} git pre-commit hook (enforce-at-the-effect"
-EARLIER_EXPIRY = "0.8.0"
+EARLIER_EXPIRY = "0.9.0"
 
 _earlier_name_warned = False
 
@@ -3888,7 +3888,7 @@ def _post_status(root: Path, repo: str, sha: str, gate: str, state: str, descrip
     if url:
         fields += ["-f", f"target_url={url}"]
     # rename-to-gatedloop D2: the earlier context is posted beside the new
-    # one through 0.7.x, so branch protection still requiring it keeps passing.
+    # one through 0.8.x, so branch protection still requiring it keeps passing.
     for posted in (context, f"{EARLIER_STATUS_CONTEXT_PREFIX}{gate}"):
         fields[3] = f"context={posted}"
         out = _gh(root, "api", f"repos/{repo}/statuses/{sha}", "-X", "POST", *fields)

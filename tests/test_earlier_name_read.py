@@ -1,7 +1,7 @@
 """Read-both, loud, for one release (change `rename-to-gatedloop`, design D2;
 spec "The earlier name is read loudly for one release").
 
-Through 0.7.x the shim reads every renamed identifier under its new spelling
+Through 0.8.x the shim reads every renamed identifier under its new spelling
 and, where that is absent, under the earlier `specloop` one, and the first
 earlier spelling a command reads prints one stderr line naming `gates
 migrate-name`. The regressions caught here, one per identifier:
@@ -58,7 +58,7 @@ gates = importlib.util.module_from_spec(_spec)
 _loader.exec_module(gates)
 
 CHANGE = "add-thing"
-WARNING_TAIL = "run gates migrate-name (old names stop working in 0.8.0)"
+WARNING_TAIL = "run gates migrate-name (old names stop working in 0.9.0)"
 MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\napproval:\n  plan: self\n'
 PROPOSAL = ("## Why\n\nBecause a reason that is long enough to pass the validator's checks.\n\n"
             "## What Changes\n\n- A thing changes.\n")
