@@ -8,7 +8,7 @@
 
 ### D1. What goes, what stays
 
-| Goes in 0.8.0 | Stays until a later change |
+| Goes in 0.9.0 | Stays until a later change |
 |---|---|
 | `_state_dir`'s fallback to `.specloop/`, `_meta_value`'s fallback key, the earlier status context in `check-remote`, `_canonical_rule_id`, the earlier hook markers in the detectors, the earlier schema block | `gates migrate-name`, `_migrate_name_text`, `_earlier_name_remnants` |
 | `marker publish`'s second context | the doctor `name` row and the `rename` catalogue item, which still find what `migrate-name` would move |
@@ -33,5 +33,5 @@ The delta is written as an ADDED requirement, because `rename-to-gatedloop` isn'
 
 ## Risks
 
-- **An adopter who never updated during 0.7.x.** They meet D2's refusal, which names the command. `gates migrate-name` still exists to run.
-- **Branch protection still requiring `specloop/ci`.** It stops passing once only `gatedloop/ci` is posted. The 0.7.x notes and `gates migrate-name`'s printed edits gave the replacement for a full release. This change's release notes repeat it.
+- **An adopter who never updated during 0.8.x.** They meet D2's refusal, which names the command. `gates migrate-name` still exists to run.
+- **Branch protection still requiring `specloop/ci`.** It stops passing once only `gatedloop/ci` is posted. The 0.8.x notes and `gates migrate-name`'s printed edits gave the replacement for a full release. This change's release notes repeat it.
