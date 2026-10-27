@@ -127,6 +127,12 @@ def clean_env(extra=None, path_prefix=None) -> dict:
     A test that needs a human context passes `CLAUDECODE=None`."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["CLAUDECODE"] = "1"
+    # No automatic maintenance: git detaches it into the background after a
+    # commit or fetch, and a detached writer still adding to `.git/objects`
+    # made a test's temp-dir cleanup fail with "Directory not empty" on CI.
+    env.update({"GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
+                "GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0"})
     if path_prefix:
         env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
     for k, v in (extra or {}).items():
