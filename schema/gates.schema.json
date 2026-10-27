@@ -196,6 +196,11 @@
           "type": "integer",
           "minimum": 0,
           "default": 1
+        },
+        "token-budget": {
+          "description": "Tokens a change may spend, counted from its recorded `usage` rows (token-ledger design D5): input, output, cache-read and cache-write across every model. Optional, no default: absent, no budget applies. Once the recorded total reaches it, task-bearing `gates run unit|ci` refuses with exit 1 and names `gates halt record budget`. The task in flight is counted at its commit or the session stop, so the refusal lags by at most that.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     },

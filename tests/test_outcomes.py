@@ -24,7 +24,7 @@ gates = importlib.util.module_from_spec(_spec)
 _loader.exec_module(gates)
 
 CAUSES = ("missing-oracle", "weak-spec", "oracle-conflict", "stalled",
-          "environment", "other")
+          "environment", "budget", "other")
 
 
 def row(ts, gate, **extra):

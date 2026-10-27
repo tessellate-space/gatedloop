@@ -919,6 +919,13 @@ def _errors(m: dict, root: Path) -> list[str]:
                     v = loop.get(key)
                     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                         errs.append(f"loop.{key} must be a non-negative integer (got {v!r})")
+            # token-ledger D5: a change's token budget -- a positive integer,
+            # no default (absent: no budget).
+            if "token-budget" in loop:
+                v = loop.get("token-budget")
+                if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                    errs.append(f"loop.token-budget must be a positive integer of tokens "
+                                f"per change (got {v!r})")
 
     # token-ledger D4: prices are the adopter's binding. The shape is checked,
     # never the model names; the shim ships no price list.
@@ -970,7 +977,7 @@ def _economics_errors(econ) -> list[str]:
 
 
 TEST_AUTHOR_MODES = ("separate", "inline")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -5397,7 +5404,8 @@ REVIEW_SCOPES = ("authored",)
 # (`--detail` is required for it).
 HALT_CAUSES = (
     "missing-oracle", "weak-spec", "oracle-conflict", "stalled",
-    "environment", "other",
+    # token-ledger D5: the change's token budget was reached.
+    "environment", "budget", "other",
 )
 
 
