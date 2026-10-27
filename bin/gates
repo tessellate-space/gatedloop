@@ -10741,10 +10741,14 @@ def _is_failed_gate_row(r: dict, task: str) -> bool:
 
 def _attempt_state(rows: list[dict], task: str) -> tuple[bool, int]:
     """`(red_run_seen, failed_attempts)` for `task`, per design D1, from the
-    rows after its latest `task-start` (all rows when it has none)."""
+    rows after the later of its latest `task-start` and its latest test
+    placement (all rows when it has neither). Starting at the placement
+    (unblock-authored-lock D6) means a test-defect cycle's red runs, against
+    tests the author has since replaced, are not attempts: the first red run
+    against the re-placed tests is the task's red run."""
     start = 0
     for i, r in enumerate(rows):
-        if r.get("gate") == TASK_BASELINE_EVENT and r.get("task") == task:
+        if r.get("gate") in (TASK_BASELINE_EVENT, TESTS_PLACED_EVENT) and r.get("task") == task:
             start = i + 1
     red_seen, count = False, 0
     for r in rows[start:]:
