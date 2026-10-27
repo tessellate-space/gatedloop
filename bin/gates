@@ -7836,6 +7836,57 @@ def tokens_from_rows(rows: list[dict]) -> dict:
     }
 
 
+def cost_from_tokens(t: dict, m: dict) -> dict:
+    """Pure (design D4): `tokens_from_rows`' figures priced with the
+    manifest's `economics.prices` -- per-million-token prices per model, in
+    one declared currency. A recorded model with no price is named with its
+    tokens and left out of the amounts; without prices nothing is priced."""
+    econ = m.get("economics") if isinstance(m, dict) else None
+    prices = econ.get("prices") if isinstance(econ, dict) else None
+    if not isinstance(prices, dict) or not prices:
+        return {"prices_declared": False, "currency": None, "total": None, "tasks": {},
+                "unattributed": None, "unpriced": {}}
+
+    def price(models: dict) -> tuple[float, dict]:
+        amount, unpriced = 0.0, {}
+        for model, mb in models.items():
+            p = prices.get(model)
+            if not isinstance(p, dict):
+                unpriced[model] = unpriced.get(model, 0) + mb["total"]
+                continue
+            for key, field in PRICE_FIELDS.items():
+                v = p.get(key)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    amount += mb[field] * v / 1_000_000
+        return amount, unpriced
+
+    total, unpriced = price(t["models"])
+    return {
+        "prices_declared": True,
+        "currency": econ.get("currency"),
+        "total": round(total, 6),
+        "tasks": {task: round(price(b["models"])[0], 6) for task, b in t["tasks"].items()},
+        "unattributed": round(price(t["unattributed"]["models"])[0], 6),
+        "unpriced": unpriced,
+    }
+
+
+def _cost_format_human(cost: dict) -> list[str]:
+    if not cost["prices_declared"]:
+        return ["cost: no prices declared (`economics.prices` in .gates.yaml) -- tokens only"]
+    cur = cost["currency"] or ""
+    scope = "priced models only" if cost["unpriced"] else "every recorded model priced"
+    lines = [f"cost ({cur}): {cost['total']:.4f} total ({scope})"]
+    for task in sorted(cost["tasks"]):
+        lines.append(f"  {task:<15} {cost['tasks'][task]:>12.4f}")
+    if cost["unattributed"]:
+        lines.append(f"  {'(unattributed)':<15} {cost['unattributed']:>12.4f}")
+    if cost["unpriced"]:
+        lines.append("unpriced (no `economics.prices` entry): " + ", ".join(
+            f"{model} ({n} tokens)" for model, n in sorted(cost["unpriced"].items())))
+    return lines
+
+
 def _read_ledger_rows_and_skipped(root: Path, change: str) -> tuple[list[dict], int]:
     """Like `_read_ledger_rows`, but also discloses how many lines could not
     be read as a JSON object (design D2) — a new function, not a change to
@@ -7928,6 +7979,8 @@ def _stats_format_human(doc: dict) -> str:
         )
         if "tokens" in c:
             lines.extend(_tokens_format_human(c["tokens"]))
+        if "cost" in c:
+            lines.extend(_cost_format_human(c["cost"]))
         lines.append("")
     lines.append(
         "limitations: the ledger records event timestamps and durations only "
@@ -8151,6 +8204,10 @@ def cmd_stats(m: dict, root: Path, args) -> int:
         )
 
     reports = [_stats_change_report(root, c, idle_gap_ms) for c in changes]
+    if getattr(args, "cost", False):
+        # token-ledger D4: priced only on request, from the adopter's binding.
+        for report in reports:
+            report["cost"] = cost_from_tokens(report["tokens"], m)
     doc = {
         "idle_gap_ms": idle_gap_ms,
         "changes": reports,
@@ -12772,6 +12829,10 @@ def main() -> int:
     sp.add_argument(
         "--outcomes", action="store_true",
         help="report autonomy instead of cost: terminal state, hands-off verdict, halts by cause, interventions by kind",
+    )
+    sp.add_argument(
+        "--cost", action="store_true",
+        help="price the recorded tokens with `economics.prices` (per million tokens, one currency); unpriced models are named, and without prices tokens are printed alone",
     )
     sp.add_argument(
         "--idle-gap", type=float, default=DEFAULT_IDLE_GAP_MINUTES, dest="idle_gap",
