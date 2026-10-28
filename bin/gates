@@ -6326,24 +6326,37 @@ def _staged_blobs(root: Path) -> dict[str, str] | None:
     return entries
 
 
-def _is_red_unit_row(r: dict, task: str) -> bool:
+def _is_red_gate_row(r: dict, task: str, gate: str = "unit") -> bool:
+    """A run of `gate` for `task` that failed for a reason other than a
+    precondition (task-oracle D4: the task's oracle gate, `unit` untagged)."""
     exit_code = r.get("exit")
     return (
-        r.get("gate") == "unit" and r.get("task") == task
-        and isinstance(exit_code, int) and exit_code not in (0, PRECONDITION_EXIT_CODE)
+        r.get("gate") == gate and r.get("task") == task
+        and isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        and exit_code not in (0, PRECONDITION_EXIT_CODE)
         and r.get("outcome") != "precondition-failed"
     )
 
 
-def _unit_verdict_row(r: dict, task: str) -> bool:
-    """A `unit` run for `task` that reached a verdict: a precondition
+def _gate_verdict_row(r: dict, task: str, gate: str = "unit") -> bool:
+    """A run of `gate` for `task` that reached a verdict: a precondition
     failure (exit 75) never ran the tests, so it is neither green nor red."""
     exit_code = r.get("exit")
     return (
-        r.get("gate") == "unit" and r.get("task") == task
-        and isinstance(exit_code, int) and exit_code != PRECONDITION_EXIT_CODE
+        r.get("gate") == gate and r.get("task") == task
+        and isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        and exit_code != PRECONDITION_EXIT_CODE
         and r.get("outcome") != "precondition-failed"
     )
+
+
+def _oracles_in_tree(root: Path, change: str, blobs: dict[str, str]) -> dict[str, dict | None]:
+    """`{task: oracle}` from the change's `tasks.md` as the evaluated tree
+    holds it -- the staged index, or a commit (task-oracle D2), so a tag
+    edited mid-branch is judged as of each commit."""
+    blob = blobs.get(f"openspec/changes/{change}/tasks.md")
+    text = _blob_text(root, blob) if blob else None
+    return {tid: oracle for tid, _text, oracle in _task_lines_text(text or "")}
 
 
 def _current_task_after_handoff(rows: list[dict]) -> str | None:
@@ -6499,29 +6512,34 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                    if task in active else "it is not in the handoff")
             problems.append(f"{rel}: {why}")
 
-    # 3. For a placed task with tests, a `unit` run recorded after the
-    #    placement failed for a reason other than a precondition -- or, for a
-    #    task declared characterization (authored-test-kinds D2), the first
-    #    such run passed: its tests must be seen to pin the tree as it was.
+    # 3. For a placed task with tests, a run of its oracle gate recorded
+    #    after the placement failed for a reason other than a precondition --
+    #    or, for a task declared characterization (authored-test-kinds D2),
+    #    the first such run passed: its tests must be seen to pin the tree as
+    #    it was. The oracle gate is the plan's tag, read from the evaluated
+    #    tree, or `unit` for an untagged task (task-oracle D4).
+    oracles = _oracles_in_tree(root, change, staged)
     for task, (index, paths) in sorted(active.items()):
         if only is not None and task != only:
             continue
         if not paths:
             continue
-        if task in state["characterization"]:
-            first = next((r for r in rows[index + 1:] if _unit_verdict_row(r, task)), None)
+        oracle = oracles.get(task)
+        gate = (oracle or {}).get("gate") or "unit"
+        if task in state["characterization"] or (oracle or {}).get("characterization"):
+            first = next((r for r in rows[index + 1:] if _gate_verdict_row(r, task, gate)), None)
             if first is None:
                 problems.append(
-                    f"task {task} is declared characterization: no passing `unit` "
+                    f"task {task} is declared characterization: no passing `{gate}` "
                     "run is recorded after its tests were placed — its tests must "
                     "pass on the tree as it is, before any implementation. Run "
-                    f"`gates run unit --task {task}` (a precondition failure, exit "
+                    f"`gates run {gate} --task {task}` (a precondition failure, exit "
                     "75, is not a run)"
                 )
             elif first.get("exit") != 0:
                 problems.append(
                     f"task {task} is declared characterization, but its first "
-                    f"`unit` run after placement was red (exit {first.get('exit')}) "
+                    f"`{gate}` run after placement was red (exit {first.get('exit')}) "
                     "— its tests do not describe the tree as it is. That is a test "
                     "defect: discard the task's work and record "
                     f"`gates tests defect {task} --kind setup|assertion --detail ...` for the author"
@@ -6530,10 +6548,10 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
         # D4: a task reopened after completion keeps the red run its first
         # placement recorded; none can exist against its committed code.
         since = reopened[task][0] if task in reopened else index
-        if not any(_is_red_unit_row(r, task) for r in rows[since + 1:]):
+        if not any(_is_red_gate_row(r, task, gate) for r in rows[since + 1:]):
             problems.append(
-                f"task {task}: no failing `unit` run is recorded after its tests "
-                f"were placed — red before green is required. Run `gates run unit "
+                f"task {task}: no failing `{gate}` run is recorded after its tests "
+                f"were placed — red before green is required. Run `gates run {gate} "
                 f"--task {task}` and read why it fails before implementing (a "
                 "precondition failure, exit 75, is not a red run; placed tests "
                 f"that pass are a defect: `gates tests defect {task} --kind green --detail ...`)"
@@ -6551,9 +6569,10 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     )
     if current and implementing and current not in active:
         if current in state["tests"]:
+            gate = (oracles.get(current) or {}).get("gate") or "unit"
             problems.append(
                 f"task {current}: its authored tests are not placed — run "
-                f"`gates tests place {current}` and a red `gates run unit --task "
+                f"`gates tests place {current}` and a red `gates run {gate} --task "
                 f"{current}` before implementing it"
             )
         elif current not in state["no_behaviour"]:
