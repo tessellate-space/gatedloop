@@ -86,3 +86,23 @@ For a task tagged with a gate, the lock's red-run condition SHALL be read on tha
 
 - **WHEN** `loop.task-oracle` is not declared
 - **THEN** untagged tasks are handed off as before
+
+### Requirement: A task's oracle tag is held to the approved plan
+
+When a change's `tasks.md` carries an oracle tag, the approval sha SHALL also cover its `(task id, tag)` pairs, without checkbox state or task text, and a plan with no tag SHALL hash as before. The handoff, the lock and `gates tests check --ref` SHALL refuse a task whose tag in the evaluated tree differs from its tag in the merge target's `tasks.md`, naming the task, both tags and that the plan is amended on the target and re-attested.
+
+#### Scenario: A retag on the change branch
+
+- **WHEN** the target's `tasks.md` tags 5.1 `[oracle: integration]` and the change branch retags it `[oracle: unit characterization]`
+- **THEN** the commit is refused, naming 5.1, both tags and the amend-and-re-attest route
+
+#### Scenario: A retag on the target after approval
+
+- **WHEN** an approved plan's tag for 5.1 is edited on the target
+- **THEN** `check-implement` refuses until the change is re-attested
+
+#### Scenario: Ticking a task
+
+- **WHEN** a task's `[ ]` becomes `[x]`
+- **THEN** the approval sha is unchanged
+
