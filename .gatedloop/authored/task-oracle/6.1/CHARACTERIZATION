@@ -1,0 +1,1 @@
+An end-to-end run over tasks 1.1-3.3, each already tested on its own: it pins their composition on the finished tree, so it passes on its first unit run (the plan's [oracle: unit characterization], amended in #77).
