@@ -5,7 +5,7 @@
 ## 2. Removal
 
 - [x] 2.1 Remove read-both and the earlier-name warning from `bin/gates`; a `.specloop/`-only project is refused naming `gates migrate-name` (design D1, D2). Tests
-- [ ] 2.2 `gates marker publish` posts only `gatedloop/<gate>`. Tests
+- [x] 2.2 `gates marker publish` posts only `gatedloop/<gate>`. Tests
 - [ ] 2.3 Remove the forwarder plugin, its marketplace entry and its release-script field (design D1). Tests
 
 ## 3. Close

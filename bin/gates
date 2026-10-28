@@ -295,8 +295,9 @@ def cmd_migrate_name(_args) -> int:
               "ledger-grade commit).")
     contexts = ", ".join(f"{EARLIER_STATUS_CONTEXT_PREFIX}{g} -> {NAME}/{g}" for g in PUBLISHED_STATUS_GATES)
     print(f"\n{NAME}: edits this command does not make; make each by hand:")
-    print(f"  - branch protection, where it requires a status: {contexts}. Both "
-          f"contexts are posted until {EARLIER_EXPIRY}, so change it whenever suits.")
+    print(f"  - branch protection, where it requires a status: {contexts}. Only the "
+          f"new contexts are posted from {EARLIER_EXPIRY}, so an earlier one required "
+          "there never passes again.")
     print(f"  - Claude Code: /plugin marketplace add tessellate-space/{NAME}, then /plugin "
           f"install {NAME}@{NAME}, then /plugin uninstall {EARLIER_NAME}@{EARLIER_NAME}.")
     for edit in _settings_edits(root):
@@ -3910,23 +3911,19 @@ def _publish_tests_status(root: Path, ref: str) -> str:
 
 
 def _post_status(root: Path, repo: str, sha: str, gate: str, state: str, description: str) -> None:
-    """Post one status under the new context and the earlier one."""
+    """Post one status under `gatedloop/<gate>`, the only context from 0.9.0."""
     context = f"{STATUS_CONTEXT_PREFIX}{gate}"
     fields = ["-f", f"state={state}", "-f", f"context={context}", "-f", f"description={description}"]
     url = _ci_run_url(repo)
     if url:
         fields += ["-f", f"target_url={url}"]
-    # rename-to-gatedloop D2: the earlier context is posted beside the new
-    # one through 0.8.x, so branch protection still requiring it keeps passing.
-    for posted in (context, f"{EARLIER_STATUS_CONTEXT_PREFIX}{gate}"):
-        fields[3] = f"context={posted}"
-        out = _gh(root, "api", f"repos/{repo}/statuses/{sha}", "-X", "POST", *fields)
-        if out.returncode != 0:
-            raise _ForgeRefusal(
-                f"gatedloop: posting {posted} on {sha[:12]} failed (`gh api`): "
-                f"{(out.stderr or out.stdout).strip() or f'exit {out.returncode}'}"
-            )
-        print(f"gatedloop: published {posted} on {sha[:12]} — {description}")
+    out = _gh(root, "api", f"repos/{repo}/statuses/{sha}", "-X", "POST", *fields)
+    if out.returncode != 0:
+        raise _ForgeRefusal(
+            f"gatedloop: posting {context} on {sha[:12]} failed (`gh api`): "
+            f"{(out.stderr or out.stdout).strip() or f'exit {out.returncode}'}"
+        )
+    print(f"gatedloop: published {context} on {sha[:12]} — {description}")
 
 
 def _check_remote_status(root: Path, gate: str, ref: str) -> str:

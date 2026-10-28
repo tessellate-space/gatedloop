@@ -158,7 +158,7 @@
       ],
       "detector": {"kind": "earlier-name"},
       "applies_when": null,
-      "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which can wait because both contexts are posted until 0.9.0."}
+      "action": {"kind": "confirm", "detail": "Run `gates migrate-name` from the repository root. It moves `.specloop/` to `.gatedloop/` with `git mv`, renames the `x-specloop-*` keys in each active change's `.openspec.yaml` (values kept; the approval sha covers no `.openspec.yaml`, so every approval still checks), renames the markers in a composed git hook, and leaves archived changes alone. It commits nothing: commit what it changed. It then prints the edits it does not make, each with its replacement: the Claude Code plugin install, any permission rule or setting naming the earlier plugin, and branch protection requiring `specloop/ci`, which never passes again: from 0.9.0 only `gatedloop/ci` is posted."}
     },
     {
       "id": "git-push-hook",

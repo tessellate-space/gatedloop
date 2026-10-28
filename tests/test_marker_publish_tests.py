@@ -7,9 +7,8 @@ commit's own tree is the evidence. The regressions: a success posted on a
 head whose lock is broken, a failure that does not name the offending path
 or that exits 0 (so a CI step stays green), a status that does not carry
 the tree `check-remote` compares, a pull request carrying no change that
-cannot get the status branch protection requires, the earlier status
-context left unposted through 0.8.x, and a missing forge CLI read as
-"nothing to publish".
+cannot get the status branch protection requires, and a missing forge CLI
+read as "nothing to publish".
 
 The forge is the fake in `_forge_fixture` (no real API is ever called); the
 repository is a real one, because the lock is a comparison of git blobs.
@@ -35,7 +34,6 @@ gates = importlib.util.module_from_spec(_spec)
 _loader.exec_module(gates)
 
 CONTEXT = f"{gates.NAME}/tests"
-EARLIER_CONTEXT = f"{gates.EARLIER_STATUS_CONTEXT_PREFIX}tests"
 
 
 class MarkerPublishTestsTest(unittest.TestCase):
@@ -60,7 +58,7 @@ class MarkerPublishTestsTest(unittest.TestCase):
         r = repo.gates("marker", "publish", "tests", **NO_CI)
 
         self.assertEqual(r.returncode, 0, combined(r))
-        for context in (CONTEXT, EARLIER_CONTEXT):
+        for context in (CONTEXT,):
             with self.subTest(context):
                 status = forge.latest_status(head, context)
                 self.assertIsNotNone(status, f"no {context} status on {head}")
@@ -92,7 +90,7 @@ class MarkerPublishTestsTest(unittest.TestCase):
 
         self.assertNotEqual(r.returncode, 0, combined(r))
         self.assertIn(TEST_REL, combined(r))
-        for context in (CONTEXT, EARLIER_CONTEXT):
+        for context in (CONTEXT,):
             with self.subTest(context):
                 status = forge.latest_status(head, context)
                 self.assertIsNotNone(status, f"no {context} status on {head}")

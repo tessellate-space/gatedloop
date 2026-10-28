@@ -1,11 +1,12 @@
-"""Every write uses the new names, with D2's one exception (change
-`rename-to-gatedloop`, design D2; spec "The plugin is named gatedloop").
+"""Every write uses the new names (change `rename-to-gatedloop`, design D2;
+spec "The plugin is named gatedloop"; from 0.9.0, change
+`remove-specloop-forwarders`, spec "The earlier name is refused after its
+release").
 
 The regressions caught here:
 
-- `marker publish` posting only `gatedloop/<gate>`, so a project whose branch
-  protection still requires the earlier context cannot merge mid-migration;
-  or the two contexts saying different things about the same tree;
+- `marker publish` still posting the earlier context beside `gatedloop/<gate>`
+  after its release, or the new context missing or carrying another tree;
 - a refusal still speaking the earlier name, which sends an adopter looking
   for a context that is no longer the one being written;
 - a re-attest that leaves the earlier `x-…-approved-*` spelling beside the new
@@ -67,7 +68,7 @@ def _top_keys(text: str) -> list[str]:
             if line and not line[0].isspace() and ":" in line]
 
 
-class TestStatusesUnderBothContexts(unittest.TestCase):
+class TestStatusUnderTheNewContext(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
@@ -79,7 +80,7 @@ class TestStatusesUnderBothContexts(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_publish_posts_the_same_verdict_under_both_contexts(self):
+    def test_a_publish_posts_only_the_new_context(self):
         self.repo.prove_head()
         head = git(self.repo.primary, "rev-parse", "HEAD")
         tree = gates._normalize_tree(self.repo.primary, git(self.repo.primary, "rev-parse", "HEAD^{tree}"))
@@ -87,12 +88,11 @@ class TestStatusesUnderBothContexts(unittest.TestCase):
         r = self.repo.gates("marker", "publish", "ci", **NO_CI)
 
         self.assertEqual(r.returncode, 0, combined(r))
-        for context in ("gatedloop/ci", EARLIER_CI):
-            with self.subTest(context):
-                status = self.forge.latest_status(head, context)
-                self.assertIsNotNone(status, f"no {context} status on {head}")
-                self.assertEqual(status["state"], "success")
-                self.assertEqual(status["description"], f"tree {tree}")
+        status = self.forge.latest_status(head, "gatedloop/ci")
+        self.assertIsNotNone(status, f"no gatedloop/ci status on {head}")
+        self.assertEqual(status["state"], "success")
+        self.assertEqual(status["description"], f"tree {tree}")
+        self.assertIsNone(self.forge.latest_status(head, EARLIER_CI))
         self.assertTrue(r.stdout.startswith("gatedloop: published gatedloop/ci"), r.stdout)
 
     def test_a_refusal_names_the_new_context_and_posts_nothing(self):
