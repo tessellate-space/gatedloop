@@ -6729,11 +6729,13 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
             defect_log.setdefault(r["task"], []).append(
                 {"kind": test_defect_kind(r), "detail": r.get("detail")})
     tasks: dict[str, dict] = {}
+    oracles = _change_task_oracles(root, change)
     if state is not None:
         for task in sorted(set(state["tests"]) | set(state["no_behaviour"]),
                            key=lambda t: [int(x) if x.isdigit() else x for x in t.split(".")]):
             log = defect_log.get(task, [])
             tasks[task] = {
+                "oracle": _oracle_label(oracles.get(task)),
                 "tests": sorted(state["tests"].get(task, {})),
                 "no_behaviour": state["no_behaviour"].get(task),
                 "characterization": state["characterization"].get(task),
@@ -6768,12 +6770,13 @@ def _tests_show(m: dict, root: Path, args) -> int:
     for task, t in doc["tasks"].items():
         state = "placed" if t["placed"] else "held"
         extra = f", {t['defects']} defect(s)" if t["defects"] else ""
+        oracle = f"oracle: {t['oracle'] or 'undeclared'}"
         if t["no_behaviour"] is not None:
-            print(f"  {task}  no behaviour change — {t['no_behaviour']}{extra}")
+            print(f"  {task}  {oracle}  no behaviour change — {t['no_behaviour']}{extra}")
         else:
             if t["characterization"] is not None:
                 state += f", characterization — {t['characterization']}"
-            print(f"  {task}  {state}{extra}")
+            print(f"  {task}  {oracle}  {state}{extra}")
             for path in t["tests"]:
                 print(f"        {path}")
         for d in t["defect_log"]:
@@ -6852,6 +6855,37 @@ def _task_lines(tasks_md: Path) -> list[tuple[str, str, dict | None]]:
     if not tasks_md.is_file():
         return []
     return _task_lines_text(tasks_md.read_text())
+
+
+def _oracle_label(oracle: dict | None) -> str | None:
+    """A declared oracle as one word or two: `<gate>`, `<gate>
+    characterization` or `none`; `None` for an untagged task."""
+    if oracle is None:
+        return None
+    if oracle["gate"] is None:
+        return "none"
+    return oracle["gate"] + (" characterization" if oracle["characterization"] else "")
+
+
+def _change_task_oracles(root: Path, change: str) -> dict[str, dict | None]:
+    """`{task: oracle}` from the change's `tasks.md` in the working tree."""
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    return {tid: oracle for tid, _text, oracle in _task_lines(tasks_md)}
+
+
+def _oracle_brief_line(oracle: dict | None) -> str:
+    """What the test author is told about one task's declared oracle (D3)."""
+    if oracle is None:
+        return ("undeclared — the author decides: red first on `unit`, "
+                "CHARACTERIZATION or NO-TESTS")
+    gate = oracle["gate"]
+    if gate is None:
+        return "none — the task needs no tests: write its NO-TESTS reason and nothing else"
+    if oracle["characterization"]:
+        return (f"characterization on `{gate}` — tests that pass on their first `{gate}` "
+                "run, with a CHARACTERIZATION reason")
+    return (f"`{gate}`, red first — tests that `{gate}` runs and that fail on their "
+            "first run after placement")
 
 
 _REPO_PATH_RE = re.compile(r"^[\w.\-]+(/[\w.\-*]+)+$")
@@ -6954,6 +6988,14 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
         lines.append(f"  {tid} {text}")
     if not tasks:
         lines.append("  none — tasks.md lists no `- [ ] N.M` task lines")
+    lines.append("")
+
+    # task-oracle D3: the plan's declaration, so the author does not infer it.
+    lines.append("## Declared oracles")
+    for tid, _text, oracle in tasks:
+        lines.append(f"{tid}: {_oracle_brief_line(oracle)}")
+    if not tasks:
+        lines.append("none — no tasks")
     lines.append("")
 
     conv = m.get("conventions") or {}
