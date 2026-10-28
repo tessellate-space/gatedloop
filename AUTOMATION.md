@@ -453,12 +453,19 @@ enforcement:
   halt voids a placement only at a task not yet completed, completion being ordered by
   the commits that tick the task and carry the row (`unblock-authored-lock` D2–D5).
 - **Red before green is a checked fact.** For every placed task with tests, the same
-  check requires a `unit` run recorded after the placement that failed with an exit other
-  than 75 (a precondition failure is not a red run), and it refuses implementation staged
-  for the task in flight before its tests are placed. A task its author declared
-  `characterization` (a locked `CHARACTERIZATION` file beside its held tests) is held to
-  the reverse: its first such run after placement must be green, and a red one is refused
-  as a defect.
+  check requires a run of the task's **oracle gate** recorded after the placement that
+  failed with an exit other than 75 (a precondition failure is not a red run), and it
+  refuses implementation staged for the task in flight before its tests are placed. The
+  oracle gate is the one the plan's tag declares (`[oracle: integration]` needs a red
+  `gates run integration --task <N.M>`), read from `tasks.md` in the tree being checked
+  (the staged index, or the commit under `--ref`), and `unit` for an untagged task
+  (`task-oracle` D2, D4). A task its author declared `characterization` (a locked
+  `CHARACTERIZATION` file beside its held tests), or that the plan tags
+  `characterization`, is held to the reverse: its first verdict on that gate after
+  placement must be green, and a red one is refused as a defect. The same check refuses a task
+  whose tag in the checked tree differs from its tag in the merge target's `tasks.md`, so
+  the branch cannot choose its own oracle; the tag changes only by amending the plan on
+  the target and re-attesting it, since the approval sha covers the tags (`task-oracle` D9).
 
 Both run where the `ci` marker check runs: `hooks/gate-commit.sh` (layer 1) and the git
 `pre-commit` hook (layer 2) call `gates tests check` right after it, so every
@@ -491,8 +498,9 @@ planning or docs pull request gets the status too.
 recorded on every ledger row, and nothing counted it. Now the count comes from the
 ledger alone:
 
-- **The cap.** A failed attempt is a red `unit` or `ci` row for the task after its
-  RED run and after its latest `restart`. Exit 75 never counts. Once the count
+- **The cap.** A failed attempt is a red row of the task's oracle gate (`unit` unless
+  the plan's tag declares another) or of `ci`, after its RED run (the first red
+  oracle-gate row) and after its latest `restart`. Exit 75 never counts. Once the count
   reaches `loop.attempts` (default 2), `gates run unit|ci` for the task refuses with
   exit 1, runs nothing and writes no row. The caller's `--attempt` is a label, so
   passing a smaller one buys nothing.

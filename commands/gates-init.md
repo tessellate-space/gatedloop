@@ -279,6 +279,22 @@ confirming every entry. It runs on **every** onboarding pass, not only when aske
   the adopter declines every candidate or there was nothing to draft and they don't
   want to write one now. `/gatedloop:upgrade` runs this same pass when the item is
   adopted later; the pass is the only copy.
+- **Then offer the task-oracle line** (the `task-oracle` adoption item). Ask (AskUserQuestion)
+  whether the plan should declare each task's oracle. On yes, the line that makes
+  `/opsx:propose` write the tags is:
+
+  > End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate),
+  > `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where
+  > <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+
+  Where this project generates `openspec/config.yaml`'s `rules:` block from the rules-doc,
+  write it as a `### task-oracle-tags` entry with `Applies to: tasks` and that line as its
+  `Rule:` (the template carries one); otherwise show the adopter the line to add under
+  `rules.tasks` in their own `openspec/config.yaml` — never edit that file for them. Then
+  offer `loop.task-oracle: required` (an untagged plan is refused at handoff) or
+  `optional`, write the one they confirm, and record `gates adoption record task-oracle
+  adopted`; on "not yet", record `declined`, write nothing, and drop the template's
+  `task-oracle-tags` entry from a rules-doc created from it.
 - **No harvestable material?** Say so plainly and complete the step **without writing
   placeholder content** — an honest empty rules-doc (or none) beats invented rules.
   Convention review then falls back to inline prose per surface (step 5), and the

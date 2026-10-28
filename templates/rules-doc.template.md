@@ -50,3 +50,12 @@ Describe how this project writes tests: where they live and how they are named,
 which shared fixtures and factories to build on (by path), what may be faked and
 what must be real, and which layer owns which behaviour. The test author reads
 this before writing a change's tests; convention review holds every test to it.
+
+### task-oracle-tags
+Applies to: tasks
+Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+
+Keep this rule if your plans declare each task's oracle (the `task-oracle` adoption
+item); delete it otherwise. `gates conventions sync` projects it into
+`openspec/config.yaml`'s `rules.tasks`, so `/opsx:propose` writes the tags, and the
+test author, the handoff and the commit lock then hold each task to its tag.

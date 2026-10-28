@@ -49,7 +49,9 @@ For each candidate:
 1. **Author the tests.** Dispatch the `test-author` agent with the change name, unless
    the project declares `loop.test-author: inline`. It writes into
    `.gatedloop/authored/<change>/` and hands off with `gates tests handoff`.
-   `gates tests show <change> --json` reports `"handoff": true` once it has.
+   `gates tests show <change> --json` reports `"handoff": true` once it has, and each
+   task's `oracle`: the gate its red step runs on, the task's oracle gate (`unit` by
+   default, or the gate the plan's `[oracle: …]` tag names).
 2. **Open a lane.** `git worktree add ../lanes/<change> -b <change> main` — branch name =
    change name, one worktree per lane, so lanes never share a checkout.
 3. **Dispatch the implementer.** The `tdd-implementer` agent, given the change name and

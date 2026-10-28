@@ -61,7 +61,8 @@ the change branch: branch name = change name, cut from `main`. Cutting it is
 hook-gated, so it fails unless the plan is merged and attested.
 
 The session runs `/gatedloop:tdd-apply <change>` the way the `tdd-implementer` agent
-does: test authoring first, then per task red, green, `gates run ci` and convention
+does: test authoring first, then per task red and green on the task's oracle gate (`unit`
+by default, or the gate the plan's `[oracle: …]` tag names), `gates run ci` and convention
 review, and one commit per task with its `[x]` and its ledger rows. It stops before the
 merge. At the end it records readiness and commits it on its own:
 
