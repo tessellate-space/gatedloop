@@ -6736,15 +6736,62 @@ _SHARED_NAME_RE = re.compile(r"conftest|fixtures?|helpers?|factor(y|ies)|support
 _BRIEF_MAX_SIBLINGS = 5
 
 
-def _task_lines(tasks_md: Path) -> list[tuple[str, str]]:
-    if not tasks_md.is_file():
-        return []
+# task-oracle D1: a task line may end with its oracle -- `[oracle: <gate>]`,
+# `[oracle: <gate> characterization]` or `[oracle: none]` -- as its last
+# bracketed span. The gates below cannot judge one task: `ci` is green at
+# every commit, `live-check` probes a surface, `eval` is an advisory score,
+# and `confirm` runs only on the merged tree.
+NON_ORACLE_GATES = ("ci", "live-check", "eval", "confirm")
+ORACLE_TAG_SYNTAX = "[oracle: <gate>], [oracle: <gate> characterization] or [oracle: none]"
+_ORACLE_TAG_RE = re.compile(r"\s*(\[\s*oracle\s*:([^\[\]]*)\])\s*$")
+_ORACLE_GATE_NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]*$")
+
+
+def _parse_oracle_body(body: str) -> dict | None:
+    """The oracle a tag's body declares, or `None` when it is malformed."""
+    words = body.split()
+    if words == ["none"]:
+        return {"gate": None, "characterization": False}
+    if not words or len(words) > 2 or words[0] in ("none", "characterization"):
+        return None
+    if len(words) == 2 and words[1] != "characterization":
+        return None
+    if not _ORACLE_GATE_NAME_RE.match(words[0]):
+        return None
+    return {"gate": words[0], "characterization": len(words) == 2}
+
+
+def _split_oracle_tag(text: str) -> tuple[str, dict | None, str | None]:
+    """`(text without the tag, oracle, raw tag)` for one task's text (D1,
+    D2). An untagged text is `(text, None, None)`; a malformed tag keeps its
+    text whole and its oracle `None`, for `gates validate` to name."""
+    text = text.strip()
+    mt = _ORACLE_TAG_RE.search(text)
+    if not mt:
+        return text, None, None
+    oracle = _parse_oracle_body(mt.group(2))
+    if oracle is None:
+        return text, None, mt.group(1)
+    return text[: mt.start()].rstrip(), oracle, mt.group(1)
+
+
+def _task_lines_text(text: str) -> list[tuple[str, str, dict | None]]:
+    """`(id, text, oracle)` per task line of a `tasks.md`'s text (task-oracle
+    D2): the one parser every consumer reads, with the tag stripped from the
+    text. `oracle` is `None` untagged, `{"gate": None, ...}` for `none`."""
     out = []
-    for line in tasks_md.read_text().splitlines():
+    for line in text.splitlines():
         mt = _TASK_LINE_RE.match(line)
         if mt:
-            out.append((mt.group(1), mt.group(2).strip()))
+            body, oracle, _tag = _split_oracle_tag(mt.group(2))
+            out.append((mt.group(1), body, oracle))
     return out
+
+
+def _task_lines(tasks_md: Path) -> list[tuple[str, str, dict | None]]:
+    if not tasks_md.is_file():
+        return []
+    return _task_lines_text(tasks_md.read_text())
 
 
 _REPO_PATH_RE = re.compile(r"^[\w.\-]+(/[\w.\-*]+)+$")
@@ -6843,7 +6890,7 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
     for p in sorted((change_dir / "specs").rglob("*.md")) if (change_dir / "specs").is_dir() else []:
         lines.append(f"- {rel(p)}")
     lines.append("Tasks:")
-    for tid, text in tasks:
+    for tid, text, _oracle in tasks:
         lines.append(f"  {tid} {text}")
     if not tasks:
         lines.append("  none — tasks.md lists no `- [ ] N.M` task lines")
@@ -6869,7 +6916,7 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
 
     lines.append("## Surface rules per task")
     task_paths: dict[str, list[str]] = {}
-    for tid, text in tasks:
+    for tid, text, _oracle in tasks:
         paths = _named_paths(text, root)
         source = "task line"
         if not paths:
@@ -6907,7 +6954,7 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
 
     lines.append("## Where tests live")
     sibling_dirs: list[str] = []
-    for tid, _text in tasks:
+    for tid, _text, _oracle in tasks:
         near = _sibling_tests(task_paths.get(tid) or [], test_files)
         lines.append(f"{tid}: {', '.join(near) if near else 'none found near its paths'}")
         for t in near:
