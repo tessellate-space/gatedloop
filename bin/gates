@@ -8966,18 +8966,15 @@ def cmd_approval_attest(root: Path, args) -> int:
 _MERGED_PR_FIELDS = "state,mergedAt,mergedBy,baseRefName,mergeCommit,headRefName"
 
 
-def _merged_plan_approval(m: dict, root: Path, change: str, pr: int) -> tuple[tuple | None, str]:
-    """planner-handoff D1/D2: `((approved_by, approved_at, sha), "")` from
-    the forge's record of plan PR `pr`'s merge, or `(None, refusal)` naming
-    the first unmet condition. Reads only; the caller writes."""
+def _merged_pr_record(root: Path, pr: int, head: str | None,
+                      merged_what: str) -> tuple[dict | None, str]:
+    """The forge checks both `--merged` writers share (planner-handoff D2,
+    merged-acceptance D1): `({"commit", "login", "merged_at"}, "")` from the
+    forge's record of PR `pr`'s merge into the merge target, or `(None,
+    refusal)` naming the first unmet condition. `head`, when given, is the
+    head branch the PR must have come from. `merged_what` finishes "only
+    ..." in the not-merged refusal. Reads only; the caller writes."""
     nothing = "Nothing was written."
-    policy = _approval_policy(m)
-    if policy != "self":
-        return None, (
-            f"gatedloop: --merged is legitimate only under `approval.plan: self` (the "
-            f"declared policy is {policy!r}) — under review the approval comes from the "
-            f"PR's approving review: `gates approval attest {change} --pr {pr}`. {nothing}"
-        )
     try:
         state, detail = _forge_cli_state(root)
         if state != "ready":
@@ -8989,7 +8986,12 @@ def _merged_plan_approval(m: dict, root: Path, change: str, pr: int) -> tuple[tu
     if rec.get("state") != "MERGED":
         return None, (
             f"gatedloop: PR #{pr} is {rec.get('state') or 'in no known state'}, not MERGED — "
-            f"only a merged plan PR attests the plan. {nothing}"
+            f"only {merged_what}. {nothing}"
+        )
+    if head is not None and rec.get("headRefName") != head:
+        return None, (
+            f"gatedloop: PR #{pr}'s head branch is '{rec.get('headRefName')}', not "
+            f"'{head}' — it is not this change's pull request. {nothing}"
         )
     target, reason = _resolve_merge_target(root)
     if target is None:
@@ -9007,21 +9009,45 @@ def _merged_plan_approval(m: dict, root: Path, change: str, pr: int) -> tuple[tu
             f"gatedloop: PR #{pr}'s merge commit {commit[:12] or '(none)'} is not on "
             f"'{target}' — fetch the target and run this again. {nothing}"
         )
+    login = str((rec.get("mergedBy") or {}).get("login") or "").strip()
+    merged_at = str(rec.get("mergedAt") or "").strip()
+    if not login or not merged_at:
+        return None, (
+            f"gatedloop: PR #{pr}'s merge record names no merger or no merge time — "
+            f"refusing to write an unattested value. {nothing}"
+        )
+    return {"commit": commit, "login": login, "merged_at": merged_at}, ""
+
+
+def _merged_plan_approval(m: dict, root: Path, change: str, pr: int) -> tuple[tuple | None, str]:
+    """planner-handoff D1/D2: `((approved_by, approved_at, sha), "")` from
+    the forge's record of plan PR `pr`'s merge, or `(None, refusal)` naming
+    the first unmet condition. Reads only; the caller writes."""
+    nothing = "Nothing was written."
+    policy = _approval_policy(m)
+    if policy != "self":
+        return None, (
+            f"gatedloop: --merged is legitimate only under `approval.plan: self` (the "
+            f"declared policy is {policy!r}) — under review the approval comes from the "
+            f"PR's approving review: `gates approval attest {change} --pr {pr}`. {nothing}"
+        )
+    rec, reason = _merged_pr_record(root, pr, None, "a merged plan PR attests the plan")
+    if rec is None:
+        return None, reason
+    commit = rec["commit"]
     proposal = f"openspec/changes/{change}/proposal.md"
     if _git(root, "cat-file", "-e", f"{commit}:{proposal}").returncode != 0:
         return None, (
             f"gatedloop: {proposal} is absent from PR #{pr}'s merge commit {commit[:12]} — "
             f"that PR did not merge this change's plan. {nothing}"
         )
-    login = str((rec.get("mergedBy") or {}).get("login") or "").strip()
-    merged_at = str(rec.get("mergedAt") or "").strip()
     sha = _approval_sha_ref(root, change, commit)
-    if not login or not merged_at or sha is None:
+    if sha is None:
         return None, (
-            f"gatedloop: PR #{pr}'s merge record names no merger, no merge time or no plan "
-            f"to hash — refusing to write an unattested value. {nothing}"
+            f"gatedloop: PR #{pr}'s merge commit holds no plan to hash — refusing to "
+            f"write an unattested value. {nothing}"
         )
-    return (f"{login} (merged #{pr})", merged_at, sha), ""
+    return (f"{rec['login']} (merged #{pr})", rec["merged_at"], sha), ""
 
 
 def cmd_handoff(m: dict, root: Path, args) -> int:
@@ -9136,16 +9162,23 @@ def _acceptance_branch_head(root: Path, change: str) -> tuple[str | None, str | 
 
 def _append_acceptance_row(root: Path, change: str, verdict: str, accepted_by: str,
                            ts: str, cause: str | None = None,
-                           detail: str | None = None) -> int:
-    raw, sha = _acceptance_branch_head(root, change)
-    if not raw:
-        print(
-            f"gatedloop: could not resolve the head tree of change '{change}' — "
-            "refusing to record an acceptance that pins no tree. Nothing was written.",
-            file=sys.stderr,
-        )
-        return 1
-    tree = _normalize_tree(root, raw)
+                           detail: str | None = None,
+                           pin: tuple[str, str] | None = None) -> int:
+    """`pin` is `(normalized tree, commit sha)` when the caller computed what
+    the row pins (a merged PR pins its merge commit, merged-acceptance D2);
+    otherwise the change branch's head."""
+    if pin is not None:
+        tree, sha = pin
+    else:
+        raw, sha = _acceptance_branch_head(root, change)
+        if not raw:
+            print(
+                f"gatedloop: could not resolve the head tree of change '{change}' — "
+                "refusing to record an acceptance that pins no tree. Nothing was written.",
+                file=sys.stderr,
+            )
+            return 1
+        tree = _normalize_tree(root, raw)
     try:
         _append_ledger_row(root, {
             "ts": ts, "gate": ACCEPTANCE_EVENT, "exit": None, "duration_ms": 0,
@@ -9171,22 +9204,86 @@ def _append_acceptance_row(root: Path, change: str, verdict: str, accepted_by: s
     return 0
 
 
+def _merged_acceptance(m: dict, root: Path, change: str, pr: int) -> tuple[tuple | None, str]:
+    """merged-acceptance D1/D2: `((accepted_by, ts, normalized tree, merge
+    commit), "")` from the forge's record of implementation PR `pr`'s merge,
+    or `(None, refusal)`. Legitimate only under `approval.acceptance: self`,
+    where the owner's merge is the acceptance. The tree is the merge
+    commit's, normalized as the merge row records it. Reads only."""
+    policy = _acceptance_policy(m)
+    if policy is None:
+        return None, _acceptance_no_policy_refusal()
+    if policy != "self":
+        return None, (
+            f"gatedloop: --merged is legitimate only under `approval.acceptance: self` "
+            f"(the declared policy is {policy!r}) — under review a second party accepts "
+            f"through the pull request's approving review: `gates acceptance attest "
+            f"{change} --pr {pr}`. Nothing was written."
+        )
+    rec, reason = _merged_pr_record(
+        root, pr, change, "a merged implementation PR of this change attests its acceptance",
+    )
+    if rec is None:
+        return None, reason
+    raw = _commit_tree(root, rec["commit"])
+    if not raw:
+        return None, (
+            f"gatedloop: could not read the tree of PR #{pr}'s merge commit "
+            f"{rec['commit'][:12]} — refusing to record an acceptance that pins no tree. "
+            "Nothing was written."
+        )
+    tree = _normalize_tree(root, raw)
+    return (f"{rec['login']} (merged #{pr})", rec["merged_at"], tree, rec["commit"]), ""
+
+
+def _accepted_already(root: Path, change: str, tree: str) -> dict | None:
+    """The latest acceptance row for normalized `tree` in the change's
+    ledger, when its verdict is `accept`; else `None`."""
+    latest = None
+    for r in _read_ledger_rows(root, change):
+        if r.get("gate") == ACCEPTANCE_EVENT and r.get("tree") == tree:
+            latest = r
+    return latest if latest is not None and latest.get("verdict") == "accept" else None
+
+
+def _acceptance_attest_merged(m: dict, root: Path, change: str, pr: int) -> int:
+    """`gates acceptance attest <change> --merged <pr>` (merged-acceptance
+    D1): under `self`, the owner's merge of the implementation PR is the
+    acceptance. Writes nothing when that tree is already accepted."""
+    accepted, reason = _merged_acceptance(m, root, change, pr)
+    if accepted is None:
+        print(reason, file=sys.stderr)
+        return 1
+    accepted_by, ts, tree, commit = accepted
+    existing = _accepted_already(root, change, tree)
+    if existing is not None:
+        print(
+            f"gatedloop: (ledger-normalized) tree {tree} of '{change}' is already accepted "
+            f"(by {existing.get('accepted_by') or 'unknown'}) — nothing was written."
+        )
+        return 0
+    return _append_acceptance_row(root, change, "accept", accepted_by, ts, pin=(tree, commit))
+
+
 def _acceptance_attest(m: dict, root: Path, args) -> int:
-    """`gates acceptance attest <change> --local | --pr <n>` (D3). Legitimacy
-    mirrors plan approval: `--local` only under `self`; `--pr` under either
-    policy, since a real review is always acceptable evidence; neither with
-    no policy declared. The tree is computed here; the identity comes from
-    git config (`--local`, with an optional `--as` display override) or from
-    the review itself (`--pr`, where `--as` is refused)."""
+    """`gates acceptance attest <change> --local | --pr <n> | --merged <n>`
+    (D3). Legitimacy mirrors plan approval: `--local` and `--merged` only
+    under `self`; `--pr` under either policy, since a real review is always
+    acceptable evidence; none with no policy declared. The tree is computed
+    here; the identity comes from git config (`--local`, with an optional
+    `--as` display override), from the review itself (`--pr`) or from the
+    forge's merge record (`--merged`), where `--as` is refused."""
     change = args.change
     if getattr(args, "as_name", None) and not args.local:
         print(
-            "gatedloop: --as only applies to --local — a --pr acceptance's "
-            "accepted_by comes from the pull request's actual approving review, "
+            "gatedloop: --as only applies to --local — a --pr or --merged acceptance's "
+            "accepted_by comes from the pull request's actual approving review or merge, "
             "never a supplied override.",
             file=sys.stderr,
         )
         return 1
+    if getattr(args, "merged", None) is not None:
+        return _acceptance_attest_merged(m, root, change, args.merged)
     policy = _acceptance_policy(m)
     if policy is None:
         print(_acceptance_no_policy_refusal(), file=sys.stderr)
@@ -12643,7 +12740,15 @@ def _merge_pr_steps(m: dict, root: Path, change: str) -> int:
     if require_approval:
         print("  auto-merge not enabled — `integration.requireApproval` is true: a reviewer "
               "approves and merges it in the forge")
-    if acc_rc != 0:
+    if acc_rc != 0 and _acceptance_policy(m) == "self":
+        # merged-acceptance D4: under `self` the owner's merge in the forge is
+        # the acceptance, so nothing is unsatisfied; auto-merge stays off
+        # because no acceptance is recorded yet.
+        print("  auto-merge not enabled — no acceptance is recorded for this tree. Under "
+              "`approval.acceptance: self` the owner's merge is the acceptance: merge the "
+              "pull request in the forge, and `gates record-merged <squash sha>` records "
+              f"that merge as the acceptance of '{change}'.")
+    elif acc_rc != 0:
         print("  auto-merge not enabled — the declared acceptance is not satisfied for this "
               f"tree: {acc_err.strip()}")
     return 0
@@ -12732,20 +12837,33 @@ def _dirty_record_refusal(root: Path) -> str | None:
     )
 
 
-def _record_merged_plan(m: dict, root: Path, change: str, number) -> int:
-    """planner-handoff D3: a merged `plan/<change>` PR. Under `self`, for a
-    change with no approval yet, attest it from the merge (D1/D2) and make
-    the one local commit; otherwise skip, saying why. Never pushes."""
+def _recorded_approval(root: Path, change: str) -> tuple:
+    """`(by, at, sha)` as the checkout's `.openspec.yaml` records them."""
+    p = _openspec_yaml_path(root, change)
+    try:
+        data = (_load(p) or {}) if p.exists() else {}
+    except Exception:
+        data = {}
+    return _approval_meta(data)
+
+
+def _record_merged_plan(m: dict, root: Path, change: str, number, sha: str) -> int:
+    """planner-handoff D3: a merged `plan/<change>` PR. Under `self`, attest
+    it from the merge (D1/D2) and make the one local commit, unless the
+    recorded approval still matches the plan in the merge commit `sha`
+    (merged-acceptance D5: a merged amendment leaves a stale `approved_sha`,
+    which is re-attested, not skipped). Otherwise skip, saying why. Never
+    pushes."""
     policy = _approval_policy(m)
     if policy != "self":
         print(f"gatedloop: PR #{number} merged the plan of '{change}', but the approval policy "
               f"is {policy!r} — under review only an approving review approves a plan "
               f"(`gates approval attest {change} --pr {number}`). Nothing was recorded.")
         return 0
-    approved_by = _read_approved_by(root, change)
-    if approved_by:
+    approved_by, _approved_at, approved_sha = _recorded_approval(root, change)
+    if approved_by and approved_sha and approved_sha == _approval_sha_ref(root, change, sha):
         print(f"gatedloop: PR #{number} merged the plan of '{change}', which is already approved "
-              f"(by {approved_by}). Nothing was recorded.")
+              f"(by {approved_by}) and still matches it. Nothing was recorded.")
         return 0
     refusal = _dirty_record_refusal(root)
     if refusal:
@@ -12815,7 +12933,7 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     number = pr.get("number")
     change = ((pr.get("head") or {}).get("ref") or "").strip()
     if change.startswith("plan/") and _is_active_change(root, change[len("plan/"):]):
-        return _record_merged_plan(m, root, change[len("plan/"):], number)
+        return _record_merged_plan(m, root, change[len("plan/"):], number, sha)
     if not _is_active_change(root, change):
         if change and "/" not in change and _archived_change_exists(root, change):
             print(f"gatedloop: PR #{number}'s head '{change}' is a change already archived — "
@@ -12832,6 +12950,22 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
 
     archive_dir = root / "openspec" / "changes" / "archive"
     before = set(archive_dir.iterdir()) if archive_dir.is_dir() else set()
+    # merged-acceptance D3: under `self` the owner's merge is the acceptance,
+    # written before the merge row and committed with it. Never a merge
+    # recorded without its acceptance: a refusal discards the whole attempt.
+    accepted = ""
+    if _acceptance_policy(m) == "self":
+        rc, out, err = _captured(_acceptance_attest_merged, m, root, change, number)
+        if rc != 0:
+            _discard_record_attempt(root, before)
+            print(f"gatedloop: the acceptance from PR #{number}'s merge could not be recorded, "
+                  f"so nothing was recorded: {(err or out).strip()}", file=sys.stderr)
+            return 1
+        accepted = (
+            f" Under `approval.acceptance: self` the merge of PR #{number} is the acceptance: "
+            + ("it was already recorded for this tree." if "already accepted" in out
+               else "recorded in the same commit.")
+        )
     rc, out, err = _captured(cmd_ledger, m, root, argparse.Namespace(ledger_cmd="record-merge", change=change, sha=sha))
     if rc != 0:
         _discard_record_attempt(root, before)
@@ -12873,7 +13007,7 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     print(
         f"gatedloop: recorded the merge of '{change}' (PR #{number}) against {sha[:12]} and "
         f"archived it in {new[:12]} ({len(files)} file(s)). Nothing was pushed — landing "
-        "this commit is the caller's."
+        f"this commit is the caller's.{accepted}"
     )
     return 0
 
@@ -13209,11 +13343,12 @@ def main() -> int:
     sp_apol.set_defaults(fn=cmd_acceptance)
     sp_aatt = acc_sub.add_parser(
         "attest",
-        help="append an `accept` ledger row pinned to the change branch's head tree -- from the PR's approving review (--pr) or, under a declared self policy, the git identity (--local)",
+        help="append an `accept` ledger row pinned to the change branch's head tree -- from the PR's approving review (--pr) or, under a declared self policy, the git identity (--local) or the merged PR's merge commit (--merged)",
     )
     sp_aatt.add_argument("change")
     aatt_group = sp_aatt.add_mutually_exclusive_group(required=True)
     aatt_group.add_argument("--pr", type=int, help="the implementation pull request's number")
+    aatt_group.add_argument("--merged", type=int, metavar="PR", help="the merged implementation pull request's number: its merger, merge time and merge commit's tree are the acceptance; legitimate only under `approval.acceptance: self`")
     aatt_group.add_argument("--local", action="store_true", help="accept as the configured git identity; legitimate only under `approval.acceptance: self`")
     sp_aatt.add_argument("--as", dest="as_name", help="override accepted_by's display name (--local only; never affects the tree)")
     sp_aatt.set_defaults(fn=cmd_acceptance)

@@ -95,6 +95,27 @@ class PullRequestMergeTest(unittest.TestCase):
                 self.assertEqual(repo.origin_main(), origin_main,
                                  "the target moved: pull-request mode integrated locally")
 
+    def test_step_4_under_self_names_the_forge_merge_as_the_acceptance(self):
+        # merged-acceptance D4: with no acceptance recorded, `self` is
+        # satisfied by the owner's merge in the forge, which `gates
+        # record-merged` records; only `review` is genuinely unsatisfied.
+        # Auto-merge stays off in both.
+        for policy, names_record_merged in (("self", True), ("review", False)):
+            with self.subTest(policy=policy), tempfile.TemporaryDirectory() as tmp:
+                repo, forge = self._ready(Path(tmp), _manifest(False, policy))
+
+                r = repo.merge(**NO_CI)
+
+                self.assertEqual(r.returncode, 0, combined(r))
+                self.assertIsNone(forge.prs()[0]["auto_merge"])
+                self.assertIn(forge.prs()[0]["url"], r.stdout)
+                if names_record_merged:
+                    self.assertIn("gates record-merged", r.stdout)
+                    self.assertNotIn("is not satisfied", r.stdout)
+                else:
+                    self.assertIn("is not satisfied", r.stdout)
+                    self.assertNotIn("record-merged", r.stdout)
+
     def test_a_second_run_updates_the_open_pull_request(self):
         repo, forge = self._ready(self.tmp, _manifest(True))
         first = repo.merge(**NO_CI)
