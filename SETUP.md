@@ -470,13 +470,14 @@ gates acceptance brief <change> [--out <path>]   # the deterministic acceptance 
 gates acceptance policy                          # acceptance=review|self|none, from approval.acceptance
 gates acceptance attest <change> --local         # record an `accept` for the branch head's tree (only under acceptance: self)
 gates acceptance attest <change> --pr <n>        # record an `accept` from the PR's APPROVED review
+gates acceptance attest <change> --merged <pr>   # under acceptance: self, the merged PR is the acceptance (merger, merge time, merge commit's tree)
 gates acceptance reject <change> --cause weak-spec --detail "..."   # record a rejection (weak-spec | missing-oracle)
 gates acceptance check <tree>                    # the merge gate's acceptance check (exit 0 when not required or accepted)
 gates integration                                # print the declared integration process: mode=… requireApproval=…
 gates merge <change>                             # local-squash-merge in six gated steps, or (pull-request mode) prove, push, publish statuses, open/update the PR; exits with the number of the step that refused
 gates marker publish <gate> [--sha <sha>]        # post a `gatedloop/<gate>` success status carrying the tree, from a green local marker (needs `gh`); `tests` is computed from the lock at the commit
 gates marker check-remote <gate> <sha>           # exit 0 only if the latest `gatedloop/<gate>` status on <sha> is a success naming that sha's tree
-gates record-merged <sha>                        # for a forge squash commit: record the change's merge row, archive it, one local commit; never pushes (a plan/<change> PR under self: attest it from the merge)
+gates record-merged <sha>                        # for a forge squash commit: record the change's merge row (under acceptance: self, its accept row first), archive it, one local commit; never pushes (a plan/<change> PR under self: attest it from the merge)
 gates approval attest <change> --merged <pr>     # under approval.plan: self, the plan PR's merge is the approval (merger, merge time; sha over the merge commit)
 gates handoff <change> [--json]                  # the planner-to-orchestrator payload, printed only when the plan is approved on the merge target; reads only
 gates ledger record-ready <change>               # append the `ready` row the implementer commits before READY TO MERGE
@@ -645,10 +646,11 @@ ledger row `--local` does; the `(merged #<pr>)` marker is what tells the sources
 
 **When it applies.** In pull-request mode (`integration.mode: pull-request`) you never
 run it by hand: the record job's `gates record-merged <sha>` sees a merged PR whose
-head is `plan/<change>`, and, under `self`, for an active change with no approval yet,
-attests it from the merge and commits the keys as its one local commit
+head is `plan/<change>`, and, under `self`, for an active change with no approval yet
+or whose `approved_sha` no longer matches the plan in the merge commit (a merged plan
+amendment), attests it from the merge and commits the keys as its one local commit
 (`attest approval: <change> (merged #<pr>)`), never pushing. Under `review`, or when the
-change already carries an approval, it skips and says why. In local-squash mode there
+change's recorded approval still matches the merged plan, it skips and says why. In local-squash mode there
 is no forge merge to read, so `--local` stays the path — unchanged, as it is for a
 project without a forge or a plan not merged through a PR.
 
@@ -726,7 +728,7 @@ completion (`tdd-apply` §7.5, `tdd-implementer` §4) whether or not a policy is
 
 **Recording the verdict — the writers mirror plan approval's.** An acceptance is one
 `acceptance` ledger row, pinned to the ledger-normalized tree of the change branch's
-head, with `accepted_by` recording who. It is a row, not an `.openspec.yaml` key,
+head (or, from a merged PR, of its merge commit), with `accepted_by` recording who. It is a row, not an `.openspec.yaml` key,
 because it pins a *tree*: writing it into any file inside that tree would change the
 tree it pins, and the ledger is the one place excluded from it. Run the writer on the
 change branch and commit the row with the change.
@@ -738,12 +740,23 @@ change branch and commit the row with the change.
   `APPROVED` review through `gh`, exactly as plan approval does; fails closed when `gh`
   is missing, unauthenticated or offline, or when no review approves; refuses `--as`.
   Legitimate under either policy.
+- `gates acceptance attest <change> --merged <pr>` — legitimate only under
+  `acceptance: self`, for a solo owner in pull-request mode: the forge refuses a review
+  of one's own PR, so the owner's merge of the implementation PR is the acceptance.
+  `accepted_by` is the merger's login marked `(merged #<pr>)`, the time is the merge
+  time, and the row pins the ledger-normalized tree of the PR's merge commit, the same
+  tree the change's merge row records. It refuses, writing nothing and naming the unmet
+  condition, when the PR is not `MERGED`, its base is not the merge target, its head
+  branch is not `<change>`, its merge commit is not on the target, or `gh` is missing
+  or unauthenticated; under `review` it names `--pr`; it refuses `--as`. When an accept
+  for that tree is already recorded it writes nothing. You rarely run it by hand:
+  `gates record-merged` runs it for you.
 - `gates acceptance reject <change> --cause weak-spec|missing-oracle --detail "..."` —
   a rejection is an escalation: the spec asked for the wrong thing (`weak-spec`), or
   it was right and nothing checked it (`missing-oracle`). `gates stats --outcomes`
   counts it under halts by cause.
 
-With no `approval.acceptance` declared, all three refuse and name the key.
+With no `approval.acceptance` declared, every writer refuses and names the key.
 
 **The merge requires it.** Under a declared policy the merge hook adds a fourth check
 after taint: `gates acceptance check <tree>` passes only when the latest acceptance row
@@ -901,14 +914,21 @@ An unproven head stops at step 1: nothing is pushed and no PR is opened. Under
 `approval.acceptance: review` the acceptance can only come from the PR's approving
 review, so the first run opens the PR and waits; after `gates acceptance attest <change>
 --pr <n>`, run `gates merge <change>` again to refresh the brief and, where nothing else
-stands in the way, enable auto-merge.
+stands in the way, enable auto-merge. Under `approval.acceptance: self` with no
+acceptance recorded, step 4 leaves auto-merge off and says so: the owner's merge in the
+forge is the acceptance, and `gates record-merged` records it.
 
 **After the forge merges it**, `gates record-merged <squash sha>` writes the ledger
 facts the forge cannot. It resolves the pull request that produced the commit (`gh api
 .../commits/<sha>/pulls`), and when its head branch names an active change it records
 that change's merge row against `<sha>`, runs `openspec archive <change> --yes`, and
 makes **one** local commit, `archive change: <change>`, holding the row, the archive
-move and `openspec/specs`. That commit is ledger- plus planning-grade, so it needs no
+move and `openspec/specs`. Under `approval.acceptance: self` it first records the PR's
+merge as the change's acceptance, as `gates acceptance attest <change> --merged <pr>`
+does, so the same commit holds an `accept` row pinned to the merge commit's tree and
+`gates stats --outcomes` reads the change as `accepted`; when an accept for that tree is
+already recorded it adds none, and when the writer refuses (the forge unreachable, say)
+nothing is committed. Under `review`, or with no policy, it writes no acceptance. That commit is ledger- plus planning-grade, so it needs no
 `ci` marker. It never pushes. A commit from no pull request, an ordinary PR, a branch
 like `gatedloop/record-merged-*` that names no change, or a change already archived is
 skipped with a note, exit 0, so it is safe to run on every push to the target. It
