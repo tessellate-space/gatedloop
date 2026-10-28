@@ -16,13 +16,6 @@
       "version": "0.8.0",
       "category": "workflow",
       "keywords": ["openspec", "spec-driven-development", "tdd", "workflow", "closed-loop"]
-    },
-    {
-      "name": "specloop",
-      "source": "./forwarder/specloop",
-      "description": "Specloop is now gatedloop. This entry holds only a notice naming the steps to switch, for one release.",
-      "version": "0.8.0",
-      "category": "workflow"
     }
   ]
 }

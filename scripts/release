@@ -43,12 +43,8 @@ from pathlib import Path
 PLUGIN_JSON = ".claude-plugin/plugin.json"
 MARKETPLACE_JSON = ".claude-plugin/marketplace.json"
 PLUGIN_NAME = "gatedloop"
-# The forwarder for the plugin's earlier name (rename-to-gatedloop D4): a
-# second marketplace entry whose version moves with the plugin's, so an
-# existing install updates onto it. Read only while the entry is listed.
-FORWARDER_NAME = "specloop"
-# The state directory, and its earlier name a not-yet-migrated checkout uses.
-STATE_DIRS = (f".{PLUGIN_NAME}", f".{FORWARDER_NAME}")
+# The state directory, whose runs/ holds each change's ledger.
+STATE_DIR = f".{PLUGIN_NAME}"
 
 # What reaches an adopter: the paths whose content changes what an installed
 # plugin does or tells them (design D3). Everything else -- openspec/, docs/,
@@ -120,8 +116,7 @@ def latest_tag(root):
 # --------------------------------------------------------------------- versions
 
 def read_fields(root):
-    """The version fields, as [(label, value)], in a fixed order: three, and a
-    fourth while the marketplace lists the forwarder."""
+    """The three version fields, as [(label, value)], in a fixed order."""
     def load(rel):
         path = root / rel
         try:
@@ -141,9 +136,6 @@ def read_fields(root):
         ("marketplace.json metadata.version", (market.get("metadata") or {}).get("version")),
         (f"marketplace.json plugins[{PLUGIN_NAME}].version", entry.get("version")),
     ]
-    forwarder = next((p for p in market.get("plugins", []) if p.get("name") == FORWARDER_NAME), None)
-    if forwarder is not None:
-        fields.append((f"marketplace.json plugins[{FORWARDER_NAME}].version", forwarder.get("version")))
     return fields
 
 
@@ -288,7 +280,7 @@ def is_change_squash(root, sha, names):
         return False
     paths = git(root, "show", "--name-only", "--format=", sha).stdout.splitlines()
     owned = tuple(f"openspec/changes/{n}/" for n in names) + \
-        tuple(f"{state}/runs/{n}.jsonl" for state in STATE_DIRS for n in names)
+        tuple(f"{STATE_DIR}/runs/{n}.jsonl" for n in names)
     return any(p.startswith(owned) for p in paths)
 
 

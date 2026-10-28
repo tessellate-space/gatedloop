@@ -1,13 +1,16 @@
 """The rename is complete only by grep (change `rename-to-gatedloop`, design
-D6, after `rename-to-gates` D5).
+D6, after `rename-to-gates` D5), and from 0.9.0 the list holds only what
+remains of the earlier name (change `remove-specloop-forwarders`, design D3).
 
 `git grep -n -i specloop -- . ':!openspec/changes/archive' ':!CHANGELOG.md'`
 may return only the hits allowed below, each with its reason. Any other hit
 is a defect: most likely a prompt that still reads correctly to a reviewer
-while naming a command, directory or key that no longer exists. This is a
-lint rather than a behaviour test (`gatedloop.test-quality` item 9); design
-D6 asks for it as a test so the allow-list holds after the change too, and
-the project's design outranks the built-in item.
+while naming a command, directory or key that no longer exists. An entry
+naming something removed is deleted with it, so the list never allows a hit
+nothing should produce. This is a lint rather than a behaviour test
+(`gatedloop.test-quality` item 9); design D6 asks for it as a test so the
+allow-list holds after the change too, and the project's design outranks the
+built-in item.
 
 Read-only against this repository. Stdlib only, per `zero-dep-shim`.
 
@@ -49,25 +52,15 @@ ALLOWED_TOKEN_PATTERNS = (
 ALLOWED = (
     ("bin/gates", ("region", "# ---------- the earlier name (rename-to-gatedloop",
                    "# ---------- end of the earlier name"),
-     "D2's read-both helpers and D3's `gates migrate-name`, kept in one region"),
-    ("scripts/release", ("lines", r"^FORWARDER_NAME = \"specloop\"$"),
-     "the forwarder plugin's name, so a cut bumps its version with the plugin's"),
-    ("forwarder/specloop/*", None, "the forwarder plugin, D4"),
-    (".claude-plugin/marketplace.json",
-     ("lines", r'"name": "specloop"|"source": "\./forwarder/specloop"|"description": "Specloop is now gatedloop'),
-     "the forwarder's marketplace entry, D4"),
+     "D3's `gates migrate-name`, the scan doctor reads, and the 0.9.0 refusal, kept in one region"),
     ("adoption/catalog.json", ("region", '"id": "rename"', '"action"'),
      "the recurring `rename` item, which names what it migrates, D3"),
-    ("tests/test_earlier_name_read.py", None, "read-both tests, which use the earlier names on purpose"),
-    ("tests/test_new_name_writes.py", None, "the dual-context write and its earlier spellings"),
     ("tests/test_migrate_name.py", None, "`gates migrate-name` tests"),
     ("tests/test_name_doctor_catalogue.py", None, "the doctor row and catalogue item tests"),
-    ("tests/test_forwarder_plugin.py", None, "the forwarder plugin tests"),
     ("tests/test_name_allow_list.py", None, "this allow-list"),
     ("README.md", ("section", "## Migrating from Specloop"), "the migration notes, D6"),
     ("SETUP.md", ("section", "## Migrating from Specloop"), "the migration notes, D6"),
     ("RELEASING.md", ("section", "## Releasing through the rename"), "the migration notes, D6"),
-    ("openspec/changes/rename-to-gatedloop/*", None, "this change's own artifacts"),
     # Archiving the change syncs its two read-both requirements into the main
     # spec, where they name the earlier identifiers by design.
     ("openspec/specs/plugin-positioning/spec.md",
@@ -77,10 +70,6 @@ ALLOWED = (
      ("section", "### Requirement: A project migrates to the new name by one command"),
      "the synced migration requirement, D3"),
     ("openspec/changes/remove-specloop-forwarders/*", None, "the expiry's plan, D7"),
-    ("openspec/changes/defer-earlier-name-expiry/*", None, "the expiry's move to 0.9.0"),
-    ("openspec/changes/*/.openspec.yaml", ("lines", r"^x-specloop-"),
-     "this repository's own change metadata, read under the earlier spelling until "
-     "it runs `gates migrate-name` (D2)"),
     ("scripts/go-public", None, "the migration tool names the private archive"),
     ("tests/test_go_public.py", None, "the migration tool names the private archive"),
     ("RELEASING.md", ("section", "## Publishing the public repository"),
@@ -89,7 +78,6 @@ ALLOWED = (
      "an approved plan, hashed by its approval: it names the private archive repository"),
     ("openspec/changes/role-commands/proposal.md", None,
      "an approved plan, hashed by its approval, so it is not rewritten here"),
-    (".specloop/*", None, "this repository's own state directory, until it migrates (D2)"),
     (".gatedloop/*", None, "this repository's own state directory: ledger rows are data"),
 )
 

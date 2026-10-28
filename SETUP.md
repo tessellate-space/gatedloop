@@ -1341,9 +1341,11 @@ The plugin was called Specloop until 0.7.0. Every name it owned changed with it.
 | `# >>> specloop pre-commit …` hook markers | `# >>> gatedloop pre-commit …` |
 | `pre-commit.specloop-prev` | `pre-commit.gatedloop-prev` |
 
-**Through 0.8.x the earlier names still work.** For each identifier the shim reads the new spelling first and the earlier one where the new is absent. The first earlier spelling a command reads prints one stderr line, `gatedloop: read the earlier name '<old>'; run gates migrate-name (old names stop working in 0.9.0)`. Writes use the new names, with two exceptions:
-- `gates marker publish` posts both `gatedloop/<gate>` and `specloop/<gate>`, so branch protection keeps passing until you edit it.
-- A project that has only `.specloop/` keeps writing there until it migrates, so its ledger never splits. A project with both `.specloop/` and `.gatedloop/` is refused by every command except `gates doctor` and `gates migrate-name`.
+**From 0.9.0 the earlier names are not read.** Through 0.8.x the shim read each earlier spelling where the new one was absent, printing a one-line warning, and `gates marker publish` posted both contexts. From 0.9.0 it reads only the new spellings, and writes only them:
+- A project that still holds `.specloop/`, alone or beside `.gatedloop/`, is refused by every command except `gates doctor` and `gates migrate-name`, and the refusal names `gates migrate-name`. Running on would start an empty `.gatedloop/` beside it and split the ledger.
+- `x-specloop-*` keys are not read, so an approval recorded under them reads as unapproved until the change is migrated.
+- A git hook carrying the earlier markers isn't recognised as gatedloop's, so `gates hook install` would add a second block beside it. Migrate first.
+- `gates marker publish` posts only `gatedloop/<gate>`. Branch protection still requiring `specloop/<gate>` never passes again.
 
 **`gates migrate-name`** runs from the repository root and makes local edits only. It never commits and never pushes:
 1. It moves `.specloop/` to `.gatedloop/` with `git mv`, or with a plain rename when git doesn't track the directory.
@@ -1356,7 +1358,7 @@ The plugin was called Specloop until 0.7.0. Every name it owned changed with it.
 
 It exits 0 when nothing is left to migrate. Commit what it changed; the commit is planning- and ledger-grade. `gates doctor`'s `name` row warns while anything earlier remains. The adoption catalogue's recurring `rename` item offers the migration through `/gatedloop:upgrade` from 0.7.0.
 
-**The Claude Code side.** An existing `specloop@specloop` install keeps resolving the `specloop` entry of the marketplace it was added from, even after that marketplace's own name changed. Through 0.8.x that entry is a forwarder. It shows a notice at session start and answers each former `/specloop:*` command with the same notice; it runs nothing else. Run `/plugin marketplace add tessellate-space/gatedloop`, then `/plugin install gatedloop@gatedloop`, then `/plugin uninstall specloop@specloop` and `/plugin marketplace remove specloop`. `gatedloop@gatedloop` resolves only once the new marketplace is added. The earlier repository, `tessellate-space/specloop`, is a private archive with no redirect.
+**The Claude Code side.** An existing `specloop@specloop` install keeps resolving the `specloop` entry of the marketplace it was added from, even after that marketplace's own name changed. Through 0.8.x that entry was a forwarder, which showed a notice at session start and answered each former `/specloop:*` command with the same notice. From 0.9.0 the entry and the forwarder are gone. Run `/plugin marketplace add tessellate-space/gatedloop`, then `/plugin install gatedloop@gatedloop`, then `/plugin uninstall specloop@specloop` and `/plugin marketplace remove specloop`. `gatedloop@gatedloop` resolves only once the new marketplace is added. The earlier repository, `tessellate-space/specloop`, is a private archive with no redirect.
 
 ## Migrating from `harness`
 

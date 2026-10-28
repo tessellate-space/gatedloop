@@ -337,11 +337,11 @@ Details: SETUP.md, "Upgrading".
 
 ## Migrating from Specloop
 
-This plugin was called Specloop until 0.7.0. Through 0.8.x the earlier names still work, and every command that reads one prints a one-line warning. They stop working in 0.9.0.
+This plugin was called Specloop until 0.7.0. Through 0.8.x the earlier names still worked, with a one-line warning. From 0.9.0 nothing reads them, and a project that still holds `.specloop/` is refused by every command except `gates doctor` and `gates migrate-name` until it migrates.
 
-1. **In Claude Code.** Run `/plugin marketplace add tessellate-space/gatedloop`, then `/plugin install gatedloop@gatedloop`. Then remove the earlier plugin with `/plugin uninstall specloop@specloop` and `/plugin marketplace remove specloop`. Until then, updating `specloop@specloop` installs a forwarder. It shows these steps at every session start, and its `/specloop:*` commands only repeat them.
+1. **In Claude Code.** Run `/plugin marketplace add tessellate-space/gatedloop`, then `/plugin install gatedloop@gatedloop`. Then remove the earlier plugin with `/plugin uninstall specloop@specloop` and `/plugin marketplace remove specloop`. The forwarder that `specloop@specloop` updated onto through 0.8.x is gone from 0.9.0.
 2. **In each project.** Run `gates migrate-name` and commit what it changed. It moves `.specloop/` to `.gatedloop/` and renames the `x-specloop-*` keys in active changes. It also renames the markers in a composed git hook. Then it prints each edit it doesn't make, with the replacement.
-3. **On the forge.** Where branch protection requires `specloop/ci`, require `gatedloop/ci` instead. `gates marker publish` posts both contexts until 0.9.0, so this can wait.
+3. **On the forge.** Where branch protection requires `specloop/ci`, require `gatedloop/ci` instead. From 0.9.0 `gates marker publish` posts only `gatedloop/<gate>`, so a rule still requiring the earlier context never passes again.
 
 The earlier repository, `tessellate-space/specloop`, is a private archive and doesn't redirect. `gates doctor` warns while anything earlier remains, and `/gatedloop:upgrade` offers the migration.
 
