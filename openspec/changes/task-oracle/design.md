@@ -49,7 +49,7 @@ Alternative considered: fixed kinds (`unit | characterization | e2e | none`). Re
 
 ### D2. One parser, read from the evaluated tree
 
-`_task_lines` returns `(id, text, oracle)`, where `oracle` is `None` or `{gate, characterization}` and `none` is `{gate: None}`. The lock and `--ref` read `tasks.md` from the tree they evaluate, the staged index or the commit. That is the same source D2 of `unblock-authored-lock` uses for task completion, so a tag edited mid-branch is judged as of each commit. The plan is approved by content sha, so a tag edit after approval already fails `check-implement` until re-attested. No new mechanism is needed to stop a tag being changed quietly.
+`_task_lines` returns `(id, text, oracle)`, where `oracle` is `None` or `{gate, characterization}` and `none` is `{gate: None}`. The lock and `--ref` read `tasks.md` from the tree they evaluate, the staged index or the commit. That is the same source D2 of `unblock-authored-lock` uses for task completion, so a tag edited mid-branch is judged as of each commit. A tag is part of what was approved, and two things hold it there (D9). Without them a retag would go unseen: the approval sha covers `proposal.md`, `design.md` and `specs/**` but never `tasks.md`, whose ticks change during implementation, and `check-implement` reads the plan on the merge target, not on the change branch.
 
 ### D3. Handoff refusals are contradictions only
 
@@ -74,6 +74,15 @@ The `task-oracle` catalog item (since 0.9.0) asks "Have the plan declare each ta
 ### D8. #47 is narrowed, not claimed
 
 `convention-review`'s authored-set check is told to judge a `NO-TESTS` or `CHARACTERIZATION` reason against the task's tag when one exists. A `NO-TESTS` that matches `[oracle: none]` is no longer read as a missing oracle, which is #47's misread. Untagged tasks keep today's judgement, so #47 stays open until a project tags its plans.
+
+### D9. A tag changes only through the approved plan
+
+Two checks, one per place a tag could move:
+
+- **On the merge target.** When a change's `tasks.md` carries at least one tag, the approval sha also covers a digest of its `(task id, tag)` pairs, at the index and at a ref alike. The digest leaves out checkbox state and task text, so ticking a task never voids the approval. A plan with no tags hashes exactly as before, so upgrading voids no existing approval. A retag on the target (a plan amendment) then fails `check-implement` until it is re-attested, like any other plan edit.
+- **On the change branch.** The handoff, the lock and `--ref` compare each task's tag in the evaluated tree with its tag in the target's `tasks.md`. A difference refuses, naming the task, both tags, and the route: amend the plan on the target and re-attest. A task absent from the target (a change proposed on its branch) is not compared.
+
+Alternative considered: hashing `tasks.md` whole, with the ticks normalized. Rejected, because every plan's sha would change on upgrade, voiding every approval in flight, and because task text is edited for reasons that are not the approval's business.
 
 ## Risks / Trade-offs
 
