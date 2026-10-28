@@ -61,15 +61,15 @@ ALLOWED = (
     ("README.md", ("section", "## Migrating from Specloop"), "the migration notes, D6"),
     ("SETUP.md", ("section", "## Migrating from Specloop"), "the migration notes, D6"),
     ("RELEASING.md", ("section", "## Releasing through the rename"), "the migration notes, D6"),
-    # Archiving the change syncs its two read-both requirements into the main
-    # spec, where they name the earlier identifiers by design.
+    # The main spec's refusal and migration requirements name the earlier
+    # identifiers by design (remove-specloop-forwarders replaced read-both).
     ("openspec/specs/plugin-positioning/spec.md",
-     ("section", "### Requirement: The earlier name is read loudly for one release"),
-     "the synced read-both requirement, D2"),
+     ("section", "### Requirement: The earlier name is refused after its release"),
+     "the synced refusal requirement, remove-specloop-forwarders D2"),
     ("openspec/specs/plugin-positioning/spec.md",
      ("section", "### Requirement: A project migrates to the new name by one command"),
      "the synced migration requirement, D3"),
-    ("openspec/changes/remove-specloop-forwarders/*", None, "the expiry's plan, D7"),
+    ("openspec/changes/archive/*-remove-specloop-forwarders/*", None, "the expiry's archived plan, D7"),
     ("scripts/go-public", None, "the migration tool names the private archive"),
     ("tests/test_go_public.py", None, "the migration tool names the private archive"),
     ("RELEASING.md", ("section", "## Publishing the public repository"),
