@@ -872,6 +872,13 @@ def _errors(m: dict, root: Path) -> list[str]:
                     f"{' or '.join(repr(v) for v in TEST_AUTHOR_MODES)} "
                     f"(got {loop.get('test-author')!r})"
                 )
+            # task-oracle: whether every task must declare its oracle.
+            if "task-oracle" in loop and loop.get("task-oracle") not in TASK_ORACLE_MODES:
+                errs.append(
+                    "loop.task-oracle must be "
+                    f"{' or '.join(repr(v) for v in TASK_ORACLE_MODES)} "
+                    f"(got {loop.get('task-oracle')!r})"
+                )
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -937,7 +944,8 @@ def _economics_errors(econ) -> list[str]:
 
 
 TEST_AUTHOR_MODES = ("separate", "inline")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget")
+TASK_ORACLE_MODES = ("optional", "required")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -966,6 +974,16 @@ def _loop_budget_warnings(m: dict) -> list[str]:
         return ["loop.attempts is 0: the first failed attempt after a task's RED run "
                 "refuses every further `unit` or `ci` run for it"]
     return []
+
+
+def _task_oracle_mode(m: dict) -> str:
+    """The effective `loop.task-oracle` (task-oracle D7): `required` only
+    when declared; `optional` otherwise (a malformed value is `gates
+    validate`'s business)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    if isinstance(loop, dict) and loop.get("task-oracle") == "required":
+        return "required"
+    return "optional"
 
 
 def _test_author_mode(m: dict) -> str:
@@ -5888,6 +5906,57 @@ def _tests_refuse(message: str) -> int:
     return 1
 
 
+def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
+                             reasons: dict, characterization: dict,
+                             only: str | None) -> list[str]:
+    """task-oracle D3: each way the holding area contradicts a task's tag,
+    and, under `loop.task-oracle: required`, the untagged tasks. Only
+    contradictions: whether the tests exercise the declared gate is for the
+    red run on that gate to show."""
+    oracles = _change_task_oracles(root, change)
+    problems: list[str] = []
+    untagged: list[str] = []
+    for task, oracle in oracles.items():
+        if only is not None and task != only:
+            continue
+        if oracle is None:
+            untagged.append(task)
+            continue
+        tag = f"[oracle: {_oracle_label(oracle)}]"
+        gate = oracle["gate"]
+        if gate is None:
+            if task in held_tests or task in characterization:
+                problems.append(
+                    f"task {task} is tagged {tag}: the plan says it adds no tests, so "
+                    f"hold only its {NO_TESTS_FILE} reason — no tests and no "
+                    f"{CHARACTERIZATION_FILE}"
+                )
+            continue
+        if task in reasons:
+            problems.append(
+                f"task {task} is tagged {tag}: the plan requires tests that `{gate}` "
+                f"runs, not {NO_TESTS_FILE}"
+            )
+        elif oracle["characterization"] and task in held_tests and task not in characterization:
+            problems.append(
+                f"task {task} is tagged {tag}: the plan requires its "
+                f"{CHARACTERIZATION_FILE} declaration, with its reason, beside its "
+                f"tests — they must pass on their first `{gate}` run"
+            )
+        elif not oracle["characterization"] and task in characterization:
+            problems.append(
+                f"task {task} is tagged {tag}: the plan requires a red `{gate}` run "
+                f"first, so it cannot be declared {CHARACTERIZATION_FILE}"
+            )
+    if untagged and _task_oracle_mode(m) == "required":
+        problems.append(
+            "loop.task-oracle is required, and these tasks declare no oracle: "
+            f"{', '.join(untagged)}. End each task line with {ORACLE_TAG_SYNTAX}, "
+            "and re-approve the plan"
+        )
+    return problems
+
+
 def _tests_handoff(m: dict, root: Path, args) -> int:
     change = args.change
     only = getattr(args, "task", None)
@@ -5914,6 +5983,15 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         reasons = {only: reasons[only]} if only in reasons else {}
         characterization = (
             {only: characterization[only]} if only in characterization else {}
+        )
+
+    contradictions = _oracle_handoff_problems(m, root, change, held_tests, reasons,
+                                              characterization, only)
+    if contradictions:
+        return _tests_refuse(
+            f"refusing the handoff for '{change}' — it contradicts the plan's oracle "
+            "tags, which only an amended, re-approved plan changes:\n  - "
+            + "\n  - ".join(contradictions) + "\n"
         )
 
     known_base = (_authoring_state(_read_ledger_rows(root, change)) or {}).get("base", {})

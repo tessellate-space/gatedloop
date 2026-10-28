@@ -320,6 +320,20 @@ A defect at a task already committed **reopens** it: the author re-hands it off 
 ```
 The tag is the line's last bracketed span; anything mid-line is prose. `<gate>` is any gate your `.gates.yaml` declares except `ci` (green at every commit), `live-check` (it probes a surface, not a task), `eval` (an advisory score) and `confirm` (it runs only on the merged tree), none of which can judge one task. `characterization` means the task's tests must pass on their first run under that gate rather than fail; `none` means the task adds no tests. A task with no tag behaves exactly as before. `gates validate` checks every tag in the active changes and fails on an unknown gate, an excluded gate or a malformed tag, naming the change, the task and the tag. A tag on a line the task parser does not read (a lettered id such as `1.2a`) is reported as a warning, since the tag would otherwise be ignored silently. A gate you name as an oracle should accept the same `-- <args>` scoping `unit` does, or each red step runs it whole.
 
+The brief prints each tag to the author, and `gates tests handoff` refuses a holding area that contradicts one, naming the task, the tag and what the plan requires:
+- tests, or a `CHARACTERIZATION` marker, for a task tagged `none`;
+- `NO-TESTS` for a task tagged with a gate;
+- a task tagged `characterization` without its `CHARACTERIZATION` marker;
+- a `CHARACTERIZATION` marker on a task the plan says goes red first.
+
+The handoff does not check that the tests exercise the declared gate (the shim cannot know which files a gate runs); the red run on that gate does, since a test the gate never runs cannot go red under it. An author who holds a tag is wrong stops and reports it as `weak-spec`: the plan is amended and re-approved, never worked around.
+
+```yaml
+loop:
+  task-oracle: optional   # default; or `required`
+```
+Under `required`, the handoff also refuses a change with any untagged task, naming each one and the tag syntax. The check runs at handoff, so a change already handed off before you set the key is unaffected. Any other value fails `gates validate`.
+
 ### `loop.attempts` and `loop.fresh-restarts` — the retry budget
 ```yaml
 loop:

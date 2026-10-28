@@ -201,6 +201,12 @@
           "description": "Tokens a change may spend, counted from its recorded `usage` rows (token-ledger design D5): input, output, cache-read and cache-write across every model. Optional, no default: absent, no budget applies. Once the recorded total reaches it, task-bearing `gates run unit|ci` refuses with exit 1 and names `gates halt record budget`. The task in flight is counted at its commit or the session stop, so the refusal lags by at most that.",
           "type": "integer",
           "minimum": 1
+        },
+        "task-oracle": {
+          "description": "Whether every task in a change's tasks.md must end with its oracle tag (task-oracle design D7): `[oracle: <gate>]`, `[oracle: <gate> characterization]` or `[oracle: none]`. optional (default): an untagged task is the test author's to decide, as before. required: `gates tests handoff` refuses a change with any untagged task, naming each. Checked at handoff, so a change handed off before the key was set is unaffected.",
+          "type": "string",
+          "enum": ["optional", "required"],
+          "default": "optional"
         }
       }
     },

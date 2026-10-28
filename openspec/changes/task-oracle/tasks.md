@@ -8,7 +8,7 @@
 ## 2. The brief and the handoff (D3)
 
 - [x] 2.1 Print each task's declared oracle in `gates tests brief`, saying "the author decides" for an untagged task, and add an oracle column to `gates tests show`. Verify with tests on a plan mixing gate, characterization, none and untagged tasks [oracle: unit]
-- [ ] 2.2 Refuse in `gates tests handoff` each of the four contradictions in the spec, naming the task, the tag and what the plan requires. Add `loop.task-oracle` (`optional` by default, or `required`) to the schema and the shim, so that `required` refuses untagged tasks at handoff and an unknown value fails validation. Document the refusals and the key in SETUP.md. Verify with a test per refusal, a `required` test and a default test [oracle: unit]
+- [x] 2.2 Refuse in `gates tests handoff` each of the four contradictions in the spec, naming the task, the tag and what the plan requires. Add `loop.task-oracle` (`optional` by default, or `required`) to the schema and the shim, so that `required` refuses untagged tasks at handoff and an unknown value fails validation. Document the refusals and the key in SETUP.md. Verify with a test per refusal, a `required` test and a default test [oracle: unit]
 
 ## 3. The lock and the attempt budget (D4)
 
