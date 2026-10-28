@@ -1,1 +1,0 @@
-Runs `gates migrate-name` on this repository (design D4). The repository already uses only the new names, so the command reports nothing to migrate and no behaviour of the shim changes.

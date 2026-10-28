@@ -1,6 +1,6 @@
 ## 1. Precondition
 
-- [ ] 1.1 Run `gates migrate-name` on this repository and commit the result, per design D4
+- [x] 1.1 Run `gates migrate-name` on this repository and commit the result, per design D4
 
 ## 2. Removal
 
