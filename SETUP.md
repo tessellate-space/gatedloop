@@ -311,6 +311,15 @@ So fixture mistakes no longer spend the behaviour cap, and a test that is right 
 
 A defect at a task already committed **reopens** it: the author re-hands it off and it is placed again as usual, and the red run its first placement recorded stays the record, so no second red run is demanded against committed code. A **halt** at a completed task leaves its placement in force (a halt in flight still voids it). Completion is read from history: a task is completed at a ledger row when the commit that checks it in `tasks.md` comes before the first commit carrying the row, so ticking a task in the same commit as a halt does not count. A ledger-only commit (a halt or defect row on its own) skips the lock in both commit hooks, since it cannot change a test. `gates tests show` lists each defect with its kind and detail, and `gates stats --outcomes` counts them by kind, so a mislabelled defect is visible.
 
+**A task's oracle, declared in the plan** (`task-oracle`). A task line in `tasks.md` may end with its oracle tag, so the plan a human approves fixes each task's kind before any test exists, instead of the author guessing it from prose:
+```markdown
+- [ ] 3.1 Parse the header [oracle: unit]                          # red first on `unit`
+- [ ] 3.2 Verify the rows 3.1 wrote [oracle: unit characterization] # green first on `unit`
+- [ ] 5.1 Wire the end-to-end step [oracle: integration]           # red first on `integration`
+- [ ] 6.1 Describe the flag in the README [oracle: none]            # no tests
+```
+The tag is the line's last bracketed span; anything mid-line is prose. `<gate>` is any gate your `.gates.yaml` declares except `ci` (green at every commit), `live-check` (it probes a surface, not a task), `eval` (an advisory score) and `confirm` (it runs only on the merged tree), none of which can judge one task. `characterization` means the task's tests must pass on their first run under that gate rather than fail; `none` means the task adds no tests. A task with no tag behaves exactly as before. `gates validate` checks every tag in the active changes and fails on an unknown gate, an excluded gate or a malformed tag, naming the change, the task and the tag. A tag on a line the task parser does not read (a lettered id such as `1.2a`) is reported as a warning, since the tag would otherwise be ignored silently. A gate you name as an oracle should accept the same `-- <args>` scoping `unit` does, or each red step runs it whole.
+
 ### `loop.attempts` and `loop.fresh-restarts` — the retry budget
 ```yaml
 loop:

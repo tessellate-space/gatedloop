@@ -1951,14 +1951,74 @@ def cmd_doctor(_args) -> int:
     return 0
 
 
+_NON_ORACLE_REASONS = {
+    "ci": "it is green at every commit",
+    "live-check": "it probes a surface, not a task",
+    "eval": "it is an advisory score",
+    "confirm": "it runs only on the merged tree",
+}
+_UNPARSED_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\S+)")
+
+
+def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
+    """task-oracle D1: `(errors, warnings)` for every oracle tag in the
+    active changes' `tasks.md`. An unknown gate, an excluded gate and a
+    malformed tag are errors; a tag on a line the task parser does not match
+    (a lettered id, #46) is a warning, so it is never silently ignored."""
+    gates = m.get("gates") if isinstance(m.get("gates"), dict) else {}
+    can = [g for g in gates if g not in NON_ORACLE_GATES]
+    can_text = ", ".join(f"`{g}`" for g in can) + (", or " if can else "") + "`none`"
+    errs: list[str] = []
+    warns: list[str] = []
+    for d in _active_change_dirs(root):
+        tasks_md = d / "tasks.md"
+        if not tasks_md.is_file():
+            continue
+        for line in tasks_md.read_text().splitlines():
+            mt = _TASK_LINE_RE.match(line)
+            if not mt:
+                lone = _UNPARSED_TASK_RE.match(line)
+                if lone and _ORACLE_TAG_RE.search(line.strip()):
+                    warns.append(
+                        f"change '{d.name}': the task line '{lone.group(1)}' carries an "
+                        "oracle tag, but the task parser does not read lettered or "
+                        "unnumbered ids (#46), so the tag is ignored. Number the task "
+                        "N.M for its tag to count."
+                    )
+                continue
+            tid = mt.group(1)
+            _text, oracle, tag = _split_oracle_tag(mt.group(2))
+            if tag is None:
+                continue
+            where = f"change '{d.name}' task {tid}: {tag}"
+            if oracle is None:
+                errs.append(f"{where} is malformed — the tag is {ORACLE_TAG_SYNTAX}")
+                continue
+            gate = oracle["gate"]
+            if gate is None:
+                continue
+            if gate in NON_ORACLE_GATES:
+                errs.append(
+                    f"{where} — `{gate}` cannot judge one task ({_NON_ORACLE_REASONS[gate]}); "
+                    f"a task's oracle is {can_text}"
+                )
+            elif gate not in gates:
+                errs.append(
+                    f"{where} names the gate `{gate}`, which .gates.yaml does not "
+                    f"declare; a task's oracle is {can_text}"
+                )
+    return errs, warns
+
+
 def cmd_validate(m: dict, root: Path, _args) -> int:
-    errs = _errors(m, root) + _epic_errors(root)  # epic-linkage D2
+    oracle_errs, oracle_warns = _task_oracle_problems(m, root)  # task-oracle D1
+    errs = _errors(m, root) + _epic_errors(root) + oracle_errs  # epic-linkage D2
     if errs:
         print("gatedloop: manifest invalid:", file=sys.stderr)
         for e in errs:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    for w in _loop_budget_warnings(m):
+    for w in _loop_budget_warnings(m) + oracle_warns:
         print(f"gatedloop: warning: {w}", file=sys.stderr)
     print("gatedloop: manifest is valid")
     return 0

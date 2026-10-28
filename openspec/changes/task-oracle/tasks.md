@@ -3,7 +3,7 @@
 ## 1. The tag and its validation (D1, D2)
 
 - [x] 1.1 Parse a trailing `[oracle: <gate>]`, `[oracle: <gate> characterization]` or `[oracle: none]` in `_task_lines`, returning it beside the id and the stripped text, with `NON_ORACLE_GATES` holding `ci`, `live-check`, `eval` and `confirm`. Verify with tests for each form, stray whitespace, a tag mid-line (not a tag), and the task text other consumers read no longer carrying the tag [oracle: unit]
-- [ ] 1.2 Make `gates validate` check every tag in the active changes. It fails naming the change, the task and the tag for an unknown gate, an excluded gate or a malformed tag, and reports a tag on a line the task parser does not match (#46). Document the tag syntax and the excluded gates in SETUP.md. Verify with tests for each failure and for a valid tagged plan, and confirm that `scripts/release docs` reports no gap [oracle: unit]
+- [x] 1.2 Make `gates validate` check every tag in the active changes. It fails naming the change, the task and the tag for an unknown gate, an excluded gate or a malformed tag, and reports a tag on a line the task parser does not match (#46). Document the tag syntax and the excluded gates in SETUP.md. Verify with tests for each failure and for a valid tagged plan, and confirm that `scripts/release docs` reports no gap [oracle: unit]
 
 ## 2. The brief and the handoff (D3)
 
