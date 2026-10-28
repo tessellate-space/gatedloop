@@ -4,21 +4,17 @@
 The regressions caught here:
 
 - `marker publish` posting only `gatedloop/<gate>`, so a project whose branch
-  protection still requires `specloop/ci` cannot merge mid-migration; or the
-  two contexts saying different things about the same tree;
-- a refusal still speaking the earlier name (`specloop: …`, `specloop/ci`),
-  which sends an adopter looking for a context that is no longer the one
-  being written;
-- a re-attest that leaves the `x-specloop-approved-*` spelling beside the new
+  protection still requires the earlier context cannot merge mid-migration;
+  or the two contexts saying different things about the same tree;
+- a refusal still speaking the earlier name, which sends an adopter looking
+  for a context that is no longer the one being written;
+- a re-attest that leaves the earlier `x-…-approved-*` spelling beside the new
   one, so the file carries two approvals that can disagree;
-- a composed git hook still written with the earlier markers, or a refreshed
-  direct copy whose backup keeps the earlier `.specloop-prev` name.
+- a composed git hook still written with the earlier markers.
 
-That a `.specloop/`-only project keeps writing its ledger there is asserted
-by `test_earlier_name_read.TestStateDirectory`, alongside the read.
-
-Stdlib only, per `zero-dep-shim`. Every repository is a throwaway one; the
-forge is the fake in `_forge_fixture`.
+The earlier name is taken from the shim (`gates.EARLIER_NAME`), which keeps it
+for `gates migrate-name`. Stdlib only, per `zero-dep-shim`. Every repository
+is a throwaway one; the forge is the fake in `_forge_fixture`.
 
 Run with:  python3 -m unittest discover -s tests
 """
@@ -35,7 +31,7 @@ import unittest
 from pathlib import Path
 
 from _forge_fixture import Forge, NO_CI
-from _hook_fixture import TEMPLATE, default_hook, init_repo, normalized, write_hook
+from _hook_fixture import init_repo, write_hook
 from _merge_fixture import MergeRepo, combined, git
 
 REPO = Path(__file__).resolve().parent.parent
@@ -49,11 +45,9 @@ _loader.exec_module(gates)
 MANIFEST_SELF = 'gatesVersion: 1\ngates:\n  ci: "true"\napproval:\n  plan: self\n'
 PROPOSAL = ("## Why\n\nBecause a reason that is long enough to pass the validator's checks.\n\n"
             "## What Changes\n\n- A thing changes.\n")
-EARLIER_KEYS = ("x-specloop-approved-by", "x-specloop-approved-at", "x-specloop-approved-sha")
+EARLIER_KEYS = tuple(f"x-{gates.EARLIER_NAME}-approved-{f}" for f in ("by", "at", "sha"))
 NEW_KEYS = ("x-gatedloop-approved-by", "x-gatedloop-approved-at", "x-gatedloop-approved-sha")
-EARLIER_COPY = ("#!/usr/bin/env bash\n"
-                "# specloop git pre-commit hook (enforce-at-the-effect, design D1/D2).\n"
-                "echo my-local-edit\nexit 0\n")
+EARLIER_CI = f"{gates.EARLIER_STATUS_CONTEXT_PREFIX}ci"
 
 
 def _env() -> dict:
@@ -93,7 +87,7 @@ class TestStatusesUnderBothContexts(unittest.TestCase):
         r = self.repo.gates("marker", "publish", "ci", **NO_CI)
 
         self.assertEqual(r.returncode, 0, combined(r))
-        for context in ("gatedloop/ci", "specloop/ci"):
+        for context in ("gatedloop/ci", EARLIER_CI):
             with self.subTest(context):
                 status = self.forge.latest_status(head, context)
                 self.assertIsNotNone(status, f"no {context} status on {head}")
@@ -156,24 +150,8 @@ class TestHookWrites(unittest.TestCase):
             body = (root / ".husky" / "pre-commit").read_text()
             self.assertIn("# >>> gatedloop pre-commit (enforce-at-the-effect) >>>", body)
             self.assertIn("# <<< gatedloop pre-commit (enforce-at-the-effect) <<<", body)
-            self.assertNotIn("specloop", body)
+            self.assertNotIn(gates.EARLIER_NAME, body)
             self.assertIn("echo lint", body)
-
-    def test_a_refreshed_earlier_copy_is_backed_up_under_the_new_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            init_repo(root)
-            hook = default_hook(root)
-            write_hook(hook, EARLIER_COPY)
-
-            r = _gates(root, "hook", "install")
-
-            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertEqual(normalized(hook.read_text()), TEMPLATE.read_text())
-            self.assertIn("# gatedloop git pre-commit hook", hook.read_text())
-            backup = hook.with_name("pre-commit.gatedloop-prev")
-            self.assertEqual(backup.read_text(), EARLIER_COPY)
-            self.assertFalse(hook.with_name("pre-commit.specloop-prev").exists())
 
 
 if __name__ == "__main__":

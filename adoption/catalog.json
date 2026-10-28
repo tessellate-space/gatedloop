@@ -150,11 +150,11 @@
       "id": "rename",
       "since": "0.7.0",
       "recurs": true,
-      "what": "This project still uses the plugin's earlier name, Specloop: a `.specloop/` state directory, `x-specloop-*` keys in an active change, or `specloop` markers in its git pre-commit hook. They are read, with a warning, until 0.9.0.",
+      "what": "This project still uses the plugin's earlier name, Specloop: a `.specloop/` state directory, `x-specloop-*` keys in an active change, or `specloop` markers in its git pre-commit hook. From 0.9.0 nothing reads them, and while `.specloop/` exists every command but `gates doctor` and `gates migrate-name` refuses.",
       "question": "Move this project onto the gatedloop names now?",
       "options": [
         {"answer": "adopted", "label": "Yes: I run `gates migrate-name`, commit what it changed, and make the edits it prints (Recommended)"},
-        {"answer": "declined", "label": "Not at this version: keep the earlier names, which stop working in 0.9.0"}
+        {"answer": "declined", "label": "Not at this version: the earlier names stay unread, and a project holding `.specloop/` stays refused"}
       ],
       "detector": {"kind": "earlier-name"},
       "applies_when": null,

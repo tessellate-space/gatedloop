@@ -105,42 +105,30 @@ def _find_manifest(root: Path) -> tuple[Path | None, Path | None]:
 # ---------- the earlier name (rename-to-gatedloop D2/D3) --------------------
 #
 # The plugin was Specloop until 0.7.0. Its committed state in an adopter's
-# repository carries that name: the `.specloop/` state directory, the
+# repository carried that name: the `.specloop/` state directory, the
 # `x-specloop-*` change-metadata keys, `specloop/<gate>` commit statuses, the
 # `specloop.*` built-in rule ids, the composed git-hook markers and a schema's
-# top-level `specloop:` flow block. Through 0.8.x every reader takes the new
-# spelling first and the earlier one where the new is absent, and the first
-# earlier spelling a command reads prints one stderr line naming `gates
-# migrate-name`. Every literal of the earlier name in this shim lives in this
-# region, so `remove-specloop-forwarders` (0.9.0) deletes one block, and the
-# allow-list test (design D6) can hold the rest of the file to the new name.
+# top-level `specloop:` flow block. Through 0.8.x every reader took either
+# spelling; from 0.9.0 (`remove-specloop-forwarders`) nothing reads the
+# earlier one. What is left is `gates migrate-name`, the scan doctor's `name`
+# row and the `rename` adoption item read, and the refusal of a project still
+# holding `.specloop/` (its design D2). Every literal of the earlier name in
+# this shim lives in this region, so the allow-list test (design D6 of
+# `rename-to-gatedloop`) can hold the rest of the file to the new name.
 
 NAME = "gatedloop"
 EARLIER_NAME = "specloop"
 STATE_DIR_NAME = f".{NAME}"
 EARLIER_STATE_DIR_NAME = f".{EARLIER_NAME}"
-# The durable ledger, under either state directory: stripped from every
-# normalized tree and read from any committed tree, whichever a tree carries.
-LEDGER_PREFIXES = (f"{STATE_DIR_NAME}/runs", f"{EARLIER_STATE_DIR_NAME}/runs")
-STATE_PREFIXES = (f"{STATE_DIR_NAME}/", f"{EARLIER_STATE_DIR_NAME}/")
+# The durable ledger: stripped from every normalized tree and read from any
+# committed tree.
+LEDGER_PREFIXES = (f"{STATE_DIR_NAME}/runs",)
+STATE_PREFIXES = (f"{STATE_DIR_NAME}/",)
 EARLIER_STATUS_CONTEXT_PREFIX = f"{EARLIER_NAME}/"
 EARLIER_HOOK_BEGIN = f"# >>> {EARLIER_NAME} pre-commit (enforce-at-the-effect) >>>"
 EARLIER_HOOK_END = f"# <<< {EARLIER_NAME} pre-commit (enforce-at-the-effect) <<<"
 EARLIER_HOOK_TEMPLATE_MARK = f"# {EARLIER_NAME} git pre-commit hook (enforce-at-the-effect"
 EARLIER_EXPIRY = "0.9.0"
-
-_earlier_name_warned = False
-
-
-def _warn_earlier_name(old: str) -> None:
-    """One stderr line per command, the first time any earlier spelling is
-    read (design D2). Later reads in the same command stay quiet."""
-    global _earlier_name_warned
-    if _earlier_name_warned:
-        return
-    _earlier_name_warned = True
-    print(f"{NAME}: read the earlier name '{old}'; run gates migrate-name "
-          f"(old names stop working in {EARLIER_EXPIRY})", file=sys.stderr)
 
 
 def _state_dirs_conflict(root: Path) -> str | None:
@@ -155,18 +143,25 @@ def _state_dirs_conflict(root: Path) -> str | None:
     return None
 
 
+def _earlier_state_refusal(root: Path) -> str | None:
+    """The refusal for a project still holding the earlier state directory,
+    or None (remove-specloop-forwarders D2). Nothing reads `.specloop/` from
+    0.9.0, so running on would start an empty `.gatedloop/` beside it and
+    split the ledger. Every command but `gates doctor` and `gates
+    migrate-name` refuses instead, naming the way out."""
+    conflict = _state_dirs_conflict(root)
+    if conflict:
+        return conflict
+    if (root / EARLIER_STATE_DIR_NAME).is_dir():
+        return (f"{NAME}: this project still holds {EARLIER_STATE_DIR_NAME}/, the "
+                f"plugin's earlier state directory, which nothing reads from "
+                f"{EARLIER_EXPIRY}. Run gates migrate-name, then commit what it moved.")
+    return None
+
+
 def _state_dir(root: Path) -> Path:
-    """The project's state directory (design D2): `.gatedloop/` when present,
-    else an existing `.specloop/` (read and written there until the project
-    migrates, warning once), else `.gatedloop/`."""
-    new = root / STATE_DIR_NAME
-    if new.is_dir():
-        return new
-    old = root / EARLIER_STATE_DIR_NAME
-    if old.is_dir():
-        _warn_earlier_name(f"{EARLIER_STATE_DIR_NAME}/")
-        return old
-    return new
+    """The project's state directory, `.gatedloop/`."""
+    return root / STATE_DIR_NAME
 
 
 def _state_rel(root: Path, *parts: str) -> str:
@@ -180,49 +175,12 @@ def _earlier_meta_key(key: str) -> str:
 
 
 def _meta_value(data, key: str):
-    """A change-metadata value under its new key, else its earlier one
-    (warning once). A missing or blank value is None."""
+    """A change-metadata value under its key; a missing or blank value is
+    None. The earlier `x-specloop-*` spelling is not read from 0.9.0."""
     if not isinstance(data, dict):
         return None
-    for k in (key, _earlier_meta_key(key)):
-        v = data.get(k)
-        if v is not None and str(v).strip():
-            if k != key:
-                _warn_earlier_name(k)
-            return v
-    return None
-
-
-def _canonical_rule_id(rule: str) -> str:
-    """A rule id with the earlier built-in prefix read as the new one."""
-    if rule.startswith(f"{EARLIER_NAME}."):
-        new = f"{NAME}." + rule[len(EARLIER_NAME) + 1:]
-        if new in BUILTIN_RULE_IDS:
-            _warn_earlier_name(rule)
-            return new
-    return rule
-
-
-def _earlier_schema_block(data: dict):
-    """The schema's earlier `specloop:` flow block, read only when the new
-    `gatedloop:` block is absent (warning once)."""
-    block = data.get(EARLIER_NAME)
-    if block is not None:
-        _warn_earlier_name(f"{EARLIER_NAME}:")
-    return block
-
-
-def _earlier_schema_key(key: str) -> str | None:
-    """The earlier spelling of a schema key a detector looks for, if any."""
-    return EARLIER_NAME if key == NAME else None
-
-
-def _hook_marks_earlier(text: str) -> bool:
-    found = EARLIER_HOOK_BEGIN in text or EARLIER_HOOK_TEMPLATE_MARK in text
-    if found:
-        _warn_earlier_name(EARLIER_HOOK_BEGIN if EARLIER_HOOK_BEGIN in text
-                           else EARLIER_HOOK_TEMPLATE_MARK)
-    return found
+    v = data.get(key)
+    return v if v is not None and str(v).strip() else None
 
 # `gates migrate-name` (design D3): one command moves a project onto the new
 # names, locally. It never commits and never pushes, leaves archived changes
@@ -370,8 +328,9 @@ def _doctor_name_row(names: list[str]) -> tuple:
     if names:
         return ("warn", "name",
                 f"This project still holds the plugin's earlier name: {'; '.join(names)}. "
-                f"It is read, with a warning, until {EARLIER_EXPIRY}. Run `gates migrate-name`, "
-                "then commit what it changed and make the edits it prints.")
+                f"Nothing reads it from {EARLIER_EXPIRY}, and while {EARLIER_STATE_DIR_NAME}/ "
+                "exists every command but this one and `gates migrate-name` refuses. Run "
+                "`gates migrate-name`, then commit what it changed and make the edits it prints.")
     return ("ok", "name", "Nothing in this project uses the plugin's earlier name.")
 
 # ---------- end of the earlier name ------------------------------------------
@@ -726,7 +685,7 @@ def _errors(m: dict, root: Path) -> list[str]:
         for rule in surf.get("rules") or []:
             # An entry is either inline prose (has spaces / long) or a rule-id.
             is_id = (" " not in rule) and len(rule) <= 60
-            if is_id and _canonical_rule_id(rule) in BUILTIN_RULE_IDS:
+            if is_id and rule in BUILTIN_RULE_IDS:
                 continue  # resolved against the plugin's own rules file
             if is_id and doc_text is not None and rule not in heading_ids:
                 errs.append(
@@ -1255,8 +1214,7 @@ def adoption_detector_acted(detector: dict, facts: dict) -> bool:
     if kind == "schema-key":
         # Column-0 key match on raw text: presence only, so no YAML parser is
         # needed (the schema-declared-flow D4 reasoning).
-        keys = [detector["key"]] + [k for k in [_earlier_schema_key(detector["key"])] if k]
-        pattern = re.compile(rf"^(?:{'|'.join(map(re.escape, keys))})\s*:", re.MULTILINE)
+        pattern = re.compile(rf"^{re.escape(detector['key'])}\s*:", re.MULTILINE)
         return any(pattern.search(text) for text in facts["schemas"])
     if kind == "decision-only":
         return False
@@ -2412,8 +2370,6 @@ def _declared_flow(data: dict):
     """The raw `gatedloop.flow` value, or None when nothing is declared."""
     block = data.get(NAME)
     if block is None:
-        block = _earlier_schema_block(data)
-    if block is None:
         return None
     if not isinstance(block, dict):
         raise SchemaDispatchError(
@@ -2448,8 +2404,8 @@ def schema_flow(data: dict) -> str:
 # `tracks` would route an implementable schema to `refuse`, and a missed `flow`
 # would route a bugfix to the default loop.
 
-_DISPATCH_READ_KEY = {"apply": "tracks", NAME: "flow", EARLIER_NAME: "flow"}
-_DISPATCH_BLOCK_OPEN_RE = re.compile(rf"^(apply|{NAME}|{EARLIER_NAME}):[ ]*(#.*)?$")
+_DISPATCH_READ_KEY = {"apply": "tracks", NAME: "flow"}
+_DISPATCH_BLOCK_OPEN_RE = re.compile(rf"^(apply|{NAME}):[ ]*(#.*)?$")
 _TOP_KEY_RE = re.compile(r"""^("[^"]*"|'[^']*'|[^\s#'"\-?:][^:#]*?|-[^\s:#][^:#]*?)[ ]*:(?:[ ]|$)""")
 _CHILD_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.\-]*)[ ]*:(?:[ ]+(.*))?$")
 _YAML_NULLS = frozenset({"~", "null", "Null", "NULL"})
@@ -3323,7 +3279,6 @@ def cmd_rules(m: dict, root: Path, args) -> int:
     ids: list[str] = []
     for s in hot:
         for r in s.get("rules") or []:
-            r = _canonical_rule_id(r)
             if r not in ids and r not in BUILTIN_RULE_IDS:
                 ids.append(r)
     # split-test-author D9: the project's `tests` rules apply to every diff,
@@ -3983,16 +3938,9 @@ def _check_remote_status(root: Path, gate: str, ref: str) -> str:
     context = f"{STATUS_CONTEXT_PREFIX}{gate}"
     data = _gh_json(root, "api", f"repos/{repo}/commits/{sha}/status")
     statuses = (data.get("statuses") if isinstance(data, dict) else None) or []
-    # The combined status lists the latest status per context. The new
-    # context outranks the earlier one whenever both are present (design D2).
+    # The combined status lists the latest status per context.
     by_context = {s.get("context"): s for s in statuses if isinstance(s, dict)}
-    new_context = f"{NAME}/{gate}"
-    earlier_context = f"{EARLIER_STATUS_CONTEXT_PREFIX}{gate}"
-    latest = by_context.get(new_context)
-    context = new_context
-    if latest is None and earlier_context in by_context:
-        latest, context = by_context[earlier_context], earlier_context
-        _warn_earlier_name(earlier_context)
+    latest = by_context.get(context)
     if latest is None:
         raise _ForgeRefusal(
             f"gatedloop: no {context} status on {sha[:12]} — nothing vouches for its tree "
@@ -4426,8 +4374,7 @@ def _hook_already_wired(path: Path | None, hook: str = "pre-commit") -> bool:
         return False
     existing = _read_text_safe(path)
     begin, _end, mark = _HOOK_MARKERS[hook]
-    return (begin in existing or mark in existing
-            or (hook == "pre-commit" and _hook_marks_earlier(existing)))
+    return begin in existing or mark in existing
 
 
 def _hook_copy_at(path: Path | None, hook: str = "pre-commit") -> dict:
@@ -4446,9 +4393,7 @@ def _hook_copy_at(path: Path | None, hook: str = "pre-commit") -> dict:
     except OSError:
         return {"copy": False, "current": False}
     begin, _end, mark = _HOOK_MARKERS[hook]
-    earlier = hook == "pre-commit" and EARLIER_HOOK_TEMPLATE_MARK in text
-    template = mark in text or earlier
-    if not template or begin in text or (hook == "pre-commit" and EARLIER_HOOK_BEGIN in text):
+    if mark not in text or begin in text:
         return {"copy": False, "current": False}
     try:
         shipped = _hook_template_path(hook).read_text()
@@ -5329,8 +5274,6 @@ def _change_ledger_rows(root: Path, change: str, ref: str) -> list[dict]:
             cwd=root, capture_output=True, text=True,
         )
         if blob.returncode == 0:
-            if prefix != LEDGER_PREFIXES[0]:
-                _warn_earlier_name(f"{EARLIER_STATE_DIR_NAME}/")
             take(_parse_jsonl_rows(blob.stdout))
             break
     holder = _worktree_holding(root, ref.removeprefix("refs/heads/"))
@@ -6149,13 +6092,6 @@ def _task_completion(root: Path, change: str, ref: str) -> _Completion:
             if walk.returncode == 0:
                 commits = [base.stdout.strip()] + walk.stdout.split()
     ledger_rel = f"{LEDGER_PREFIXES[0]}/{change}.jsonl"
-    for prefix in LEDGER_PREFIXES[1:]:
-        earlier = f"{prefix}/{change}.jsonl"
-        if (subprocess.run(["git", "cat-file", "-e", f"{sha}:{ledger_rel}"], cwd=root,
-                           capture_output=True).returncode != 0
-                and subprocess.run(["git", "cat-file", "-e", f"{sha}:{earlier}"], cwd=root,
-                                   capture_output=True).returncode == 0):
-            ledger_rel = earlier
     tasks_rel = f"openspec/changes/{change}/tasks.md"
     tick_at: dict[str, int] = {}
     row_at: list[int] = []
@@ -13037,11 +12973,13 @@ def main() -> int:
         # manifest, and it reads nothing but the manifest's one key.
         return cmd_agent_session(_repo_root())
     if args.cmd not in ("doctor", "migrate-name"):
-        # rename-to-gatedloop D2: both state directories would split the
-        # ledger, so nothing that reads or writes state runs on them.
-        conflict = _state_dirs_conflict(_repo_root())
-        if conflict:
-            print(conflict, file=sys.stderr)
+        # Design D2 of the earlier name's expiry: from 0.9.0 nothing reads
+        # the earlier state directory, so a project still holding it (alone
+        # or beside `.gatedloop/`) would split its ledger. Nothing runs on
+        # it but the two commands that report and move it.
+        refusal = _earlier_state_refusal(_repo_root())
+        if refusal:
+            print(refusal, file=sys.stderr)
             return 1
     if args.cmd == "init":
         return cmd_init(args)
