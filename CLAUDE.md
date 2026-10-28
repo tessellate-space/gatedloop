@@ -128,7 +128,8 @@ LLM; the *selection* does not.
 
 - `agents/test-author.md` (Sonnet) writes every task's failing tests for the whole change
   before implementation starts; the tests are held, placed per task and locked, and a
-  red run is enforced after placement (`gates tests …`). `agents/merge-runner.md`
+  red run is enforced after placement (`gates tests …`), on the task's oracle gate: the
+  `[oracle: …]` tag ending its `tasks.md` line, `unit` when untagged. `agents/merge-runner.md`
   (Sonnet) runs `gates merge` for an orchestrator.
 - `agents/tdd-implementer.md` (Sonnet) runs that same skill autonomously. It differs
   in four load-bearing ways: it cannot ask the user (HALTs instead of guessing), it
@@ -220,16 +221,11 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.8.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.9.0. Read a change's
 `design.md` before touching the area it covers:
 
-- `token-ledger`: usage rows per task, `economics.prices`, `loop.token-budget`. Implemented
-  (draft PR #67), held for 0.9.0 because it adds manifest keys.
 - `role-commands`: `/gatedloop:planner` and `/gatedloop:orchestrator`, prompt commands over shipped
   primitives.
-- `remove-specloop-forwarders`: the 0.9.0 expiry of the earlier name's read-both and forwarder
-  (moved from 0.8.0 by `defer-earlier-name-expiry`); re-attest it before implementing, since
-  that move edited it.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 

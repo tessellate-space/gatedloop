@@ -24,6 +24,7 @@ mostly one host: Claude Code, locally and on the web.
 | The merge lane (`gates merge` in both modes, `gates record-merged`, `gatedloop/*` statuses) | yes, by one person | this repository runs in pull-request mode with branch protection |
 | The SessionStart brief and `/gatedloop:start` | yes, by one person | in the maintainer's repositories only |
 | Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
+| Token usage rows, `gates stats --cost` and `loop.token-budget` | lightly | usage recorded on this repository's own changes since `token-ledger` merged; the budget has not halted a real change |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
 The prompts (commands, skills, agents) have no automated oracle. `ci` here says the
@@ -98,7 +99,8 @@ The merge hook covers `git merge`. A merge made in the forge never passes throug
 Pull-request mode closes that path at the forge instead: `gates merge` publishes the
 `ci` and `live-check` markers as `gatedloop/<gate>` commit statuses naming the tree
 they proved, and `gates record-merged <sha>` writes the merge row and the archive
-afterwards. A status posted from a laptop proves only that the laptop said so; it is
+afterwards; under `approval.acceptance: self` the same commit records the owner's
+merge as the acceptance. A status posted from a laptop proves only that the laptop said so; it is
 evidence only where branch protection requires `gatedloop/ci` from your CI provider.
 That protection is a repository setting only you can apply;
 [`running-at-scale.md`](./running-at-scale.md), §5, lists it.
@@ -124,11 +126,13 @@ A pack installed into a project is a snapshot. There is no registry, no version 
 and no `openspec schema update`; a later improvement reaches the project only by
 reinstalling it. [`AGENT_INSTALL.md`](../AGENT_INSTALL.md) says the same.
 
-### The earlier plugin name still reads for one release — *shipped*
+### The earlier plugin name is refused — *shipped*
 
-The plugin was renamed in 0.7.0. Through 0.8.x the earlier names are read with a
-one-line warning, and they stop working in 0.9.0; `gates migrate-name` does the
-migration. README's migration section has the steps.
+The plugin was renamed in 0.7.0, and the earlier names were read with a warning through
+0.8.x. From 0.9.0 nothing reads them: a project still holding the earlier state directory is refused
+by every command except `gates doctor` and `gates migrate-name`, which does the
+migration, and only `gatedloop/<gate>` statuses are posted. README's migration section
+has the steps.
 
 ## Upstream coupling
 
