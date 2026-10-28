@@ -1,3 +1,11 @@
+## REMOVED Requirements
+
+### Requirement: The earlier name is read loudly for one release
+
+**Reason**: Its one release, 0.8.x, is over. From 0.9.0 the earlier name is refused, not read.
+
+**Migration**: Run `gates migrate-name` before upgrading, and require `gatedloop/<gate>` in branch protection instead of `specloop/<gate>`.
+
 ## ADDED Requirements
 
 ### Requirement: The earlier name is refused after its release

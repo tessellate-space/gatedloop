@@ -29,7 +29,7 @@ This repository runs `gates migrate-name` on itself, and commits the result, bef
 
 ### D5. The spec delta
 
-The delta is written as an ADDED requirement, because `rename-to-gatedloop` isn't archived yet: its requirement "The earlier name is read loudly for one release" isn't in `openspec/specs/plugin-positioning` to modify. Once it's archived, before this change is implemented, the delta should become a REMOVED of that requirement plus this ADDED one. Without that, the living spec keeps both, and they contradict each other.
+The delta REMOVES "The earlier name is read loudly for one release" and ADDS "The earlier name is refused after its release". It was first written as an ADDED alone, while `rename-to-gatedloop` was unarchived and its requirement wasn't yet in `openspec/specs/plugin-positioning`. That change was archived on 2026-10-23, so the delta now carries the REMOVED too. Without it, the living spec would keep both requirements, and they contradict each other.
 
 ## Risks
 
