@@ -23,10 +23,13 @@ let a task commit through sooner; it cannot let a change merge.
 Exits 1 if any module fails, printing each failed module's full output; stdlib only.
 """
 import argparse
+import atexit
 import fnmatch
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -35,11 +38,23 @@ ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
 
 
+# git detaches auto-maintenance (`gc --auto`, `maintenance run --auto`) after a
+# commit; a detached writer still adding to `.git/objects` when a test removes
+# its temp repository fails the cleanup with "Directory not empty". Turn it off
+# through XDG_CONFIG_HOME, which git reads beside ~/.gitconfig and which
+# survives the tests that strip every GIT_* variable from their children.
+_XDG = tempfile.mkdtemp(prefix="test-parallel-xdg-")
+(Path(_XDG) / "git").mkdir()
+(Path(_XDG) / "git" / "config").write_text("[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n")
+ENV = {**os.environ, "XDG_CONFIG_HOME": _XDG}
+atexit.register(shutil.rmtree, _XDG, True)
+
+
 def run_module(path: Path) -> tuple[Path, int, str, float]:
     start = time.monotonic()
     out = subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", str(TESTS), "-p", path.name, "-q"],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=ROOT, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     return path, out.returncode, out.stdout, time.monotonic() - start
 
