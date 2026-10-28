@@ -181,6 +181,18 @@ nothing an adopter uses. This rule prevents drift per change; `scripts/release
 docs` (run by `scripts/release cut`) catches the whole-set drift a per-change
 rule misses.
 
+### task-oracle-tags
+Applies to: tasks
+Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+
+The plan fixes each task's oracle before any test exists, so the test author
+does not infer it from prose and the lock reads the gate it names
+(`task-oracle`). In this repo a task that changes the shim is `[oracle: unit]`;
+a prompt or docs task is `[oracle: none]`, since no gate judges prose; a task
+whose tests only pin what an earlier task already built is
+`[oracle: unit characterization]`. This repo does not set
+`loop.task-oracle: required`, so a plan proposed before this rule is unaffected.
+
 ### rejection-test
 Applies to: proposal
 Rule: Before proposing a new gatedloop capability, apply the rejection test — reject anything that only authors an artifact or only binds a stack command.

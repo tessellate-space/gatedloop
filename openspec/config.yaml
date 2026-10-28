@@ -24,3 +24,4 @@ rules:
     - "Before proposing a new gatedloop capability, apply the rejection test — reject anything that only authors an artifact or only binds a stack command."
   tasks:
     - "A change that adds, removes or alters an adopter-facing surface updates README.md and SETUP.md in the same change (and AUTOMATION.md when it changes enforcement)."
+    - "End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm."

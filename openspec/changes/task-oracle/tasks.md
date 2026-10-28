@@ -25,7 +25,7 @@
 
 - [x] 5.1 Add the `task-oracle` adoption item (`since: 0.9.0`), which prints the `rules.tasks` line and offers `loop.task-oracle: required`, with its detector. Have `commands/gates-init.md` and `templates/rules-doc.template.md` offer the same line at onboarding. Verify with an adoption test for the detector and the item's answers [oracle: unit]
 - [x] 5.2 Describe the red step as "the task's oracle gate (`unit` by default)" in README.md (the authored-test row, the `test-author` agent row and the loop diagram), `docs/topology.md` and `docs/running-at-scale.md`, and mark the `docs/status.md` sharp edge on inferred task kinds as shipped. Verify that `scripts/release docs` reports no gap and that `grep -n "gates run unit"` in those files finds only places that mean `unit` itself [oracle: none]
-- [ ] 5.3 Add a `### task-oracle-tags` rule to this repo's `docs/conventions.md` (each task line ends with its oracle tag) and run `gates conventions sync`, so that `openspec/config.yaml`'s `rules.tasks` carries it. Do not set `loop.task-oracle: required` here. Verify that `gates validate` passes with the synced block [oracle: none]
+- [x] 5.3 Add a `### task-oracle-tags` rule to this repo's `docs/conventions.md` (each task line ends with its oracle tag) and run `gates conventions sync`, so that `openspec/config.yaml`'s `rules.tasks` carries it. Do not set `loop.task-oracle: required` here. Verify that `gates validate` passes with the synced block [oracle: none]
 
 ## 6. Integration
 
