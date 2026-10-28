@@ -1,0 +1,1 @@
+Deletes the forwarder plugin, its marketplace entry and the release script's fourth version field; the three-field contract that remains is already pinned by tests/test_release.py (TestCheck, TestCut), and a test that the forwarder is gone would be a tombstone (gatedloop.test-quality item 6).
