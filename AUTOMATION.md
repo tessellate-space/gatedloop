@@ -495,8 +495,9 @@ planning or docs pull request gets the status too.
 recorded on every ledger row, and nothing counted it. Now the count comes from the
 ledger alone:
 
-- **The cap.** A failed attempt is a red `unit` or `ci` row for the task after its
-  RED run and after its latest `restart`. Exit 75 never counts. Once the count
+- **The cap.** A failed attempt is a red row of the task's oracle gate (`unit` unless
+  the plan's tag declares another) or of `ci`, after its RED run (the first red
+  oracle-gate row) and after its latest `restart`. Exit 75 never counts. Once the count
   reaches `loop.attempts` (default 2), `gates run unit|ci` for the task refuses with
   exit 1, runs nothing and writes no row. The caller's `--attempt` is a label, so
   passing a smaller one buys nothing.

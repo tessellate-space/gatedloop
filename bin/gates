@@ -11232,7 +11232,8 @@ def cmd_run(m: dict, root: Path, args) -> int:
         if task is None:
             task = _current_task_after_handoff(rows)
         if task is not None:
-            refusal = _budget_refusal(m, rows, task) or _token_budget_refusal(m, rows, change, task)
+            refusal = (_budget_refusal(m, rows, task, _task_oracle_gate(root, change, task))
+                       or _token_budget_refusal(m, rows, change, task))
             if refusal:
                 print(refusal, file=sys.stderr)
                 return 1
@@ -11459,8 +11460,9 @@ def cmd_run(m: dict, root: Path, args) -> int:
 # "If a gate stays red after 2 focused fix attempts, HALT" was a sentence in a
 # prompt, and `--attempt` a label nothing read back. The count now comes from
 # the ledger alone, so a caller's `--attempt` buys nothing: for task T, a
-# failed attempt is a red `unit` or `ci` row of T after T's RED run (its first
-# red `unit` since its latest `task-start`) and after its latest `restart`.
+# failed attempt is a red row of T's oracle gate (`unit` untagged; task-oracle
+# D4) or of `ci` after T's RED run (its first red oracle-gate row since its
+# latest `task-start`) and after its latest `restart`.
 # Exit 75 (a down environment, a busy lock) never counts -- nothing judged
 # the code. A green row never resets the count.
 
@@ -11469,23 +11471,15 @@ ATTEMPT_NOTE_EVENT = "attempt-note"
 BUDGETED_GATES = ("unit", "ci")
 
 
-def _is_failed_gate_row(r: dict, task: str) -> bool:
-    rc = r.get("exit")
-    return (
-        r.get("gate") in BUDGETED_GATES and r.get("task") == task
-        and isinstance(rc, int) and not isinstance(rc, bool)
-        and rc not in (0, PRECONDITION_EXIT_CODE)
-        and r.get("outcome") != "precondition-failed"
-    )
-
-
-def _attempt_state(rows: list[dict], task: str) -> tuple[bool, int]:
+def _attempt_state(rows: list[dict], task: str, gate: str = "unit") -> tuple[bool, int]:
     """`(red_run_seen, failed_attempts)` for `task`, per design D1, from the
     rows after the later of its latest `task-start` and its latest test
     placement (all rows when it has neither). Starting at the placement
     (unblock-authored-lock D6) means a test-defect cycle's red runs, against
     tests the author has since replaced, are not attempts: the first red run
-    against the re-placed tests is the task's red run."""
+    against the re-placed tests is the task's red run. `gate` is the task's
+    oracle gate (task-oracle D4): its first red run is the RED run, and its
+    later red runs and red `ci` runs are the attempts."""
     start = 0
     for i, r in enumerate(rows):
         if r.get("gate") in (TASK_BASELINE_EVENT, TESTS_PLACED_EVENT) and r.get("task") == task:
@@ -11494,17 +11488,25 @@ def _attempt_state(rows: list[dict], task: str) -> tuple[bool, int]:
     for r in rows[start:]:
         if r.get("gate") == RESTART_EVENT and r.get("task") == task:
             count = 0
-        elif _is_failed_gate_row(r, task):
-            if not red_seen and r.get("gate") == "unit":
-                red_seen = True
-            elif red_seen:
+        elif _is_red_gate_row(r, task, gate):
+            if red_seen:
                 count += 1
+            red_seen = True
+        elif red_seen and _is_red_gate_row(r, task, "ci"):
+            count += 1
     return red_seen, count
 
 
-def failed_attempt_count(rows: list[dict], task: str) -> int:
+def _task_oracle_gate(root: Path, change: str, task: str) -> str:
+    """The task's oracle gate from the change's `tasks.md` in the working
+    tree: its tag's gate, or `unit` when it declares none (task-oracle D4)."""
+    oracle = _change_task_oracles(root, change).get(task)
+    return (oracle or {}).get("gate") or "unit"
+
+
+def failed_attempt_count(rows: list[dict], task: str, gate: str = "unit") -> int:
     """Pure: task's failed attempts since its RED run and its last restart."""
-    return _attempt_state(rows, task)[1]
+    return _attempt_state(rows, task, gate)[1]
 
 
 def restarts_used(rows: list[dict], task: str) -> int:
@@ -11512,11 +11514,11 @@ def restarts_used(rows: list[dict], task: str) -> int:
     return sum(1 for r in rows if r.get("gate") == RESTART_EVENT and r.get("task") == task)
 
 
-def _budget_refusal(m: dict, rows: list[dict], task: str) -> str | None:
+def _budget_refusal(m: dict, rows: list[dict], task: str, gate: str = "unit") -> str | None:
     """Design D2: the refusal message once the task's budget is used, else
     `None`. Never refuses before the RED run -- that run is required."""
     attempts, limit = loop_budget(m)
-    red_seen, count = _attempt_state(rows, task)
+    red_seen, count = _attempt_state(rows, task, gate)
     if not red_seen or count < attempts:
         return None
     used = restarts_used(rows, task)
@@ -11626,7 +11628,7 @@ def cmd_attempt(m: dict, root: Path, args) -> int:
                 print(f"  - {p}", file=sys.stderr)
             print("Nothing was written.", file=sys.stderr)
             return 1
-        attempt = failed_attempt_count(rows, task)
+        attempt = failed_attempt_count(rows, task, _task_oracle_gate(root, change, task))
         _append_ledger_row(root, {
             "ts": _now_iso(), "gate": ATTEMPT_NOTE_EVENT, "exit": None, "duration_ms": 0,
             "change": change, "task": task, "tree": None, "attempt": attempt,

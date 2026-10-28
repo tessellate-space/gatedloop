@@ -186,7 +186,7 @@
           "default": "separate"
         },
         "attempts": {
-          "description": "Failed attempts allowed per task, per context (retry-budget design D1, D5): red `unit` or `ci` runs after the task's RED run and since its last restart, counted from the ledger. Exit 75 never counts. Once reached, `gates run unit|ci` for the task refuses with exit 1. 0 is legal but `gates validate` warns.",
+          "description": "Failed attempts allowed per task, per context (retry-budget design D1, D5): red runs of the task's oracle gate (`unit` unless its tasks.md tag declares another) or of `ci`, after the task's RED run and since its last restart, counted from the ledger. Exit 75 never counts. Once reached, `gates run unit|ci` for the task refuses with exit 1. 0 is legal but `gates validate` warns.",
           "type": "integer",
           "minimum": 0,
           "default": 2

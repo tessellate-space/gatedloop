@@ -13,7 +13,7 @@
 ## 3. The lock and the attempt budget (D4)
 
 - [x] 3.1 Read the lock's red-run condition, and the characterization first-green condition, on the task's oracle gate, at the index and under `--ref`, with `unit` for untagged tasks. Update AUTOMATION.md's description of what the lock reads. Verify with tests for an `integration`-tagged task red on `integration` (holds), red only on `unit` (refused, naming the right command), a characterization task on a non-`unit` gate, and an untagged task unchanged [oracle: unit]
-- [ ] 3.2 Count failed attempts from the first red run on the task's oracle gate, with red `ci` runs still counting. Verify with tests for an `integration`-tagged task's window and an untagged task's unchanged window [oracle: unit]
+- [x] 3.2 Count failed attempts from the first red run on the task's oracle gate, with red `ci` runs still counting. Verify with tests for an `integration`-tagged task's window and an untagged task's unchanged window [oracle: unit]
 - [ ] 3.3 Hold each tag to the approved plan (D9). When `tasks.md` carries a tag, add a digest of its `(task id, tag)` pairs to the approval sha, at the index and at a ref, leaving out checkbox state and task text. Make the handoff, the lock and `--ref` refuse a task whose tag differs from the target's `tasks.md`, naming the task, both tags and the amend-and-re-attest route. Verify with tests for an untagged plan's unchanged sha, a tick leaving the sha unchanged, a retag on the target voiding `check-implement`, a retag on the branch refused at the lock and under `--ref`, and a task absent from the target not compared [oracle: unit]
 
 ## 4. The loop prompts (D5, D6, D8)
