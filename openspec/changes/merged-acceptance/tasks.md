@@ -2,7 +2,7 @@
 
 ## 1. The merged-PR acceptance writer (D1, D2)
 
-- [ ] 1.1 Add `gates acceptance attest <change> --merged <pr>`, sharing the forge checks with `_merged_plan_approval`, writing the accept row with `accepted_by: "<login> (merged #<pr>)"`, the merge time and the merge commit's normalized tree, and doing nothing when an accept row for that tree exists. Verify with tests for a merged PR under self, the review policy, no policy, an open PR, a PR into another base, a PR from another head branch, a merge commit not on the target, and the already-accepted no-op, with the forge faked as the `approval attest --merged` tests fake it [oracle: unit]
+- [x] 1.1 Add `gates acceptance attest <change> --merged <pr>`, sharing the forge checks with `_merged_plan_approval`, writing the accept row with `accepted_by: "<login> (merged #<pr>)"`, the merge time and the merge commit's normalized tree, and doing nothing when an accept row for that tree exists. Verify with tests for a merged PR under self, the review policy, no policy, an open PR, a PR into another base, a PR from another head branch, a merge commit not on the target, and the already-accepted no-op, with the forge faked as the `approval attest --merged` tests fake it [oracle: unit]
 
 ## 2. record-merged (D3, D5)
 
