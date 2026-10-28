@@ -28,7 +28,7 @@
 
 ## 6. Integration
 
-- [ ] 6.1 Run, on a fixture change with an `integration`-tagged task, a `characterization` task and a `none` task, the handoff, placement, the red step on each declared gate, the commits, and a `gates merge` step-1 head proof. Then run `./bin/gates run ci` on the finished branch, and verify that both exit 0 [oracle: unit]
+- [ ] 6.1 Run, on a fixture change with an `integration`-tagged task, a `characterization` task and a `none` task, the handoff, placement, the red step on each declared gate, the commits, and a `gates merge` step-1 head proof. Then run `./bin/gates run ci` on the finished branch, and verify that both exit 0 [oracle: unit characterization]
 
 ## Workflow follow-up
 
