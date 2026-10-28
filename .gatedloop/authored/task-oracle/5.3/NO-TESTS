@@ -1,0 +1,1 @@
+This repo's own rules-doc and its synced openspec/config.yaml; gates validate's drift check covers it, per the plan's [oracle: none].
