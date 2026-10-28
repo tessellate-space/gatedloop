@@ -19,7 +19,7 @@
 ## 4. The loop prompts (D5, D6, D8)
 
 - [x] 4.1 Make `skills/tdd-apply/SKILL.md` and `agents/tdd-implementer.md` run the red step on the task's oracle gate, as `gates tests show` reports it, skip it for a `none` task, and expect green first for `characterization`, never naming an adopter's gate. Verify that the convention review of the `prompts` surface reports no `stack-agnostic-prompts` finding [oracle: none]
-- [ ] 4.2 Make `agents/test-author.md` read the declared oracle from the brief, write tests for that gate's layer, and stop with a `weak-spec` report naming the task when it holds a tag is wrong. Retire the 0.8.0 interim "declare an e2e task `CHARACTERIZATION`" rule. Make `agents/convention-review.md`'s authored-set check judge a `NO-TESTS`/`CHARACTERIZATION` reason against the task's tag when one exists (#47). Verify by the same convention review [oracle: none]
+- [x] 4.2 Make `agents/test-author.md` read the declared oracle from the brief, write tests for that gate's layer, and stop with a `weak-spec` report naming the task when it holds a tag is wrong. Retire the 0.8.0 interim "declare an e2e task `CHARACTERIZATION`" rule. Make `agents/convention-review.md`'s authored-set check judge a `NO-TESTS`/`CHARACTERIZATION` reason against the task's tag when one exists (#47). Verify by the same convention review [oracle: none]
 
 ## 5. Adoption and the docs that describe the loop (D7)
 
