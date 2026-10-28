@@ -5914,7 +5914,7 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
     contradictions: whether the tests exercise the declared gate is for the
     red run on that gate to show."""
     oracles = _change_task_oracles(root, change)
-    problems: list[str] = []
+    problems: list[str] = _oracle_drift_problems(root, change, oracles, only)
     untagged: list[str] = []
     for task, oracle in oracles.items():
         if only is not None and task != only:
@@ -6350,6 +6350,38 @@ def _gate_verdict_row(r: dict, task: str, gate: str = "unit") -> bool:
     )
 
 
+def _tag_text(oracle: dict | None) -> str:
+    label = _oracle_label(oracle)
+    return f"[oracle: {label}]" if label else "no tag"
+
+
+def _oracle_drift_problems(root: Path, change: str, here: dict[str, dict | None],
+                           only: str | None = None) -> list[str]:
+    """task-oracle D9: each task whose tag in the evaluated tree (`here`)
+    differs from its tag in the merge target's `tasks.md`. A task absent
+    from the target -- or a change not on it, or no target -- is not
+    compared: only an approved plan holds a tag."""
+    target, _reason = _resolve_merge_target(root)
+    if target is None:
+        return []
+    text = _blob_at(root, target, f"openspec/changes/{change}/tasks.md")
+    if text is None:
+        return []
+    there = {tid: oracle for tid, _t, oracle in _task_lines_text(text)}
+    problems = []
+    for task, oracle in here.items():
+        if only is not None and task != only:
+            continue
+        if task not in there or there[task] == oracle:
+            continue
+        problems.append(
+            f"task {task}: its oracle tag here is {_tag_text(oracle)}, but the approved "
+            f"plan on '{target}' tags it {_tag_text(there[task])} — a tag changes only "
+            f"through the plan: amend tasks.md on '{target}' and re-attest the change"
+        )
+    return problems
+
+
 def _oracles_in_tree(root: Path, change: str, blobs: dict[str, str]) -> dict[str, dict | None]:
     """`{task: oracle}` from the change's `tasks.md` as the evaluated tree
     holds it -- the staged index, or a commit (task-oracle D2), so a tag
@@ -6519,6 +6551,7 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     #    it was. The oracle gate is the plan's tag, read from the evaluated
     #    tree, or `unit` for an untagged task (task-oracle D4).
     oracles = _oracles_in_tree(root, change, staged)
+    problems.extend(_oracle_drift_problems(root, change, oracles, only))
     for task, (index, paths) in sorted(active.items()):
         if only is not None and task != only:
             continue
@@ -8416,7 +8449,8 @@ def cmd_stats(m: dict, root: Path, args) -> int:
 #
 # `approved_sha` pins an approval to exact content, computed over the
 # change's PLAN artifacts only — `proposal.md`, `design.md`, and every
-# `specs/**/*.md` — never `tasks.md` (SETUP.md: it is *derived* from the
+# `specs/**/*.md`, plus the oracle-tag digest of `tasks.md` when it carries
+# a tag (task-oracle D9) — never the rest of `tasks.md` (SETUP.md: it is *derived* from the
 # already-approved plan, not independently agreed) and never `.openspec.yaml`
 # itself (it would have to hash its own field). Two ways to read that
 # content, because the two callers see it at different times: `sha`/`attest`
@@ -8432,6 +8466,33 @@ def _is_plan_artifact_relpath(rel: str) -> bool:
     if rel in PLAN_ARTIFACT_NAMES:
         return True
     return rel.startswith("specs/") and rel.endswith(".md")
+
+
+def _oracle_tag_pairs(text: str | None) -> list[tuple[str, str]]:
+    """task-oracle D9: `(task id, tag)` for every tagged task line of a
+    `tasks.md`'s text, in file order -- checkbox state and task text left
+    out, so a tick or a reworded task never moves the approval sha."""
+    out = []
+    for line in (text or "").splitlines():
+        mt = _TASK_LINE_RE.match(line)
+        if not mt:
+            continue
+        _body, oracle, tag = _split_oracle_tag(mt.group(2))
+        if tag is not None:
+            label = _oracle_label(oracle)
+            out.append((mt.group(1), f"[oracle: {label}]" if label else " ".join(tag.split())))
+    return out
+
+
+def _update_with_oracle_tags(h, tasks_text: str | None) -> None:
+    """Add the tag digest to an approval hash, only when the plan has a tag:
+    an untagged plan hashes exactly as before (D9)."""
+    pairs = _oracle_tag_pairs(tasks_text)
+    if not pairs:
+        return
+    h.update(b"tasks.md#oracle-tags\n")
+    for tid, tag in pairs:
+        h.update(f"{tid} {tag}\n".encode())
 
 
 def _approval_sha_worktree(root: Path, change: str) -> str | None:
@@ -8455,6 +8516,8 @@ def _approval_sha_worktree(root: Path, change: str) -> str | None:
         h.update(rel.encode() + b"\n")
         h.update(f.read_bytes())
         h.update(b"\n")
+    tasks_md = change_dir / "tasks.md"
+    _update_with_oracle_tags(h, tasks_md.read_text() if tasks_md.is_file() else None)
     return h.hexdigest()
 
 
@@ -8483,6 +8546,7 @@ def _approval_sha_ref(root: Path, change: str, ref: str) -> str | None:
         h.update(rel.encode() + b"\n")
         h.update(content.stdout.encode())
         h.update(b"\n")
+    _update_with_oracle_tags(h, _blob_at(root, ref, f"{prefix}tasks.md"))
     return h.hexdigest()
 
 

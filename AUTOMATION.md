@@ -462,7 +462,10 @@ enforcement:
   (`task-oracle` D2, D4). A task its author declared `characterization` (a locked
   `CHARACTERIZATION` file beside its held tests), or that the plan tags
   `characterization`, is held to the reverse: its first verdict on that gate after
-  placement must be green, and a red one is refused as a defect.
+  placement must be green, and a red one is refused as a defect. The same check refuses a task
+  whose tag in the checked tree differs from its tag in the merge target's `tasks.md`, so
+  the branch cannot choose its own oracle; the tag changes only by amending the plan on
+  the target and re-attesting it, since the approval sha covers the tags (`task-oracle` D9).
 
 Both run where the `ci` marker check runs: `hooks/gate-commit.sh` (layer 1) and the git
 `pre-commit` hook (layer 2) call `gates tests check` right after it, so every
