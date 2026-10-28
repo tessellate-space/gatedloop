@@ -185,6 +185,20 @@
       "detector": {"kind": "manifest-key", "key": "loop.token-budget"},
       "applies_when": null,
       "action": {"kind": "manifest-key", "key": "loop.token-budget"}
+    },
+    {
+      "id": "task-oracle",
+      "since": "0.9.0",
+      "what": "A plan can now declare each task's oracle, so the test author no longer guesses a task's kind from its prose and the lock reads the gate the plan names: a task line in tasks.md may end with `[oracle: <gate>]`, `[oracle: <gate> characterization]` or `[oracle: none]`. For `/opsx:propose` to write the tags, add this line to your own `openspec/config.yaml` under `rules.tasks` (or, where `gates conventions sync` generates that block, as an `Applies to: tasks` rule in your rules-doc): \"End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.\" gatedloop never edits that file. Optionally, `loop.task-oracle: required` makes `gates tests handoff` refuse a change with an untagged task.",
+      "question": "Have the plan declare each task's oracle?",
+      "options": [
+        {"answer": "adopted", "value": "required", "label": "Yes: add the line above to `openspec/config.yaml` `rules.tasks`, and set `task-oracle: required` so an untagged plan is refused at handoff (Recommended)"},
+        {"answer": "adopted", "value": "optional", "label": "Tags where the plan writes them: add the line to `rules.tasks`, and set `task-oracle: optional`, so an untagged task is still the author's to decide"},
+        {"answer": "declined", "label": "Not yet: plans stay untagged, and the test author decides each task's kind as before"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.task-oracle"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.task-oracle"}
     }
   ]
 }
