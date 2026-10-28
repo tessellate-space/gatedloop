@@ -78,18 +78,19 @@ its variable is declared. The `pre-push` gate on the merge target is opt-in, and
 copy: re-run `gates hook install`, and `gates doctor` reports it as `stale-copy`
 until you do.
 
-### The test author infers each task's kind from prose — *shipped limitation*
+### The plan declares each task's oracle — *shipped, opt-in*
 
 The authored-test lock is checked at every commit, again at the merge head
 (`gates merge` step 1) and at the forge (`gatedloop/tests`). Since 0.8.0 it no longer
 blocks ledger-only commits, halts at a finished task, or a finished task reopened by
-a defect, which had left finished changes unable to merge (#56, #49). What remains:
-the author decides from the plan's prose whether a task is red-then-green,
-`CHARACTERIZATION` or `NO-TESTS`, and a wrong guess shows only when the placed tests
-pass on their first run. The implementer then records a `green` defect and the author
-re-declares or rewrites. A file the `unit` gate never runs, such as an e2e step file,
-can only be declared `CHARACTERIZATION` for now. `task-oracle`, which lets the plan
-declare each task's oracle, is the next change to be proposed.
+a defect, which had left finished changes unable to merge (#56, #49). Since 0.9.0
+(`task-oracle`) a task line may end with `[oracle: <gate>]`, `[oracle: <gate>
+characterization]` or `[oracle: none]`: the brief tells the author, the handoff
+refuses a contradiction, and the lock reads the red run on the declared gate, so an
+e2e task tagged `[oracle: integration]` goes red under `integration` instead of being
+declared `CHARACTERIZATION`. An untagged task is still the author's to decide from the
+prose, and a wrong guess there shows only as a `green` defect. `loop.task-oracle:
+required` refuses untagged tasks at handoff; it is off by default.
 
 ### Statuses posted from a laptop are self-reported — *shipped, by design*
 
