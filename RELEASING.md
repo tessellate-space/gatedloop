@@ -234,11 +234,11 @@ Before `tree`, the README must say that issue numbers before 0.7.0 were remapped
 
 ## Releasing through the rename
 
-The 0.7.x releases carry the rename from Specloop (`rename-to-gatedloop`), and three things about them differ from an ordinary release.
+The 0.7.x and 0.8.x releases carried the rename from Specloop (`rename-to-gatedloop`), and three things about them differed from an ordinary release.
 
-- **A fourth version field.** `.claude-plugin/marketplace.json` lists a second plugin, the `specloop` forwarder at `forwarder/specloop/`, and its entry's `version` moves with the plugin's. `scripts/release check` reads it as a fourth field, and `cut` bumps it with the other three. Its version has to change on every release: an existing `specloop@specloop` install updates onto the forwarder only when its computed version changes.
-- **Where the forwarder ships from.** An existing install updates from the repository its marketplace was added from, `tessellate-space/specloop`. So the release that first carries the forwarder must reach that repository's `main` before `go-public-migration` makes it a private archive. A release cut only in `tessellate-space/gatedloop` reaches no existing install.
-- **The expiry.** `remove-specloop-forwarders` removes the forwarder, the read-both readers, the dual status posting and the earlier-name warnings in 0.9.0 (`defer-earlier-name-expiry` moved it from 0.8.0, so the #56 fix could ship in 0.8.0). `gates migrate-name` stays one release longer. Cut 0.9.0 only with that change archived.
+- **A fourth version field, through 0.8.x.** `.claude-plugin/marketplace.json` listed a second plugin, the `specloop` forwarder at `forwarder/specloop/`, and its entry's `version` moved with the plugin's. `scripts/release check` read it as a fourth field, and `cut` bumped it with the other three. From 0.9.0 the entry is gone, and `check` and `cut` read the three fields again.
+- **Where the forwarder shipped from.** An existing install updates from the repository its marketplace was added from, `tessellate-space/specloop`. So the release that first carried the forwarder had to reach that repository's `main` before `go-public-migration` made it a private archive.
+- **The expiry.** `remove-specloop-forwarders` removes the forwarder, the read-both readers, the dual status posting and the earlier-name warnings in 0.9.0 (`defer-earlier-name-expiry` moved it from 0.8.0, so the #56 fix could ship in 0.8.0). `gates migrate-name` stays one release longer. Cut 0.9.0 only with that change archived, and have its release notes repeat that branch protection requiring `specloop/ci` must require `gatedloop/ci` instead: from 0.9.0 only `gatedloop/<gate>` is posted.
 
 ## A partial publish
 

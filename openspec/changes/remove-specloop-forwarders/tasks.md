@@ -10,4 +10,4 @@
 
 ## 3. Close
 
-- [ ] 3.1 Shrink the allow-list test and the migration notes (design D3); `gates run ci` green
+- [x] 3.1 Shrink the allow-list test and the migration notes (design D3); `gates run ci` green

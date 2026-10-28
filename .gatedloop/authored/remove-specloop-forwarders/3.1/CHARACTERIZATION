@@ -1,1 +1,0 @@
-The shrunk allow-list pins what the tree already holds once 2.1-2.3 have removed the read-both code and tests, the forwarder and its release-script field: it must pass before the migration notes are edited, and keep passing after (design D3).
