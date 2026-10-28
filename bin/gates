@@ -12740,7 +12740,15 @@ def _merge_pr_steps(m: dict, root: Path, change: str) -> int:
     if require_approval:
         print("  auto-merge not enabled — `integration.requireApproval` is true: a reviewer "
               "approves and merges it in the forge")
-    if acc_rc != 0:
+    if acc_rc != 0 and _acceptance_policy(m) == "self":
+        # merged-acceptance D4: under `self` the owner's merge in the forge is
+        # the acceptance, so nothing is unsatisfied; auto-merge stays off
+        # because no acceptance is recorded yet.
+        print("  auto-merge not enabled — no acceptance is recorded for this tree. Under "
+              "`approval.acceptance: self` the owner's merge is the acceptance: merge the "
+              "pull request in the forge, and `gates record-merged <squash sha>` records "
+              f"that merge as the acceptance of '{change}'.")
+    elif acc_rc != 0:
         print("  auto-merge not enabled — the declared acceptance is not satisfied for this "
               f"tree: {acc_err.strip()}")
     return 0

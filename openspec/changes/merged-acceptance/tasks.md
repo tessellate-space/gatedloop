@@ -11,7 +11,7 @@
 
 ## 3. The merge message and the docs (D4)
 
-- [ ] 3.1 In pull-request mode under `acceptance: self` with no acceptance recorded, make `gates merge` step 4 say that the owner's merge in the forge is recorded as the acceptance by `gates record-merged`. Verify with a test of the step 4 output under self and under review [oracle: unit]
+- [x] 3.1 In pull-request mode under `acceptance: self` with no acceptance recorded, make `gates merge` step 4 say that the owner's merge in the forge is recorded as the acceptance by `gates record-merged`. Verify with a test of the step 4 output under self and under review [oracle: unit]
 - [ ] 3.2 Document `--merged` beside `--pr` and `--local` in SETUP.md's acceptance writers, and what `record-merged` records under `acceptance: self` in SETUP.md and AUTOMATION.md. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
 
 ## Workflow follow-up
