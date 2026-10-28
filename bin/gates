@@ -12829,20 +12829,33 @@ def _dirty_record_refusal(root: Path) -> str | None:
     )
 
 
-def _record_merged_plan(m: dict, root: Path, change: str, number) -> int:
-    """planner-handoff D3: a merged `plan/<change>` PR. Under `self`, for a
-    change with no approval yet, attest it from the merge (D1/D2) and make
-    the one local commit; otherwise skip, saying why. Never pushes."""
+def _recorded_approval(root: Path, change: str) -> tuple:
+    """`(by, at, sha)` as the checkout's `.openspec.yaml` records them."""
+    p = _openspec_yaml_path(root, change)
+    try:
+        data = (_load(p) or {}) if p.exists() else {}
+    except Exception:
+        data = {}
+    return _approval_meta(data)
+
+
+def _record_merged_plan(m: dict, root: Path, change: str, number, sha: str) -> int:
+    """planner-handoff D3: a merged `plan/<change>` PR. Under `self`, attest
+    it from the merge (D1/D2) and make the one local commit, unless the
+    recorded approval still matches the plan in the merge commit `sha`
+    (merged-acceptance D5: a merged amendment leaves a stale `approved_sha`,
+    which is re-attested, not skipped). Otherwise skip, saying why. Never
+    pushes."""
     policy = _approval_policy(m)
     if policy != "self":
         print(f"gatedloop: PR #{number} merged the plan of '{change}', but the approval policy "
               f"is {policy!r} — under review only an approving review approves a plan "
               f"(`gates approval attest {change} --pr {number}`). Nothing was recorded.")
         return 0
-    approved_by = _read_approved_by(root, change)
-    if approved_by:
+    approved_by, _approved_at, approved_sha = _recorded_approval(root, change)
+    if approved_by and approved_sha and approved_sha == _approval_sha_ref(root, change, sha):
         print(f"gatedloop: PR #{number} merged the plan of '{change}', which is already approved "
-              f"(by {approved_by}). Nothing was recorded.")
+              f"(by {approved_by}) and still matches it. Nothing was recorded.")
         return 0
     refusal = _dirty_record_refusal(root)
     if refusal:
@@ -12912,7 +12925,7 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     number = pr.get("number")
     change = ((pr.get("head") or {}).get("ref") or "").strip()
     if change.startswith("plan/") and _is_active_change(root, change[len("plan/"):]):
-        return _record_merged_plan(m, root, change[len("plan/"):], number)
+        return _record_merged_plan(m, root, change[len("plan/"):], number, sha)
     if not _is_active_change(root, change):
         if change and "/" not in change and _archived_change_exists(root, change):
             print(f"gatedloop: PR #{number}'s head '{change}' is a change already archived — "
