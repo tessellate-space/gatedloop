@@ -17,6 +17,13 @@ that is open, merged elsewhere, from another branch, or whose merge commit is
 off the target writing a row anyway or not naming what was unmet; and a
 re-run writing a second row for the same tree.
 
+`gates record-merged <sha>` (design D3) writes that same row under `self`,
+before the merge row and in the same local commit, so a solo pull-request
+project ends a change with a complete ledger. Its regressions: no accept row
+(the change reads `merged`, never `accepted`), a second accept row beside
+one the owner already recorded, an accept row under the review policy or
+none, and a merge committed without its acceptance when the forge refuses.
+
 Real git with a bare remote (the target is a remote ref), the fake forge from
 `_forge_fixture`, and `_merge_fixture`'s repository.
 
@@ -206,6 +213,70 @@ class AttestMergedAcceptanceTest(unittest.TestCase):
                     self.assertIn(word, combined(r))
                 self.assertEqual(state(repo), before, "a refusal wrote something")
                 self.assertEqual(acceptance_rows(ledger_rows(repo)), [])
+
+
+
+class RecordMergedAcceptanceTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_under_self_the_merge_is_recorded_as_the_acceptance_in_the_same_commit(self):
+        repo, _forge, squash = merged_change(self.tmp)
+
+        r = repo.gates("record-merged", squash, **NO_CI)
+
+        self.assertEqual(r.returncode, 0, combined(r))
+        self.assertEqual(git(repo.primary, "rev-parse", "HEAD~1"), squash, "not exactly one commit")
+        self.assertEqual(git(repo.primary, "status", "--porcelain"), "")
+        rows = repo.rows_at("HEAD")
+        accepts = acceptance_rows(rows)
+        self.assertEqual(len(accepts), 1, accepts)
+        self.assertEqual(accepts[0].get("accepted_by"), "alice (merged #42)")
+        merges = [x for x in rows if x.get("gate") == "merge"]
+        self.assertEqual([x.get("sha") for x in merges], [squash])
+        self.assertLess(rows.index(accepts[0]), rows.index(merges[0]),
+                        "the accept row does not precede the merge row")
+        self.assertEqual(accepts[0].get("tree"), merges[0].get("tree"))
+        self.assertEqual(outcome(repo), "accepted")
+
+    def test_an_acceptance_already_recorded_for_the_tree_is_not_written_again(self):
+        repo, _forge, squash = merged_change(self.tmp, accept_locally=True)
+
+        r = repo.gates("record-merged", squash, **NO_CI)
+
+        self.assertEqual(r.returncode, 0, combined(r))
+        accepts = acceptance_rows(repo.rows_at("HEAD"))
+        self.assertEqual(len(accepts), 1, accepts)
+        self.assertNotIn("(merged #42)", accepts[0].get("accepted_by") or "")
+        self.assertEqual(outcome(repo), "accepted")
+
+    def test_without_the_self_policy_no_acceptance_is_written(self):
+        for policy in ("review", None):
+            with self.subTest(policy=policy), tempfile.TemporaryDirectory() as tmp:
+                repo, _forge, squash = merged_change(Path(tmp), policy=policy)
+
+                r = repo.gates("record-merged", squash, **NO_CI)
+
+                self.assertEqual(r.returncode, 0, combined(r))
+                rows = repo.rows_at("HEAD")
+                self.assertEqual(acceptance_rows(rows), [])
+                self.assertEqual([x.get("sha") for x in rows if x.get("gate") == "merge"], [squash])
+                self.assertEqual(outcome(repo), "merged")
+
+    def test_a_forge_refusal_commits_nothing(self):
+        repo, _forge, squash = merged_change(self.tmp, pr_record=False)
+
+        r = repo.gates("record-merged", squash, **NO_CI)
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        self.assertEqual(git(repo.primary, "rev-parse", "HEAD"), squash)
+        self.assertEqual(git(repo.primary, "status", "--porcelain"), "")
+        self.assertEqual([x for x in ledger_rows(repo) if x.get("gate") == "merge"], [])
+        self.assertEqual(acceptance_rows(ledger_rows(repo)), [])
 
 
 if __name__ == "__main__":

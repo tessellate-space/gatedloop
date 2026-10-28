@@ -6,7 +6,7 @@
 
 ## 2. record-merged (D3, D5)
 
-- [ ] 2.1 Make `gates record-merged`, under `approval.acceptance: self`, write the acceptance row before the merge row in the same local commit, skip it when an accept row for the tree exists, and discard the whole attempt when the writer refuses. Verify with tests for the self case (`gates stats --outcomes` reads `accepted`), an existing accept row, the review policy (no row written), no policy, and a forge refusal leaving nothing committed [oracle: unit]
+- [x] 2.1 Make `gates record-merged`, under `approval.acceptance: self`, write the acceptance row before the merge row in the same local commit, skip it when an accept row for the tree exists, and discard the whole attempt when the writer refuses. Verify with tests for the self case (`gates stats --outcomes` reads `accepted`), an existing accept row, the review policy (no row written), no policy, and a forge refusal leaving nothing committed [oracle: unit]
 - [ ] 2.2 Make `_record_merged_plan` re-attest a change whose `approved_sha` no longer matches the plan in the merge commit, and skip only a matching one. Verify with tests for a merged amendment re-attested (and `check-implement` passing), a matching approval skipped, and a change with no approval attested as now [oracle: unit]
 
 ## 3. The merge message and the docs (D4)

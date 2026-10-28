@@ -12929,6 +12929,22 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
 
     archive_dir = root / "openspec" / "changes" / "archive"
     before = set(archive_dir.iterdir()) if archive_dir.is_dir() else set()
+    # merged-acceptance D3: under `self` the owner's merge is the acceptance,
+    # written before the merge row and committed with it. Never a merge
+    # recorded without its acceptance: a refusal discards the whole attempt.
+    accepted = ""
+    if _acceptance_policy(m) == "self":
+        rc, out, err = _captured(_acceptance_attest_merged, m, root, change, number)
+        if rc != 0:
+            _discard_record_attempt(root, before)
+            print(f"gatedloop: the acceptance from PR #{number}'s merge could not be recorded, "
+                  f"so nothing was recorded: {(err or out).strip()}", file=sys.stderr)
+            return 1
+        accepted = (
+            f" Under `approval.acceptance: self` the merge of PR #{number} is the acceptance: "
+            + ("it was already recorded for this tree." if "already accepted" in out
+               else "recorded in the same commit.")
+        )
     rc, out, err = _captured(cmd_ledger, m, root, argparse.Namespace(ledger_cmd="record-merge", change=change, sha=sha))
     if rc != 0:
         _discard_record_attempt(root, before)
@@ -12970,7 +12986,7 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     print(
         f"gatedloop: recorded the merge of '{change}' (PR #{number}) against {sha[:12]} and "
         f"archived it in {new[:12]} ({len(files)} file(s)). Nothing was pushed — landing "
-        "this commit is the caller's."
+        f"this commit is the caller's.{accepted}"
     )
     return 0
 
