@@ -3274,6 +3274,23 @@ def _is_catchall_surface(surf: dict) -> bool:
     return "**" in _expand_surface_globs(surf)
 
 
+def _first_unmatched_path(m: dict, changed: list[str]) -> str | None:
+    """The first path of `changed`, in sorted order, that no non-catch-all
+    surface matches, or `None` (err-full-scoping D1). A catch-all matches
+    every path, so counting it would hide every unmatched one. The loop's own
+    state (`.gatedloop/`: the ledger, the holding area) is never a project
+    path: every task commit stages its ledger row, and a ledger row cannot
+    change what a test runs."""
+    specific = [s for s in (m.get("surfaces") or []) if not _is_catchall_surface(s)]
+    globs = [g for s in specific for g in _expand_surface_globs(s)]
+    for path in sorted(changed):
+        if path.startswith(STATE_DIR_NAME + "/"):
+            continue
+        if not any(_matches(path, g) for g in globs):
+            return path
+    return None
+
+
 def _select_scoped_gate(m: dict, gate: str, changed: list[str] | None) -> tuple[str | dict | None, str]:
     """Select the manifest spec to run for a scopable gate (`ci`/`unit`) and
     the scope it ran under -- a surface name, or `"full"` for the globally
@@ -3283,12 +3300,13 @@ def _select_scoped_gate(m: dict, gate: str, changed: list[str] | None) -> tuple[
     command runs ONLY when `changed`'s hot set is exactly one NON-catch-all
     surface that declares an override for `gate`; every other case --
     `changed` empty or unreadable (`None`), no hot surface, more than one hot
-    surface, or a hot surface without the override -- runs the globally
+    surface, a hot surface without the override, or a changed path no
+    non-catch-all surface matches (err-full-scoping D1) -- runs the globally
     declared gate. This can only ever narrow to a declared scoped command,
     never skip the gate outright.
     """
     global_cmd = (m.get("gates") or {}).get(gate)
-    if changed:
+    if changed and _first_unmatched_path(m, changed) is None:
         non_catchall_hot = [s for s in hot_surfaces(m, changed) if not _is_catchall_surface(s)]
         if len(non_catchall_hot) == 1:
             override = (non_catchall_hot[0].get("gates") or {}).get(gate)
@@ -11562,6 +11580,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
             # whatever the staged squash would otherwise scope to.
             changed_for_scope = []
         spec, scope = _select_scoped_gate(m, gate, changed_for_scope)
+        unmatched = _first_unmatched_path(m, changed_for_scope) if changed_for_scope else None
     else:
         spec = gates.get(gate)
     if not spec:
@@ -11593,7 +11612,12 @@ def cmd_run(m: dict, root: Path, args) -> int:
     elif extra:
         cmd = cmd + " " + " ".join(extra)
     if gate in ("ci", "unit"):
-        why = "nothing scoped narrower" if scope == "full" else f"hot surface '{scope}' declares an override"
+        if unmatched is not None:
+            why = f"{unmatched} matches no surface"
+        elif scope == "full":
+            why = "nothing scoped narrower"
+        else:
+            why = f"hot surface '{scope}' declares an override"
         print(f"gatedloop: {gate}[{scope}] — {why}", file=sys.stderr)
     started = time.monotonic()
     # design D6 (worktree-native-loop): the lock is held strictly around the

@@ -2,7 +2,7 @@
 
 ## 1. Unmatched paths err full (D1)
 
-- [ ] 1.1 Make `_select_scoped_gate` return the global gate when any changed path is matched by no non-catch-all surface, and announce `<gate>[full] — <path> matches no surface` with the first such path in sorted order. Verify with tests: a staged diff of one scoped surface's file plus an unmatched file runs the global `ci`; the same with a catch-all surface declared; the same for `unit` off the working set; a diff wholly in one scoped surface still runs the scoped command [oracle: unit]
+- [x] 1.1 Make `_select_scoped_gate` return the global gate when any changed path is matched by no non-catch-all surface, and announce `<gate>[full] — <path> matches no surface` with the first such path in sorted order. Verify with tests: a staged diff of one scoped surface's file plus an unmatched file runs the global `ci`; the same with a catch-all surface declared; the same for `unit` off the working set; a diff wholly in one scoped surface still runs the scoped command [oracle: unit]
 
 ## 2. A multi-surface unit runs the union (D2)
 
