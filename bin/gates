@@ -1979,6 +1979,18 @@ _NON_ORACLE_REASONS = {
 # optionally followed by one lowercase letter (`1.2a`, a plan amendment's
 # insert). Every `tasks.md` reader builds its pattern from this one.
 TASK_ID_PATTERN = r"\d+(?:\.\d+)+[a-z]?"
+def _task_sort_key(tid: str) -> tuple:
+    """friction-fixes D2: the one order every task listing uses -- by number,
+    segment by segment, a lettered id after the same id bare (`1.2` < `1.2a`
+    < `1.10`). A segment outside the grammar sorts after every numeric one,
+    as a string, so a legacy ledger id never crashes a listing."""
+    out = []
+    for seg in str(tid).split("."):
+        mt = re.fullmatch(r"(\d+)([a-z]?)", seg)
+        out.append((0, int(mt.group(1)), mt.group(2)) if mt else (1, 0, seg))
+    return tuple(out)
+
+
 # The validate tag check still reads `N.M` ids only (friction-fixes D3 narrows it).
 _NM_TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\d+(?:\.\d+)+)\s+(.*)$")
 _UNPARSED_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\S+)")
@@ -6867,8 +6879,7 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     tasks: dict[str, dict] = {}
     oracles = _change_task_oracles(root, change)
     if state is not None:
-        for task in sorted(set(state["tests"]) | set(state["no_behaviour"]),
-                           key=lambda t: [int(x) if x.isdigit() else x for x in t.split(".")]):
+        for task in sorted(set(state["tests"]) | set(state["no_behaviour"]), key=_task_sort_key):
             log = defect_log.get(task, [])
             tasks[task] = {
                 "oracle": _oracle_label(oracles.get(task)),
@@ -7578,7 +7589,7 @@ def _usage_show(root: Path, args) -> int:
             f"{(r.get('messages') if counted else '-'):>8}  "
             f"{(usage_total(r.get('tokens')) if counted else '-'):>12}")
     lines.append("")
-    for task in sorted(by_task):
+    for task in sorted(by_task, key=_task_sort_key):
         lines.append(f"{task:<15} {by_task[task]:>12}")
     lines.append(f"{'total':<15} {total:>12}")
     print("\n".join(lines))
@@ -8037,7 +8048,7 @@ def tokens_from_rows(rows: list[dict]) -> dict:
         task = r.get("task")
         _token_add(tasks.setdefault(task, _token_bucket()) if task else unattributed, r["tokens"])
     known = {r.get("task") for r in rows if r.get("task") and r.get("gate") != USAGE_EVENT}
-    unrecorded = sorted(t for t in known if t not in tasks)
+    unrecorded = sorted((t for t in known if t not in tasks), key=_task_sort_key)
     stamps = sorted(k for k in (_utc_key(r.get("ts")) for r in rows) if k is not None)
     span_ms = uncovered = 0
     if stamps:
@@ -8103,7 +8114,7 @@ def _cost_format_human(cost: dict) -> list[str]:
     cur = cost["currency"] or ""
     scope = "priced models only" if cost["unpriced"] else "every recorded model priced"
     lines = [f"cost ({cur}): {cost['total']:.4f} total ({scope})"]
-    for task in sorted(cost["tasks"]):
+    for task in sorted(cost["tasks"], key=_task_sort_key):
         lines.append(f"  {task:<15} {cost['tasks'][task]:>12.4f}")
     if cost["unattributed"]:
         lines.append(f"  {'(unattributed)':<15} {cost['unattributed']:>12.4f}")
@@ -8186,7 +8197,7 @@ def _stats_format_human(doc: dict) -> str:
             )
         lines.append("")
         lines.append("task            active      gate  failed")
-        for name in sorted(c["tasks"]):
+        for name in sorted(c["tasks"], key=_task_sort_key):
             t = c["tasks"][name]
             lines.append(
                 f"{name:<15} {_stats_fmt_ms(t['active_ms']):>8}  "
@@ -8236,7 +8247,7 @@ def _tokens_format_human(t: dict) -> list[str]:
         "covered by a usage window",
         f"{'task':<15} {'tokens':>12}",
     ]
-    for name in sorted(set(t["tasks"]) | set(u["tasks"])):
+    for name in sorted(set(t["tasks"]) | set(u["tasks"]), key=_task_sort_key):
         value = t["tasks"][name]["total"] if name in t["tasks"] else "unrecorded"
         lines.append(f"{name:<15} {value:>12}")
     if t["unattributed"]["total"]:
