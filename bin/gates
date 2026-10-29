@@ -11621,10 +11621,12 @@ def cmd_run(m: dict, root: Path, args) -> int:
                 "; ".join(f"{name}: {cmd}" for name, cmd, _prc in failed), failed[0][2], time.monotonic(),
             )
             return PRECONDITION_EXIT_CODE
-        scope = "full"
-        surfaces = ", ".join(f"'{name}'" for name, _raw in union)
-        print(f"gatedloop: unit[{scope}] — hot surfaces {surfaces} each run their own unit",
-              file=sys.stderr)
+        # D2: the scope names every component in run order, `full` for the
+        # global; readers treat scope as a free string (only `ci` markers
+        # compare it to `full`), so none changes.
+        scope = "+".join(name for name, _raw in union)
+        print(f"gatedloop: unit[{scope}] — the change spans several surfaces; "
+              "each one's unit oracle runs", file=sys.stderr)
         started = time.monotonic()
         rc = 0
         try:
