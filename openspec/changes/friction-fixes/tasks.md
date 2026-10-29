@@ -17,7 +17,7 @@
 
 ## 4. Docs
 
-- [ ] 4.1 Document the task-id grammar beside the oracle tag syntax in SETUP.md, and the switch-then-merge case in AUTOMATION.md's merge hook section. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
+- [x] 4.1 Document the task-id grammar beside the oracle tag syntax in SETUP.md, and the switch-then-merge case in AUTOMATION.md's merge hook section. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
 
 ## Workflow follow-up
 
