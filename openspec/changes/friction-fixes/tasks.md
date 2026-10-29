@@ -13,7 +13,7 @@
 
 ## 3. The authored-set review (D6)
 
-- [ ] 3.1 Add D6's coverage rule to the authored-set paragraph of `agents/convention-review.md`, keeping the task-oracle D8 tag rule and the read-only budget. Verify by the convention review against `stack-agnostic-prompts` and the test-quality items it cites [oracle: none]
+- [x] 3.1 Add D6's coverage rule to the authored-set paragraph of `agents/convention-review.md`, keeping the task-oracle D8 tag rule and the read-only budget. Verify by the convention review against `stack-agnostic-prompts` and the test-quality items it cites [oracle: none]
 
 ## 4. Docs
 
