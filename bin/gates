@@ -3315,6 +3315,33 @@ def _select_scoped_gate(m: dict, gate: str, changed: list[str] | None) -> tuple[
     return global_cmd, "full"
 
 
+def _unit_union(m: dict, changed: list[str] | None) -> list[tuple[str, str | dict]] | None:
+    """The `(surface name, raw spec)` pairs a multi-surface `unit` run runs
+    (err-full-scoping D2), or `None` when the run is not one. It is one when
+    every changed path is matched (D1) and two or more non-catch-all
+    surfaces are hot: each hot surface's `unit` override in surface order,
+    then the global `unit` once, named `full`, when any hot surface declares
+    none. A single-surface run, or any err-full case, is `None` and goes
+    through `_select_scoped_gate` as before."""
+    if not changed or _first_unmatched_path(m, changed) is not None:
+        return None
+    hot = [s for s in hot_surfaces(m, changed) if not _is_catchall_surface(s)]
+    if len(hot) < 2:
+        return None
+    union: list[tuple[str, str | dict]] = []
+    needs_global = False
+    for surf in hot:
+        override = (surf.get("gates") or {}).get("unit")
+        if override:
+            union.append((surf.get("name", "<unnamed>"), override))
+        else:
+            needs_global = True
+    global_unit = (m.get("gates") or {}).get("unit")
+    if needs_global and global_unit:
+        union.append(("full", global_unit))
+    return union or None
+
+
 def cmd_surfaces(m: dict, root: Path, args) -> int:
     changed = _changed_files(args)
     hot = hot_surfaces(m, changed)
@@ -11563,6 +11590,57 @@ def cmd_run(m: dict, root: Path, args) -> int:
         _maybe_print_fresh_worktree_hint(root, rc)
         return rc
 
+    def _run_unit_union(union: list[tuple[str, str | dict]]) -> int:
+        # err-full-scoping D2: every hot surface's oracle, each command once
+        # (the live-check dedupe rule), every precondition before any command,
+        # all under one lock acquisition; the first non-zero exit is the run's,
+        # and every command runs so each surface's verdict is reported.
+        recipes: dict[str, list[str]] = {}
+        failed: list[tuple[str, str, int]] = []
+        checked: set[str] = set()
+        for name, raw in union:
+            cmd, requires = _gate_spec(raw)
+            if not cmd:
+                sys.exit(f"gatedloop: surface '{name}' unit has no 'run' command")
+            if requires and requires not in checked:
+                checked.add(requires)
+                prc = _exec(requires, root)
+                if prc != 0:
+                    failed.append((name, requires, prc))
+            if extra:
+                cmd = cmd + " " + " ".join(extra)
+            recipes.setdefault(cmd, []).append(name)
+        if failed:
+            for name, requires, prc in failed:
+                print(
+                    f"gatedloop: precondition '{requires}' failed (exit {prc}) — "
+                    f"unit [{name}] was not run; no unit command ran",
+                    file=sys.stderr,
+                )
+            record_precondition_failure(
+                "; ".join(f"{name}: {cmd}" for name, cmd, _prc in failed), failed[0][2], time.monotonic(),
+            )
+            return PRECONDITION_EXIT_CODE
+        scope = "full"
+        surfaces = ", ".join(f"'{name}'" for name, _raw in union)
+        print(f"gatedloop: unit[{scope}] — hot surfaces {surfaces} each run their own unit",
+              file=sys.stderr)
+        started = time.monotonic()
+        rc = 0
+        try:
+            with _gate_lock(root, m, gate, max_wait=max_wait, priority=priority,
+                            bound_key=bound_key):
+                for cmd, names in recipes.items():
+                    one = _run_gate_captured(cmd, root, gate, "+".join(names),
+                                             getattr(args, "verbose", False))
+                    rc = rc or one
+        except _LockBusy as busy:
+            return lock_busy(busy, started)
+        tree = _write_tree(root)
+        record(rc, tree, started, scope=scope)
+        _maybe_print_fresh_worktree_hint(root, rc)
+        return rc
+
     gates = m.get("gates") or {}
     scope = "full"
     if gate in ("ci", "unit"):
@@ -11581,6 +11659,9 @@ def cmd_run(m: dict, root: Path, args) -> int:
             changed_for_scope = []
         spec, scope = _select_scoped_gate(m, gate, changed_for_scope)
         unmatched = _first_unmatched_path(m, changed_for_scope) if changed_for_scope else None
+        union = _unit_union(m, changed_for_scope) if gate == "unit" else None
+        if union:
+            return _run_unit_union(union)
     else:
         spec = gates.get(gate)
     if not spec:
