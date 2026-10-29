@@ -9,6 +9,50 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.9.0 — 2026-10-28
+
+Each task can now declare the gate that proves it, every task's token cost is recorded, a solo project's merge counts as its acceptance, and the earlier `specloop` names stop working.
+
+**The plan declares each task's oracle**
+
+- **task-oracle** (#86). Fixes #56.
+  - **A task line may end with `[oracle: <gate>]`**, `[oracle: <gate> characterization]` or `[oracle: none]`. `gates validate` checks every tag. `ci`, `live-check`, `eval` and `confirm` can't be oracles.
+  - **The test author no longer guesses a task's kind.** `gates tests brief` prints each declared oracle, and the handoff refuses a held test that contradicts its tag. The author stops with `weak-spec` when it thinks a tag is wrong, and the 0.8.0 interim rule ("declare an e2e task `CHARACTERIZATION`") is retired.
+  - **The lock and the attempt budget read the tagged gate.** An e2e task tagged `[oracle: integration]` goes red under `integration`, not `unit`. An untagged task works as before.
+  - **A tag can't be changed quietly.** A tagged plan's approval covers its tags, and the lock refuses a tag that differs from the one on the merge target. Untagged plans hash as before.
+  - **Opt-in.** `loop.task-oracle: required` makes the handoff refuse untagged tasks. The default is `optional`. `/gatedloop:upgrade` and `gates-init` offer a `rules.tasks` line that asks the planner to tag.
+  - `convention-review` judges a `NO-TESTS` or `CHARACTERIZATION` reason against the task's tag (#47).
+
+**What a task cost**
+
+- **token-ledger** (#67):
+  - **Usage rows, on by default.** The commit hook records, per task, the tokens the session spent on it (input, output, cache read, cache write, per model), and the Stop hook records the task in flight. Only counts are stored, never transcript content. A session with no readable transcript records null counts with the reason.
+  - **`gates stats`** reports tokens per task, per change and per model, says what went unrecorded, and rolls tokens up with `--epic`.
+  - **`economics.prices`** (with `economics.currency`) maps a model to per-million-token prices, and `gates stats --cost` prints a figure. The plugin ships no price list.
+  - **`loop.token-budget`** caps a change's recorded tokens. Once usage reaches it, task-bearing `gates run unit|ci` refuses and names a new halt cause, `budget`. `/gatedloop:upgrade` offers it, recommending record-only.
+
+**Acceptance through a merged pull request**
+
+- **merged-acceptance** (#87). Fixes #75.
+  - **`gates acceptance attest <change> --merged <pr>`**, under `approval.acceptance: self`, records the owner's merge of the implementation PR as the acceptance. The row is pinned to the merge commit's tree.
+  - **`gates record-merged`** writes that row in the same commit as the merge row and the archive, so `gates stats --outcomes` reads the change as accepted.
+  - **`gates record-merged` re-attests a merged plan amendment** whose approval no longer matches, where it used to skip it as already approved.
+  - In pull-request mode under `self`, `gates merge` says the owner's merge will count as the acceptance.
+
+**The earlier name**
+
+- **remove-specloop-forwarders** (#80). **This is a breaking change** for a project that never migrated.
+  - Nothing reads the earlier `specloop` names. A project that still holds `.specloop/` is refused by every command except `gates doctor` and `gates migrate-name`.
+  - `gates marker publish` posts only `gatedloop/<gate>`. A branch protection rule that still requires `specloop/ci` stops passing.
+  - The `specloop` forwarder plugin and its marketplace entry are gone.
+
+**Upgrading**
+
+1. **Still on the earlier name?** Run `gates migrate-name` on 0.8.x before updating. It lists the branch-protection contexts to rename to `gatedloop/<gate>`.
+2. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+3. **Re-run `gates hook install`** if you installed the git-layer hook. The installed copy predates usage recording, and `gates doctor` reports it as `stale-copy`.
+4. **Run `/gatedloop:upgrade`.** It offers the token budget and the oracle tags. Both are optional.
+
 ## 0.8.0 — 2026-10-27
 
 The authored-test lock no longer leaves a finished change unable to merge, and the git layer reaches beyond Claude Code.

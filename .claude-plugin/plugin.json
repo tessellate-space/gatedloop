@@ -1,6 +1,6 @@
 {
   "name": "gatedloop",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "The enforcement and onboarding layer for OpenSpec: gated per-task TDD, convention review, and a blocking live self-check carry an approved OpenSpec change to verified-on-main. Bring your own schema, bring your own stack.",
   "author": {
     "name": "radub21"
