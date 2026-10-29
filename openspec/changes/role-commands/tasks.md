@@ -1,6 +1,6 @@
 ## 1. Commands
 
-- [ ] 1.1 Add `commands/planner.md` per design D1, D2 and D4
+- [x] 1.1 Add `commands/planner.md` per design D1, D2 and D4
 - [ ] 1.2 Add `commands/orchestrator.md` per design D1, D3 and D4
 
 ## 2. Docs
