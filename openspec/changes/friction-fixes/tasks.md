@@ -9,7 +9,7 @@
 ## 2. Switch-then-merge (D5)
 
 - [x] 2.1 Make `_gate_match.py` report `switch_branch` for the `git-merge` kind, per D5. Verify with matcher tests for `checkout my-change`, `switch my-change`, `checkout -b x origin/main`, `switch -c x`, `--detach`, `checkout -- path`, two switches (the last one wins), and an unparsable command (empty) [oracle: unit]
-- [ ] 2.2 Add `--branch <b>` to `gates discipline merge-scope`, and have `hooks/gate-merge.sh` use it when `switch_before=1` and `switch_branch` is set. Add the unresolved-switch line to the denial. Verify with hook tests in a real repo with a remote: `checkout my-change && merge --ff-only origin/main` passes; `checkout main && merge --ff-only my-change`, `checkout -b main …` and `checkout --detach origin/main && merge my-change` are gated; and the last of these carries the new line [oracle: unit]
+- [x] 2.2 Add `--branch <b>` to `gates discipline merge-scope`, and have `hooks/gate-merge.sh` use it when `switch_before=1` and `switch_branch` is set. Add the unresolved-switch line to the denial. Verify with hook tests in a real repo with a remote: `checkout my-change && merge --ff-only origin/main` passes; `checkout main && merge --ff-only my-change`, `checkout -b main …` and `checkout --detach origin/main && merge my-change` are gated; and the last of these carries the new line [oracle: unit]
 
 ## 3. The authored-set review (D6)
 

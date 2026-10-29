@@ -9923,6 +9923,23 @@ def _is_integrating(root: Path) -> bool:
     return head is not None and head == _rev(root, target)
 
 
+def _is_integrating_on(root: Path, branch: str) -> bool:
+    """`_is_integrating` for a merge run after switching to `branch`
+    (friction-fixes D5): the target's own branch integrates; an existing local
+    branch, or a name that resolves to nothing (one the switch creates), does
+    not; any other ref would detach HEAD there, which integrates exactly when
+    it sits at the target's tip. An unresolvable target integrates."""
+    target, _reason = _resolve_merge_target(root)
+    if target is None or not branch:
+        return True
+    if branch == target.split("/")[-1]:
+        return True
+    if _rev(root, f"refs/heads/{branch}") is not None:
+        return False
+    at = _rev(root, branch)
+    return at is not None and at == _rev(root, target)
+
+
 def _untracked_unproposed_change_dirs(root: Path) -> list[str]:
     """`openspec/changes/<name>` directories that are wholly untracked --
     debris from an earlier scaffold that was refused or abandoned before
@@ -10753,6 +10770,11 @@ def _cmd_discipline_other(m: dict, root: Path, args) -> int:
         # `integrating` or `not-integrating`; the hook skips its marker work
         # on the latter alone, so any other outcome (an error, no output)
         # keeps the merge gated -- this can fail closed, never open.
+        # friction-fixes D5: `--branch` asks about the branch a switch earlier
+        # in the same command lands on, instead of the current checkout.
+        if args.branch is not None:
+            print("integrating" if _is_integrating_on(root, args.branch) else "not-integrating")
+            return 0
         print("integrating" if _is_integrating(root) else "not-integrating")
         return 0
 
@@ -13410,6 +13432,7 @@ def main() -> int:
     sp_wt = disc_sub.add_parser("check-worktree", help="exit 1 if the current branch is checked out in more than one worktree, naming each")
     sp_wt.set_defaults(fn=cmd_discipline)
     sp_ms = disc_sub.add_parser("merge-scope", help="print 'integrating' if a merge here lands on the integration target (its branch, or a detached HEAD at its tip), else 'not-integrating'")
+    sp_ms.add_argument("--branch", help="judge a merge run after switching to this branch, not the current checkout (the merge hook's switch-then-merge case)")
     sp_ms.set_defaults(fn=cmd_discipline)
     sp_arch = disc_sub.add_parser("check-archive", help="exit 1 if <change> is not yet merged to the target branch")
     sp_arch.add_argument("change")
