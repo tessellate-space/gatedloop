@@ -1991,16 +1991,15 @@ def _task_sort_key(tid: str) -> tuple:
     return tuple(out)
 
 
-# The validate tag check still reads `N.M` ids only (friction-fixes D3 narrows it).
-_NM_TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\d+(?:\.\d+)+)\s+(.*)$")
 _UNPARSED_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\S+)")
 
 
 def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
     """task-oracle D1: `(errors, warnings)` for every oracle tag in the
     active changes' `tasks.md`. An unknown gate, an excluded gate and a
-    malformed tag are errors; a tag on a line the task parser does not match
-    (a lettered id, #46) is a warning, so it is never silently ignored."""
+    malformed tag are errors; a tag on a line whose id is outside the task-id
+    grammar (friction-fixes D1, D3) is a warning, so it is never silently
+    ignored."""
     gates = m.get("gates") if isinstance(m.get("gates"), dict) else {}
     can = [g for g in gates if g not in NON_ORACLE_GATES]
     can_text = ", ".join(f"`{g}`" for g in can) + (", or " if can else "") + "`none`"
@@ -2011,15 +2010,15 @@ def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
         if not tasks_md.is_file():
             continue
         for line in tasks_md.read_text().splitlines():
-            mt = _NM_TASK_LINE_RE.match(line)
+            mt = _TASK_LINE_RE.match(line)
             if not mt:
                 lone = _UNPARSED_TASK_RE.match(line)
                 if lone and _ORACLE_TAG_RE.search(line.strip()):
                     warns.append(
                         f"change '{d.name}': the task line '{lone.group(1)}' carries an "
-                        "oracle tag, but the task parser does not read lettered or "
-                        "unnumbered ids (#46), so the tag is ignored. Number the task "
-                        "N.M for its tag to count."
+                        "oracle tag, but the task parser reads ids of the form N.M or "
+                        "N.Ma, so the tag is ignored. Number the task N.M for its tag "
+                        "to count."
                     )
                 continue
             tid = mt.group(1)

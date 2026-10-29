@@ -4,7 +4,7 @@
 
 - [x] 1.1 Define `TASK_ID_PATTERN` and build `_TASK_LINE_RE` and `_CHECKED_TASK_RE` from it. Verify with tests showing a `1.2a` line read by `_task_lines_text` with its oracle tag, by the test author's brief, by the completion walk (a committed `[x] 1.2a` before a halt row leaves the placement in force), and by the D9 approval digest (retagging `1.2a` voids the approval). Also test that `1A.2`, `1.2-b` and an unnumbered line are not read [oracle: unit]
 - [x] 1.2 Add `_task_sort_key` and use it in `tests show`, the `stats` usage table and both cost listings. Verify with a test that `gates tests show` on a change holding `1.2a` exits 0 and lists `1.2`, `1.2a`, `1.9`, `1.10` in that order (with `--json` too), and that the usage and cost listings use the same order [oracle: unit]
-- [ ] 1.3 Narrow the `validate` warning to ids outside the grammar, with the new wording and no `#46` reference. Verify by updating `tests/test_task_oracle_validate.py`: a tagged `1.2a` draws no warning and its tag is validated like any other (an unknown gate on `1.2a` fails), and an unnumbered tagged line still warns [oracle: unit]
+- [x] 1.3 Narrow the `validate` warning to ids outside the grammar, with the new wording and no `#46` reference. Verify by updating `tests/test_task_oracle_validate.py`: a tagged `1.2a` draws no warning and its tag is validated like any other (an unknown gate on `1.2a` fails), and an unnumbered tagged line still warns [oracle: unit]
 
 ## 2. Switch-then-merge (D5)
 
