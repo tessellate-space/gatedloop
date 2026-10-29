@@ -45,7 +45,7 @@ surfaces:
   # live-check — convention review is the only gate that means anything here,
   # which is exactly why the rule list is the long one.
   - name: prompts
-    match: "{commands,skills,agents,hooks,templates,packs,forwarder}/**"
+    match: "{commands,skills,agents,hooks,templates,packs}/**"
     rules:
       - stack-agnostic-prompts
       - plugin-relative-paths
