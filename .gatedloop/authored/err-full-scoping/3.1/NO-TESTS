@@ -1,1 +1,0 @@
-docs only: SETUP.md prose and the schema's description string; no behaviour a test can observe (scripts/release docs and ci are the check)

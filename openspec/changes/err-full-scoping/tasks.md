@@ -11,7 +11,7 @@
 
 ## 3. Docs (D3, D4, D5)
 
-- [ ] 3.1 Update SETUP.md "Scoped `ci`/`unit`" (the unmatched-path rule with catch-alls, the `unit` union and its scope string, why `ci` keeps the global fallback) and the override description in `schema/gates.schema.json`. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
+- [x] 3.1 Update SETUP.md "Scoped `ci`/`unit`" (the unmatched-path rule with catch-alls, the `unit` union and its scope string, why `ci` keeps the global fallback) and the override description in `schema/gates.schema.json`. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
 
 ## Workflow follow-up
 
