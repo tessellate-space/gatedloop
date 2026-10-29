@@ -1975,6 +1975,12 @@ _NON_ORACLE_REASONS = {
     "eval": "it is an advisory score",
     "confirm": "it runs only on the merged tree",
 }
+# friction-fixes D1: a task id is two or more dot-separated numbers, the last
+# optionally followed by one lowercase letter (`1.2a`, a plan amendment's
+# insert). Every `tasks.md` reader builds its pattern from this one.
+TASK_ID_PATTERN = r"\d+(?:\.\d+)+[a-z]?"
+# The validate tag check still reads `N.M` ids only (friction-fixes D3 narrows it).
+_NM_TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\d+(?:\.\d+)+)\s+(.*)$")
 _UNPARSED_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\S+)")
 
 
@@ -1993,7 +1999,7 @@ def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
         if not tasks_md.is_file():
             continue
         for line in tasks_md.read_text().splitlines():
-            mt = _TASK_LINE_RE.match(line)
+            mt = _NM_TASK_LINE_RE.match(line)
             if not mt:
                 lone = _UNPARSED_TASK_RE.match(line)
                 if lone and _ORACLE_TAG_RE.search(line.strip()):
@@ -6164,7 +6170,7 @@ def _tests_place(m: dict, root: Path, args) -> int:
 # staged with the row is in the same commit (or in none), so a halt in
 # flight cannot be carried past its void by ticking the task with it.
 
-_CHECKED_TASK_RE = re.compile(r"^\s*-\s*\[[xX]\]\s+(\d+(?:\.\d+)+)(?:\s|$)")
+_CHECKED_TASK_RE = re.compile(rf"^\s*-\s*\[[xX]\]\s+({TASK_ID_PATTERN})(?:\s|$)")
 
 
 class _LedgerRewritten(Exception):
@@ -6921,7 +6927,7 @@ def _tests_show(m: dict, root: Path, args) -> int:
 # nothing decided: paths, rule-ids, the bound command (never run), and "none"
 # lines where the project has nothing to offer.
 
-_TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\d+(?:\.\d+)+)\s+(.*)$")
+_TASK_LINE_RE = re.compile(rf"^\s*-\s*\[[ xX]\]\s+({TASK_ID_PATTERN})\s+(.*)$")
 _PATH_SPAN_RE = re.compile(r"`([^`\s<>]+)`")
 _TEST_NAME_RE = re.compile(r"(^|[._-])(tests?|specs?)([._-]|$)", re.IGNORECASE)
 _TEST_DIR_NAMES = frozenset({"test", "tests", "spec", "specs", "__tests__"})
