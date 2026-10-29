@@ -9,4 +9,4 @@
 
 ## 3. Close
 
-- [ ] 3.1 `gates run ci` green; `openspec validate role-commands --strict` passes
+- [x] 3.1 `gates run ci` green; `openspec validate role-commands --strict` passes
