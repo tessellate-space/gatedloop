@@ -1,0 +1,1 @@
+Docs only; the inventory check `python3 scripts/release docs` is the existing oracle for the command list, and it is run in the task.

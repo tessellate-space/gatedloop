@@ -1,0 +1,1 @@
+A closing check that runs existing gates (ci, openspec validate); it changes no behaviour.
