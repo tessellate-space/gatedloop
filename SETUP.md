@@ -668,7 +668,9 @@ command a receiver re-runs before acting. Without `--json`, the same fields prin
 `key: value` lines. It sends, writes and commits nothing: the message is a doorbell,
 git stays the source of truth. See
 [`docs/running-at-scale.md`](./docs/running-at-scale.md) §8 for the planner/orchestrator
-contract.
+contract. `/gatedloop:planner` and `/gatedloop:orchestrator` load each side of it into a
+session as a role: the planner sends a payload only when `gates handoff` exits 0, and
+the orchestrator runs its `verify` before queueing. Re-run either after a compaction.
 
 **The honesty note (design D3).** Content is attested mechanically: `approved_sha`
 is computed by the shim itself, never supplied by a caller, and a post-approval edit

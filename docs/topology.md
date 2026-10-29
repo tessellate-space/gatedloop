@@ -15,6 +15,9 @@ The short version:
 | Implementer | a Claude Code on the web session | one per change | runs the loop on the change branch and records READY |
 | Orchestrator | a local Claude Code session, in the primary checkout | exactly one | queues approved changes and merges finished ones |
 
+The planner and the orchestrator load their roles with `/gatedloop:planner` and
+`/gatedloop:orchestrator`, and re-run them after a compaction.
+
 A person approves each plan by merging its PR, and reviews each change before the
 forge merges it. Everything else runs without a human turn.
 

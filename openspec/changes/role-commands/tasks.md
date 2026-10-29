@@ -5,7 +5,7 @@
 
 ## 2. Docs
 
-- [ ] 2.1 Add both commands to README's command list and to SETUP, and point `docs/running-at-scale.md` §8 and `docs/topology.md` at them. `python3 scripts/release docs` exits 0
+- [x] 2.1 Add both commands to README's command list and to SETUP, and point `docs/running-at-scale.md` §8 and `docs/topology.md` at them. `python3 scripts/release docs` exits 0
 
 ## 3. Close
 
