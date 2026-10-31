@@ -9392,6 +9392,17 @@ def _accepted_already(root: Path, change: str, tree: str) -> dict | None:
     return latest if latest is not None and latest.get("verdict") == "accept" else None
 
 
+def _acceptance_plan_refusal(m: dict, root: Path, change: str) -> str | None:
+    """loop-hardening D2 for `--local` and `--pr`: the head they pin is the
+    change branch's (`_acceptance_branch_head`), so that is where the plan
+    must still be the approved one."""
+    _raw, head = _acceptance_branch_head(root, change)
+    if head is None:
+        return None  # `_append_acceptance_row` refuses a headless change itself
+    stale = _plan_approval_refusal(m, root, change, head, "accepting it")
+    return f"{stale}. Nothing was written." if stale else None
+
+
 def _acceptance_attest_merged(m: dict, root: Path, change: str, pr: int) -> int:
     """`gates acceptance attest <change> --merged <pr>` (merged-acceptance
     D1): under `self`, the owner's merge of the implementation PR is the
@@ -9401,6 +9412,10 @@ def _acceptance_attest_merged(m: dict, root: Path, change: str, pr: int) -> int:
         print(reason, file=sys.stderr)
         return 1
     accepted_by, ts, tree, commit = accepted
+    stale = _plan_approval_refusal(m, root, change, commit, "accepting it")
+    if stale:
+        print(f"{stale}. Nothing was written.", file=sys.stderr)
+        return 1
     existing = _accepted_already(root, change, tree)
     if existing is not None:
         print(
@@ -9452,6 +9467,10 @@ def _acceptance_attest(m: dict, root: Path, args) -> int:
                 file=sys.stderr,
             )
             return 1
+        stale = _acceptance_plan_refusal(m, root, change)
+        if stale:
+            print(stale, file=sys.stderr)
+            return 1
         return _append_acceptance_row(root, change, "accept", who, _now_iso())
 
     review, reason = _first_approving_review(
@@ -9459,6 +9478,10 @@ def _acceptance_attest(m: dict, root: Path, args) -> int:
     )
     if review is None:
         print(reason, file=sys.stderr)
+        return 1
+    stale = _acceptance_plan_refusal(m, root, change)
+    if stale:
+        print(stale, file=sys.stderr)
         return 1
     return _append_acceptance_row(
         root, change, "accept", review["login"], review["submittedAt"] or _now_iso(),
@@ -13193,7 +13216,15 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     # written before the merge row and committed with it. Never a merge
     # recorded without its acceptance: a refusal discards the whole attempt.
     accepted = ""
+    # loop-hardening D2: the forge merge happened, so its merge row is still
+    # recorded; an unapproved plan only withholds the acceptance, and the job
+    # exits non-zero naming the re-approval.
+    stale = None
     if _acceptance_policy(m) == "self":
+        stale = _plan_approval_refusal(m, root, change, sha, "its merge counts as the acceptance")
+    if stale:
+        accepted = " No acceptance was recorded: the plan is not the approved one."
+    elif _acceptance_policy(m) == "self":
         rc, out, err = _captured(_acceptance_attest_merged, m, root, change, number)
         if rc != 0:
             _discard_record_attempt(root, before)
@@ -13248,6 +13279,9 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
         f"archived it in {new[:12]} ({len(files)} file(s)). Nothing was pushed — landing "
         f"this commit is the caller's.{accepted}"
     )
+    if stale:
+        print(stale, file=sys.stderr)
+        return 1
     return 0
 
 

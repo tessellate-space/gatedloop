@@ -3,7 +3,7 @@
 ## 1. The plan approval at merge and acceptance (D1, D2)
 
 - [x] 1.1 Make `_merge_prove_head` run `_approval_check_at` and the branch-head sha comparison before its evidence checks, in both modes. Verify with real-repo tests: a plan amended on the target without re-attest halts step 1; a branch editing its own `specs/` halts step 1; an untagged-tick-only `tasks.md` change does not; and pull-request mode halts before any status is published [oracle: unit]
-- [ ] 1.2 Run the same check in every acceptance writer, and make `record-merged` under `self` write the merge row but no `accept` row, exiting non-zero, when the plan is stale. Verify with tests for `--local`, `--pr` (stubbed review) and `--merged` against an amended plan, and for the `record-merged` row set and exit code [oracle: unit]
+- [x] 1.2 Run the same check in every acceptance writer, and make `record-merged` under `self` write the merge row but no `accept` row, exiting non-zero, when the plan is stale. Verify with tests for `--local`, `--pr` (stubbed review) and `--merged` against an amended plan, and for the `record-merged` row set and exit code [oracle: unit]
 
 ## 2. The sync merge (D3, D4, D5)
 

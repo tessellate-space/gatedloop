@@ -21,6 +21,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _approved_plan import write_approved_plan
+
 REPO = Path(__file__).resolve().parent.parent
 GATES_SHIM = REPO / "bin" / "gates"
 MERGE_HOOK = REPO / "hooks" / "gate-merge.sh"
@@ -303,10 +305,12 @@ def _green_branch(root: Path, manifest: str) -> None:
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "T")
     (root / ".gates.yaml").write_text(manifest)
+    # An acceptance is refused for a plan that is not the approved one
+    # (loop-hardening D2), so the plan lands on main with its approval.
+    write_approved_plan(root, "my-change")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "init")
     _git(root, "checkout", "-b", "my-change")
-    (root / "openspec" / "changes" / "my-change").mkdir(parents=True, exist_ok=True)
     (root / "task.txt").write_text("done\n")
     _git(root, "add", "task.txt")
     ci = _run_gates(root, "run", "ci", "--change", "my-change")
