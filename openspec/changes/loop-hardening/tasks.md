@@ -7,7 +7,7 @@
 
 ## 2. The sync merge (D3, D4, D5)
 
-- [ ] 2.1 Make `_gate_match.py` report the merge's committing flags, and make `gate-merge.sh` deny a committing not-integrating merge with the route. Verify with hook tests in a real repo with a remote: `git merge origin/main` on a branch with its own commits is denied; `--no-commit`, `--squash`, `--ff-only`, `--abort` and a pure fast-forward pass; `--no-ff` and `--continue` are denied; an unparsable ref without a non-committing flag is denied; and #44's cases still pass [oracle: unit]
+- [x] 2.1 Make `_gate_match.py` report the merge's committing flags, and make `gate-merge.sh` deny a committing not-integrating merge with the route. Verify with hook tests in a real repo with a remote: `git merge origin/main` on a branch with its own commits is denied; `--no-commit`, `--squash`, `--ff-only`, `--abort` and a pure fast-forward pass; `--no-ff` and `--continue` are denied; an unparsable ref without a non-committing flag is denied; and #44's cases still pass [oracle: unit]
 - [ ] 2.2 List each tainted commit in `_taint_refusal`, marking merge commits. Verify with a test where a merge commit made outside the hooks taints the change, and `gates merge` step 1 names its sha and marks it a merge commit [oracle: unit]
 - [ ] 2.3 Add the sync route to `skills/tdd-apply/SKILL.md` and `agents/tdd-implementer.md`. Verify by convention review against `stack-agnostic-prompts` [oracle: none]
 

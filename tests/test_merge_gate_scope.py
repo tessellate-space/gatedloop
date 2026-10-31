@@ -78,7 +78,9 @@ class TestNonIntegrationMergesPassWithoutMarkers(unittest.TestCase):
             root = Path(tmp)
             _repo_with_two_branches(root)
             _git(root, "checkout", "my-change")
-            r = _run_hook(root, "git merge main")
+            # loop-hardening D3: a sync passes when it creates no commit of
+            # its own; the commit that concludes it goes through the commit gate.
+            r = _run_hook(root, "git merge --no-commit main")
             self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_merging_one_change_branch_into_another_is_allowed(self):
@@ -86,7 +88,7 @@ class TestNonIntegrationMergesPassWithoutMarkers(unittest.TestCase):
             root = Path(tmp)
             _repo_with_two_branches(root)
             _git(root, "checkout", "other-change")
-            r = _run_hook(root, "git merge my-change 2>&1")
+            r = _run_hook(root, "git merge --no-commit my-change 2>&1")
             self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_a_detached_head_away_from_the_target_tip_is_not_integrating(self):

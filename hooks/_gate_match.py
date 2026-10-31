@@ -309,6 +309,32 @@ def _first_non_flag(tokens: list[str]) -> str:
 # token is never mistaken for the source ref).
 _MERGE_SEQUENCER_FLAGS = {"--continue", "--abort", "--quit"}
 
+def _merge_commits(tokens: list[str]) -> str:
+    """Whether one `git merge` invocation creates a commit of its own
+    (loop-hardening D3): `never` (`--no-commit`, `--squash`, `--ff-only`,
+    `--abort`, `--quit`), `always` (`--no-ff`, `--continue`), or `unless-ff`
+    -- a bare merge, which commits unless it is a fast-forward, and only the
+    repository can tell that. Paired flags are read as git reads them: the
+    last of `--commit`/`--no-commit`, of `--squash`/`--no-squash`, and of
+    `--ff`/`--no-ff`/`--ff-only` wins."""
+    if "--abort" in tokens or "--quit" in tokens:
+        return "never"
+    if "--continue" in tokens:
+        return "always"
+    no_commit = squash = False
+    ff = "--ff"
+    for tok in tokens:
+        if tok in ("--commit", "--no-commit"):
+            no_commit = tok == "--no-commit"
+        elif tok in ("--squash", "--no-squash"):
+            squash = tok == "--squash"
+        elif tok in ("--ff", "--no-ff", "--ff-only"):
+            ff = tok
+    if no_commit or squash or ff == "--ff-only":
+        return "never"
+    return "always" if ff == "--no-ff" else "unless-ff"
+
+
 _MERGE_FLAGS_WITH_VALUE = {
     "-m", "--message", "-s", "--strategy", "-X", "--strategy-option",
     "--into-name",
@@ -441,6 +467,7 @@ def _fallback_match(kind: str, command: str) -> dict:
         # assume one, keeping the merge gated (design D3: never fail open).
         result["switch_before"] = "1"
         result["switch_branch"] = ""
+        result["merge_commits"] = "always"
     return result
 
 
@@ -469,6 +496,7 @@ def match(kind: str, command: str) -> dict:
         switch_before = False
         target = ""
         landings: list[str | None] = []
+        commits = "never"
         for c in commands:
             for sub in ("checkout", "switch"):
                 sw = _match_git_subcommand(c, sub)
@@ -494,6 +522,10 @@ def match(kind: str, command: str) -> dict:
             matched = True
             if not ref:
                 ref = _merge_source_ref(rest)
+            # D3: the command commits as much as its most committing merge.
+            this = _merge_commits(rest)
+            if this == "always" or (this == "unless-ff" and commits == "never"):
+                commits = this
             # A sequencer step (`--continue`, `--abort`, `--quit`) carries no
             # incoming ref by design and keeps checking HEAD's tree; any other
             # merge must name exactly one (hook-correctness D1).
@@ -508,6 +540,7 @@ def match(kind: str, command: str) -> dict:
             "matched": 1 if matched else 0, "ref": ref, "ref_parse": ref_parse,
             "switch_before": "1" if switch_before else "0",
             "switch_branch": switch_branch,
+            "merge_commits": commits if matched else "",
         }
 
     if kind == "openspec-archive":
@@ -562,7 +595,8 @@ def main(argv: list[str]) -> int:
 
     lines = [f"matched={shlex.quote(str(result['matched']))}"]
     lines.append(f"hook_cwd={shlex.quote(hook_cwd)}")
-    for key in ("change", "branch", "ref", "ref_parse", "switch_before", "switch_branch"):
+    for key in ("change", "branch", "ref", "ref_parse", "switch_before", "switch_branch",
+                "merge_commits"):
         if key in result:
             lines.append(f"{key}={shlex.quote(result[key])}")
     print("\n".join(lines))

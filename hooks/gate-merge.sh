@@ -44,6 +44,7 @@ ref=""
 ref_parse=""
 switch_before="1"
 switch_branch=""
+merge_commits=""
 eval "$(printf '%s' "$input" | python3 "${MATCHER}" git-merge 2>/dev/null)"
 
 [ "${matched}" = "1" ] || exit 0
@@ -68,15 +69,40 @@ resolved_repo="$(pwd)"
 # names decides instead (`merge-scope --branch`). A switch the matcher could
 # not resolve to one branch leaves `switch_branch` empty and the merge gated,
 # and every denial below then says how to get past it.
+#
+# loop-hardening D3: a sync into a change branch passes only when it creates
+# no commit of its own -- git runs no pre-commit hook for a merge commit, so
+# that commit would be one no gate saw. `--no-commit`, `--squash`,
+# `--ff-only`, `--abort` and `--quit` never commit; a bare merge commits
+# unless it is a fast-forward (the landing branch is an ancestor of the
+# ref) or already up to date (the ref is an ancestor of the landing
+# branch); `--no-ff` and `--continue` always do. The commit that concludes
+# a `--no-commit` sync is an ordinary `git commit`, gated as every other.
+sync_or_deny() {
+  local landing="${1:-HEAD}"
+  case "${merge_commits}" in
+    never) exit 0 ;;
+    unless-ff)
+      if [ -n "${ref}" ] && { git merge-base --is-ancestor "${landing}" "${ref}" 2>/dev/null \
+          || git merge-base --is-ancestor "${ref}" "${landing}" 2>/dev/null; }; then
+        exit 0
+      fi
+      ;;
+  esac
+  local label="${1:-$(git branch --show-current 2>/dev/null)}"
+  echo "gatedloop: merge denied — a merge into change branch '${label}' creates a commit no gate saw. Run \`git merge --no-commit ${ref:-<ref>}\`, then \`gates run ci\`, then \`git commit\`." >&2
+  exit 2
+}
+
 if [ "${switch_before}" = "1" ] && [ -n "${switch_branch}" ]; then
   merge_scope="$("${GATES}" discipline merge-scope --branch "${switch_branch}" 2>/dev/null)"
   if [ "${merge_scope}" = "not-integrating" ]; then
-    exit 0
+    sync_or_deny "${switch_branch}"
   fi
 else
   merge_scope="$("${GATES}" discipline merge-scope 2>/dev/null)"
   if [ "${merge_scope}" = "not-integrating" ] && [ "${switch_before}" = "0" ]; then
-    exit 0
+    sync_or_deny ""
   fi
 fi
 

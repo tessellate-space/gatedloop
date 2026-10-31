@@ -138,7 +138,8 @@ class TestSwitchingToAChangeBranchAndSyncing(unittest.TestCase):
     def test_switch_then_merge_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _clone_with_a_change(Path(tmp))
-            r = _run_hook(root, "git switch my-change && git merge origin/main")
+            # loop-hardening D3: the sync itself must not commit.
+            r = _run_hook(root, "git switch my-change && git merge --no-commit origin/main")
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
