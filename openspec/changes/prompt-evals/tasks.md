@@ -2,17 +2,19 @@
 
 ## 1. Spike and fixture
 
-- [ ] 1.1 Spike, recorded in `evals/README.md`: using one throwaway case, establish whether `claude plugin eval . --scaffold` runs the scaffold in the case's cwd, whether the loaded plugin's `bin/` and `openspec` are on `PATH` there, whether a dispatched subagent's tool calls appear in the graded trace, and the pilot cost of one implementer run and one review run; adjust D2's secondary graders or D5's ceiling to the findings, and say so in the PR [oracle: none]
-- [ ] 1.2 Add `evals/_fixture/scaffold.sh <variant>` per design D6. It builds the `weak-spec`, `ready`, `review-violation` and `review-clean` variants, and exits non-zero naming a missing `openspec`, `gates` or `git`. Add the `evals` surface to `.gates.yaml` and `evals/results/` to `.gitignore` (D7) [oracle: none]
+- [ ] 1.1 Spike, recorded in `evals/README.md`: using one throwaway case, establish whether `claude plugin eval . --scaffold` runs the scaffold in the case's cwd, whether the loaded plugin's `bin/` and `openspec` are on `PATH` there, whether a dispatched subagent's tool calls appear in the graded trace, whether a `regex` grader's `match` treats its pattern as a regular expression, whether a `not_contains` on a file the run moved away passes, and the pilot cost of one implementer run, one test-author run and one review run; adjust D2's secondary graders or D5's ceiling to the findings, and say so in the PR [oracle: none]
+- [ ] 1.2 Add `evals/_fixture/scaffold.sh <variant>` per design D6. It builds the `weak-spec`, `ready`, `hook-refusal`, `authored-call-sites`, `author-red`, `review-violation` and `review-clean` variants, and exits non-zero naming a missing `openspec`, `gates` or `git`. Add the `evals` surface to `.gates.yaml` and `evals/results/` to `.gitignore` (D7) [oracle: none]
 
 ## 2. Cases
 
 - [ ] 2.1 Add `evals/implementer-halts-on-weak-spec/` and `evals/implementer-ready-stops-before-merge/`, with the graders in design D2 [oracle: none]
 - [ ] 2.2 Add `evals/review-cites-stack-agnostic-prompts/` and `evals/review-clean-diff/`, with the graders in design D2. The violation case's prompt says the violation is planted [oracle: none]
+- [ ] 2.3 Add `evals/implementer-halts-on-hook-refusal/` and `evals/implementer-never-edits-authored-test/`, with the graders in design D2. Use task 1.1's answers on regex alternation and on `not_contains` against a moved file, falling back as D2 says [oracle: none]
+- [ ] 2.4 Add `evals/test-author-red-on-assertions/`, with the graders in design D2, and write in `evals/README.md` which adopter failures it can and cannot reproduce stack-free (D9) [oracle: none]
 
 ## 3. Wrapper and release reminder
 
-- [ ] 3.1 Add `scripts/eval-prompts` per design D5. Unit-test its flag building, its `--max-cost-usd` override, and the summary line parsed from a recorded `--json` result: all pass, a 2/3 case, and a failing case giving a non-zero exit [oracle: unit]
+- [ ] 3.1 Add `scripts/eval-prompts` per design D5. Unit-test its flag building, its `--max-cost-usd` override, `--case` passed through with the ceiling scaled to the selected cases, and the summary line parsed from a recorded `--json` result: all pass, a 2/3 case, and a failing case giving a non-zero exit [oracle: unit]
 - [ ] 3.2 `scripts/release status` reports `prompts_changed` and prints the advisory reminder per the plugin-release delta. Unit-test that a prompt edit since the tag lists the path, that no prompt edit prints nothing, and that the exit code and suggested level don't change [oracle: unit]
 
 ## 4. Docs and close
