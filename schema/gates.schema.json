@@ -75,7 +75,7 @@
             "description": "Command (or {run, requires} mapping) run as the live self-check when this surface is hot (optional; omit for surfaces with no runtime probe)."
           },
           "gates": {
-            "description": "Optional per-surface overrides for the `ci`/`unit` gates (scale-gate-cost D1). Selected err-full: the scoped command runs only when this is the one non-catch-all hot surface in the diff and it declares the override for that gate; every other case runs the globally declared gate. Each named gate must also be declared globally. Each value takes the same scalar-or-{run, requires} shape as a top-level gate.",
+            "description": "Optional per-surface overrides for the `ci`/`unit` gates (scale-gate-cost D1). Selected err-full: the scoped command runs only when this is the one non-catch-all hot surface in the diff, it declares the override for that gate, and no changed path is left unmatched by every non-catch-all surface; a `unit` run spanning several matched surfaces runs each hot surface's `unit` override, and the global `unit` once for those declaring none (err-full-scoping D2); every other case runs the globally declared gate. Each named gate must also be declared globally. Each value takes the same scalar-or-{run, requires} shape as a top-level gate.",
             "type": "object",
             "additionalProperties": false,
             "properties": {

@@ -422,6 +422,29 @@ diff look "multi-surface" and silently disable scoping forever. `gates validate`
 notes this exclusion, and rejects a `gates:` override naming a gate that isn't
 `ci`/`unit`, or that has no matching global declaration to narrow from.
 
+**An unmatched path errs full, catch-all or not.** A changed path that no
+non-catch-all surface matches counts as unmatched even when a catch-all surface
+matches it, so a diff holding one scoped surface's file and, say, a top-level script
+runs the global gate, and the announcement names the path (`ci[full] — scripts/build.sh
+matches no surface`). Add the path to a surface to scope it again. The loop's own
+state under `.gatedloop/` (the ledger rows every task commit stages, the held tests)
+is never counted.
+
+**A multi-surface `unit` runs every hot surface's oracle.** When the working tree
+spans two or more non-catch-all surfaces and every path is matched, `gates run unit`
+runs each hot surface's `unit` override in surface order, plus the global `unit` once
+if any hot surface declares none. Identical commands run once, arguments after `--`
+reach each command, every precondition is checked before any command runs, and all
+run under one lock. Every command runs even after a red, so each surface's verdict is
+printed, and the run's exit is the first non-zero one. It is one run: one ledger row,
+whose scope names the components in run order joined with `+`, `full` for the global
+(`unit[frontend+e2e]`, `unit[frontend+full]`). The global `unit` alone could miss a
+surface's own tests and read a task's required red as green.
+
+**A multi-surface `ci` still runs the global `ci`.** The global `ci` is the oracle
+the merge requires, so a union of scoped `ci` commands would only be a narrower
+oracle under another name.
+
 **The oracle chosen, and why, is announced** in the run's own output (`ci[frontend]
 — hot surface 'frontend' declares an override`, or `ci[full] — nothing scoped
 narrower`), and the marker/ledger row it writes records the same `scope` value — an
