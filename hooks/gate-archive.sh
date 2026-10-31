@@ -29,7 +29,16 @@ eval "$(printf '%s' "$input" | python3 "${MATCHER}" openspec-archive 2>/dev/null
 # Resolve the repository the guarded command will actually run in (design D1
 # of worktree-native-loop): computed from the command itself, falling back
 # to the hook's own `cwd`, then `CLAUDE_PROJECT_DIR`, then `pwd`.
-effective_dir="$(printf '%s' "$input" | "${GATES}" hook git-cwd openspec-archive 2>/dev/null)"
+cwd_rc=0
+effective_dir="$(printf '%s' "$input" | "${GATES}" hook git-cwd openspec-archive 2>/dev/null)" || cwd_rc=$?
+# loop-hardening D8: exit 3 is a `cd` the resolver could not evaluate. The
+# hook cannot know which repository the command runs in, so it denies rather
+# than judge this session's checkout in its place.
+if [ "${cwd_rc}" = "3" ]; then
+  printf '%s' "$input" | "${GATES}" hook git-cwd openspec-archive >/dev/null
+  echo "gatedloop: archive denied — the repository this command runs in could not be resolved." >&2
+  exit 2
+fi
 if [ -n "${effective_dir}" ] && [ -d "${effective_dir}" ]; then
   cd "${effective_dir}" 2>/dev/null || true
 fi

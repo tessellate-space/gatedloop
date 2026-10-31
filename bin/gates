@@ -4438,25 +4438,68 @@ def _git_dash_c_and_env_dir(gm, tokens: list[str]) -> str | None:
 
 _UNEVALUABLE_MARKERS = ("$", "`")
 
+# loop-hardening D8: a `cd` the resolver cannot evaluate no longer falls
+# through to the hook's cwd -- that judged the session's checkout, which could
+# allow or deny on evidence about another repository. `hook git-cwd` exits
+# with this code instead, and every hook that guards a kind denies on it.
+GIT_CWD_UNRESOLVED_EXIT = 3
+
+
+class _UnresolvedCd(Exception):
+    """A `cd` before the guarded invocation whose target is not static."""
+
+    def __init__(self, target: str):
+        super().__init__(target)
+        self.target = target
+
+
+def _expand_cd_target(target: str) -> str | None:
+    """`target` with `~`, `~/…`, `$HOME/…` and `${HOME}/…` expanded from this
+    process's `HOME`; `None` for anything else not static (`~user`, `-`,
+    another variable, a command substitution)."""
+    home = os.environ.get("HOME") or ""
+    for prefix in ("${HOME}", "$HOME", "~"):
+        if target == prefix or target.startswith(prefix + "/"):
+            return home + target[len(prefix):] if home else None
+    if target.startswith("~") or target == "-" or any(mk in target for mk in _UNEVALUABLE_MARKERS):
+        return None
+    return target
+
 
 def _resolve_cd_chain(gm, commands: list[list[str]], end: int, base: str) -> str | None:
     """Rung 3: chain every `cd <dir>` before index `end`, starting from
-    `base` (the hook cwd). A target this can't statically evaluate (a shell
-    variable or command substitution) abandons the WHOLE chain -- D1's own
-    non-goal is explicit that fall-through, not a partial answer, is the
-    safe behavior here."""
-    current = base
+    `base` (the hook cwd). A bare `cd` goes home, as the shell's does. A
+    leading `(` opens a subshell and a trailing `)` closes it, restoring the
+    directory, so a `cd` inside one governs only that subshell's commands
+    (D8). Raises `_UnresolvedCd` when the directory in force at `end` came
+    from a `cd` this can't statically evaluate -- never a partial answer."""
+    current: str | _UnresolvedCd = base
     saw_cd = False
+    stack: list[tuple[str | _UnresolvedCd, bool]] = []
     for c in commands[:end]:
-        if not c or c[0] != "cd":
-            continue
-        if len(c) < 2:
-            continue
-        target = c[1]
-        if any(marker in target for marker in _UNEVALUABLE_MARKERS):
-            return None
-        current = target if target.startswith("/") or not current else str(Path(current) / target)
-        saw_cd = True
+        toks = list(c)
+        while toks and toks[0] == "(":
+            toks.pop(0)
+            stack.append((current, saw_cd))
+        closes = 0
+        while toks and toks[-1] == ")":
+            toks.pop()
+            closes += 1
+        if toks and toks[0] == "cd":
+            target = toks[1] if len(toks) > 1 else "~"
+            expanded = _expand_cd_target(target)
+            if expanded is None:
+                current = _UnresolvedCd(target)
+            elif expanded.startswith("/") or not current:
+                current = expanded
+            elif isinstance(current, str):
+                current = str(Path(current) / expanded)
+            saw_cd = True
+        for _ in range(closes):
+            if stack:
+                current, saw_cd = stack.pop()
+    if isinstance(current, _UnresolvedCd):
+        raise current
     return current if saw_cd else None
 
 
@@ -4488,7 +4531,16 @@ def _hook_git_cwd(kind: str | None) -> int:
 
     resolved = None
     if command and kind:
-        resolved = _resolve_command_cwd(command, kind, hook_cwd)
+        try:
+            resolved = _resolve_command_cwd(command, kind, hook_cwd)
+        except _UnresolvedCd as e:
+            print(
+                f"gatedloop: could not resolve the directory of `cd {e.target}` — use an "
+                "absolute path or `git -C <dir>`, so the hook judges the repository the "
+                "command runs in.",
+                file=sys.stderr,
+            )
+            return GIT_CWD_UNRESOLVED_EXIT
     if resolved:
         print(resolved)
         return 0

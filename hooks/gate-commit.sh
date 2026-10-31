@@ -45,7 +45,16 @@ eval "$(printf '%s' "$input" | python3 "${MATCHER}" git-commit 2>/dev/null)"
 # `CLAUDE_PROJECT_DIR`, then this process's own `pwd`. This is what makes a
 # background agent's `cd <worktree> && git commit …` evaluate the worktree,
 # not the harness session's checkout.
-effective_dir="$(printf '%s' "$input" | "${GATES}" hook git-cwd git-commit 2>/dev/null)"
+cwd_rc=0
+effective_dir="$(printf '%s' "$input" | "${GATES}" hook git-cwd git-commit 2>/dev/null)" || cwd_rc=$?
+# loop-hardening D8: exit 3 is a `cd` the resolver could not evaluate. The
+# hook cannot know which repository the command runs in, so it denies rather
+# than judge this session's checkout in its place.
+if [ "${cwd_rc}" = "3" ]; then
+  printf '%s' "$input" | "${GATES}" hook git-cwd git-commit >/dev/null
+  echo "gatedloop: commit denied — the repository this command runs in could not be resolved." >&2
+  exit 2
+fi
 if [ -n "${effective_dir}" ] && [ -d "${effective_dir}" ]; then
   cd "${effective_dir}" 2>/dev/null || true
 fi
