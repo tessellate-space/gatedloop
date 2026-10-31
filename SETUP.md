@@ -428,7 +428,9 @@ matches it, so a diff holding one scoped surface's file and, say, a top-level sc
 runs the global gate, and the announcement names the path (`ci[full] — scripts/build.sh
 matches no surface`). Add the path to a surface to scope it again. The loop's own
 state under `.gatedloop/` (the ledger rows every task commit stages, the held tests)
-is never counted.
+is never counted. A change's own `openspec/changes/<change>/tasks.md` is: every task
+commit stages it, so with no surface covering `openspec/**` each task commit runs the
+global `ci`. Add `openspec/**` to a surface (a `docs` one, say) to scope those commits.
 
 **A multi-surface `unit` runs every hot surface's oracle.** When the working tree
 spans two or more non-catch-all surfaces and every path is matched, `gates run unit`

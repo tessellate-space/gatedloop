@@ -123,6 +123,8 @@ LLM; the *selection* does not.
 /gatedloop:merge     → gates merge <change>: prove the head, squash, ci, confirm, archive, one push
                       (pull-request mode: publish gatedloop/* statuses and hand the PR to the forge)
 /gatedloop:upgrade   → walk the settings a new plugin version asks this project to decide
+/gatedloop:planner   → propose in its own worktree, send `gates handoff`'s payload; never implements
+/gatedloop:orchestrator → verify each handoff, dispatch lanes, merge and archive
 /gatedloop:archive   → delegates to /opsx:archive, then commits the move
 ```
 
@@ -221,11 +223,14 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.9.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.10.0. Read a change's
 `design.md` before touching the area it covers:
 
-- `role-commands`: `/gatedloop:planner` and `/gatedloop:orchestrator`, prompt commands over shipped
-  primitives.
+- `stability-contract`: a versioned ledger row, a checked-in snapshot of the public `gates`
+  contract (`tests/contract.json`), breaking-change detection in `scripts/release`, a wider ci
+  matrix and `docs/stability.md`'s deprecation policy.
+- `prompt-evals`: an on-demand `claude plugin eval` suite under `evals/` for the implementer and
+  the convention review, run by `scripts/eval-prompts`; no `eval` gate.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 
