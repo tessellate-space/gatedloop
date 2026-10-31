@@ -3,7 +3,7 @@
 ## 1. The ledger row version (D1, D2)
 
 - [x] 1.1 Add `v` to `LEDGER_ROW_FIELDS` and `LEDGER_ROW_VERSION = 1`, and make `_append_ledger_row` set `v` itself. Verify with tests that every appended row kind carries `"v": 1` and that a `v` passed by the caller is overwritten [oracle: unit]
-- [ ] 1.2 Add `_ledger_row_ok` and call it from `_read_ledger_rows`, `_read_ledger_rows_and_skipped`, `_jsonl_objects` and `_parse_jsonl_rows`. Verify with tests that a ledger with no `v` reads unchanged in `gates stats`; that a `v: 2` row makes `gates stats`, `gates acceptance check` and `gates merge` exit 1 with a message naming the file and both versions, and `gates merge` writes no merge row; that a non-integer `v` counts as an unreadable line; and that a committed `v: 2` row read through `_ledger_rows_at` is refused the same way [oracle: unit]
+- [x] 1.2 Add `_ledger_row_ok` and call it from `_read_ledger_rows`, `_read_ledger_rows_and_skipped`, `_jsonl_objects` and `_parse_jsonl_rows`. Verify with tests that a ledger with no `v` reads unchanged in `gates stats`; that a `v: 2` row makes `gates stats`, `gates acceptance check` and `gates merge` exit 1 with a message naming the file and both versions, and `gates merge` writes no merge row; that a non-integer `v` counts as an unreadable line; and that a committed `v: 2` row read through `_ledger_rows_at` is refused the same way [oracle: unit]
 
 ## 2. The contract snapshot (D3, D4)
 

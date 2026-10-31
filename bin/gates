@@ -5046,6 +5046,29 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
 # never reaches the taint-relevant code path (`cmd_run` returns before it).
 
 
+def _ledger_row_ok(obj, source) -> dict | None:
+    """stability-contract D2: the one check every ledger reader applies to a
+    parsed line. Returns the row when it is readable, `None` when it is not a
+    row (not an object, or a `v` that is not an integer -- each reader treats
+    that exactly as a line of malformed JSON). A row of a version newer than
+    LEDGER_ROW_VERSION exits 1: skipping it would read an accept or merge row
+    as "never happened", and reading it as version 1 would misread it."""
+    if not isinstance(obj, dict):
+        return None
+    v = obj.get("v")
+    if v is None:
+        return obj
+    if not isinstance(v, int) or isinstance(v, bool):
+        return None
+    if v > LEDGER_ROW_VERSION:
+        sys.exit(
+            f"gatedloop: `{source}` holds a ledger row of version `{v}`; this plugin "
+            f"reads up to `{LEDGER_ROW_VERSION}`. Update the plugin (a teammate's "
+            "newer gatedloop wrote it)."
+        )
+    return obj
+
+
 def _read_ledger_rows(root: Path, change: str) -> list[dict]:
     p = _ledger_path(root, change)
     if not p.exists():
@@ -5056,9 +5079,12 @@ def _read_ledger_rows(root: Path, change: str) -> list[dict]:
         if not line:
             continue
         try:
-            rows.append(json.loads(line))
+            obj = json.loads(line)
         except Exception:
             continue
+        row = _ledger_row_ok(obj, p)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -5422,7 +5448,7 @@ def _change_ledger_rows(root: Path, change: str, ref: str) -> list[dict]:
             cwd=root, capture_output=True, text=True,
         )
         if blob.returncode == 0:
-            take(_parse_jsonl_rows(blob.stdout))
+            take(_parse_jsonl_rows(blob.stdout, f"{ref}:{prefix}/{change}.jsonl"))
             break
     holder = _worktree_holding(root, ref.removeprefix("refs/heads/"))
     if holder is not None:
@@ -6306,7 +6332,7 @@ def _task_completion(root: Path, change: str, ref: str) -> _Completion:
     checked: set[str] = set()
     for k, commit in enumerate(commits):
         text = _blob_at(root, commit, ledger_rel)
-        count = len(_parse_jsonl_rows(text)) if text else 0
+        count = len(_parse_jsonl_rows(text, f"{commit[:12]}:{ledger_rel}")) if text else 0
         now = _checked_task_ids(_blob_at(root, commit, tasks_rel))
         if count < len(row_at):
             raise _LedgerRewritten(
@@ -8198,10 +8224,11 @@ def _read_ledger_rows_and_skipped(root: Path, change: str) -> tuple[list[dict], 
         except Exception:
             skipped += 1
             continue
-        if not isinstance(obj, dict):
+        row = _ledger_row_ok(obj, p)
+        if row is None:
             skipped += 1
             continue
-        rows.append(obj)
+        rows.append(row)
     return rows, skipped
 
 
@@ -9430,7 +9457,9 @@ def _acceptance_reject(m: dict, root: Path, args) -> int:
     )
 
 
-def _parse_jsonl_rows(text: str) -> list[dict]:
+def _parse_jsonl_rows(text: str, source: str = "a ledger file") -> list[dict]:
+    """The rows of a ledger's text, through `_ledger_row_ok`; `source` names
+    the file (a path, or `<commit>:<path>` for a blob) in its refusal."""
     rows: list[dict] = []
     for line in text.splitlines():
         line = line.strip()
@@ -9440,8 +9469,9 @@ def _parse_jsonl_rows(text: str) -> list[dict]:
             obj = json.loads(line)
         except Exception:
             continue
-        if isinstance(obj, dict):
-            rows.append(obj)
+        row = _ledger_row_ok(obj, source)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -9485,7 +9515,7 @@ def _acceptance_rows_for(root: Path, tree: str, change: str | None) -> list[dict
                 cwd=root, capture_output=True, text=True,
             )
             if blob.returncode == 0:
-                take(_parse_jsonl_rows(blob.stdout))
+                take(_parse_jsonl_rows(blob.stdout, f"{tree[:12]}:{rel}"))
 
     runs = _state_dir(root) / "runs"
     if runs.is_dir():
@@ -9493,7 +9523,7 @@ def _acceptance_rows_for(root: Path, tree: str, change: str | None) -> list[dict
             if names is not None and p.name not in names:
                 continue
             try:
-                take(_parse_jsonl_rows(p.read_text()))
+                take(_parse_jsonl_rows(p.read_text(), str(p)))
             except OSError:
                 continue
     return out
@@ -10531,7 +10561,7 @@ def _ledger_rows_at(root: Path, sha: str) -> list[dict]:
                 continue
             blob = _git(root, "cat-file", "blob", f"{sha}:{rel}")
             if blob.returncode == 0:
-                rows.extend(_parse_jsonl_rows(blob.stdout))
+                rows.extend(_parse_jsonl_rows(blob.stdout, f"{sha[:12]}:{rel}"))
     return rows
 
 
@@ -12232,7 +12262,8 @@ def _merge_recover(root: Path, change: str) -> None:
     if state.get("change") != change or not position:
         return
     blob = _git(root, "cat-file", "blob", f"HEAD:{_ledger_rel(change, root)}")
-    rows = _parse_jsonl_rows(blob.stdout) if blob.returncode == 0 else []
+    rows = (_parse_jsonl_rows(blob.stdout, f"HEAD:{_ledger_rel(change, root)}")
+            if blob.returncode == 0 else [])
     if not any(
         r.get("gate") == "merge" and r.get("sha") and _is_ancestor(root, r["sha"], "HEAD")
         for r in rows
