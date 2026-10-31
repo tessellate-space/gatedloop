@@ -12,7 +12,7 @@
 
 ## 3. Release reporting (D5)
 
-- [ ] 3.1 Make `scripts/release status` diff the snapshot at the tag against `HEAD`. It reports public removals and a raised row version under `breaking`, in text and in `--json`, and prints a note that the comparison was skipped when the tag has no snapshot. Make `cut` draft `### Breaking` with `TODO` migrations, and make `publish` refuse while a `TODO` remains. Verify with tests for a removed flag, additions only, a removed `internal` subcommand, a tag with no snapshot, and `publish` refusing a `TODO` before its first write [oracle: unit]
+- [x] 3.1 Make `scripts/release status` diff the snapshot at the tag against `HEAD`. It reports public removals and a raised row version under `breaking`, in text and in `--json`, and prints a note that the comparison was skipped when the tag has no snapshot. Make `cut` draft `### Breaking` with `TODO` migrations, and make `publish` refuse while a `TODO` remains. Verify with tests for a removed flag, additions only, a removed `internal` subcommand, a tag with no snapshot, and `publish` refusing a `TODO` before its first write [oracle: unit]
 
 ## 4. The supported environment (D6, D7)
 
