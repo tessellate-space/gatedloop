@@ -17,7 +17,7 @@
 ## 4. The supported environment (D6, D7)
 
 - [x] 4.1 Replace `TESTED_OPENSPEC_VERSION` with `OPENSPEC_MIN` and `OPENSPEC_MAX_TESTED`, and make the doctor compare the installed version against that range. Verify with tests for a version inside the range, above it, below it, and one that can't be parsed [oracle: unit]
-- [ ] 4.2 Add the OS × Python × OpenSpec matrix to the `ci` job in `.github/workflows/gatedloop.yml`, with only the primary leg publishing statuses. Add `.github/workflows/openspec-latest.yml`, a weekly run against the latest OpenSpec that publishes no status. Verify on the implementation PR that every leg runs and only one posts `gatedloop/ci` [oracle: none]
+- [x] 4.2 Add the OS × Python × OpenSpec matrix to the `ci` job in `.github/workflows/gatedloop.yml`, with only the primary leg publishing statuses. Add `.github/workflows/openspec-latest.yml`, a weekly run against the latest OpenSpec that publishes no status. Verify on the implementation PR that every leg runs and only one posts `gatedloop/ci` [oracle: none]
 
 ## 5. The policy and the docs (D8)
 

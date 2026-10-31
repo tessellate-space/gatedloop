@@ -14,6 +14,8 @@ and in what order is read from that file, not from captured output.
 Stdlib only, per `zero-dep-shim`. Run with:  python3 -m unittest discover -s tests
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import tempfile

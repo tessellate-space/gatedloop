@@ -20,6 +20,8 @@ git repository with the environment set explicitly, never inherited.
 Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
