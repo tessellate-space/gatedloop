@@ -5389,11 +5389,41 @@ def _maybe_resolve_taint(root: Path, change: str, tree: str) -> None:
     )
 
 
-def _taint_refusal(change: str) -> str:
+def _unresolved_taint_shas(rows: list[dict]) -> list[str]:
+    """The commits of the taint rows after the last `taint-clear`, in ledger
+    order and without repeats -- the incidents `_taint_unresolved` reports."""
+    shas: list[str] = []
+    for r in rows:
+        g = r.get("gate")
+        if g == "taint-clear":
+            shas = []
+        elif g == "taint" and r.get("sha") and r["sha"] not in shas:
+            shas.append(r["sha"])
+    return shas
+
+
+def _taint_refusal(change: str, rows: list[dict] | None = None, root: Path | None = None) -> str:
+    """loop-hardening D5: the refusal names each tainted commit -- short sha
+    and subject -- and marks a merge commit, the usual way one slips the
+    hooks (git runs no pre-commit hook for it). The remedy is unchanged."""
+    lines = []
+    for sha in _unresolved_taint_shas(rows or []):
+        subject, merge = "", False
+        if root is not None:
+            shown = _git(root, "log", "-1", "--format=%P%x1f%s", sha)
+            if shown.returncode == 0 and "\x1f" in shown.stdout:
+                parents, subject = shown.stdout.rstrip("\n").split("\x1f", 1)
+                merge = len(parents.split()) > 1
+        line = f"\n  - {sha[:12]}" + (f" {subject}" if subject else "")
+        if merge:
+            line += (" (merge commit — see the sync route: `git merge --no-commit <ref>`, "
+                     "then `gates run ci`, then `git commit`)")
+        lines.append(line)
     return (
         f"gatedloop: change '{change}' carries an unresolved taint — the reflog audit "
         "found a commit with no green-ci record (it slipped the commit hooks, issue "
-        "#2). Run `gates run ci` green on the branch head to re-verify and clear it "
+        "#2)" + (":" + "".join(lines) + "\n" if lines else ". ")
+        + "Run `gates run ci` green on the branch head to re-verify and clear it "
         "before merging."
     )
 
@@ -5493,15 +5523,17 @@ def cmd_taint(m: dict, root: Path, args) -> int:
     if ref:
         change = _resolve_change_name(root, given) if given else _change_for_ref(root, ref)
         if change is not None:
-            if _taint_unresolved(_change_ledger_rows(root, change, ref)):
-                print(_taint_refusal(change), file=sys.stderr)
+            rows = _change_ledger_rows(root, change, ref)
+            if _taint_unresolved(rows):
+                print(_taint_refusal(change, rows, root), file=sys.stderr)
                 return 1
             return 0
     change = _resolve_change_name(root, given)
     if change is None:
         return 0
-    if _taint_unresolved(_read_ledger_rows(root, change)):
-        print(_taint_refusal(change), file=sys.stderr)
+    rows = _read_ledger_rows(root, change)
+    if _taint_unresolved(rows):
+        print(_taint_refusal(change, rows, root), file=sys.stderr)
         return 1
     return 0
 
@@ -10709,7 +10741,7 @@ def _push_tree_problems(m: dict, root: Path, sha: str, changes: list[str]) -> li
                 f"(ledger-normalized) tree {norm!r}.\n  -> run `gates run verify` on it.")
     for change in changes:
         if _taint_unresolved(change_rows[change]):
-            problems.append(_taint_refusal(change))
+            problems.append(_taint_refusal(change, change_rows[change], root))
         try:
             lock = _lock_at_commit(root, change, sha)
         except _ForgeRefusal as refusal:
@@ -12451,7 +12483,7 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
         print("gatedloop: step 1 — `verify` is not declared; nothing to require of it")
 
     if _taint_unresolved(rows):
-        problems.append(_taint_refusal(change))
+        problems.append(_taint_refusal(change, rows, root))
     elif lane is None:
         unrecorded = _unrecorded_commits(root, change, rows)
         if unrecorded:
