@@ -9,6 +9,38 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.10.0 — 2026-11-01
+
+A scoped `ci` or `unit` no longer runs narrower than it should, lettered task ids work everywhere, a lane can sync its branch without a hook refusal, and two role commands set up the planner/orchestrator split.
+
+**Scoped gates err full, as documented**
+
+- **err-full-scoping** (#99). Fixes #61 and #45.
+  - **A changed file that no surface matches runs the full gate.** A diff holding one surface's file and one unmatched file used to run that surface's scoped `ci`. Catch-all surfaces (`match: "**"`) still don't count as a match, and `.gatedloop/` bookkeeping is never treated as unmatched. The message names the unmatched path.
+  - **A `unit` run spanning several surfaces runs each surface's own `unit`**, plus the global `unit` once for any of them that declares none. It is red if any of them is red, and it counts as one attempt. It used to fall back to the global `unit` alone, which could skip a surface's tests and record a false green.
+  - `ci` across several surfaces still runs the full `ci`.
+  - **You may see more full runs.** A change's own `tasks.md` is an unmatched path, so if no surface covers `openspec/**`, every task commit now runs the full `ci`. Add `openspec/**` to a surface to scope those commits again (SETUP, "Scoped `ci`/`unit`").
+
+**Smaller fixes**
+
+- **friction-fixes** (#100). Fixes #46, #44 and #47.
+  - **Lettered task ids (`1.2a`) are read everywhere**: oracle tags, the test author's brief, completion ticks and the approval digest. `gates tests show` no longer crashes on them, and every task listing sorts `1.2`, `1.2a`, `1.9`, `1.10`.
+  - **A switch-then-merge passes the merge hook** when it lands on a change branch, e.g. `git checkout my-change && git merge --ff-only origin/main`. A merge into the target stays gated, and so does a switch the hook can't resolve; the refusal says to run the merge as its own command.
+  - **`convention-review` reports a missing test only when no task in the change holds one**, so a `NO-TESTS` on a "write the test" task whose test another task holds is no longer a finding.
+
+**Role commands**
+
+- **role-commands** (#98).
+  - **`/gatedloop:planner`** proposes in its own worktree and, once the plan PR merges, sends `gates handoff` to the orchestrator session.
+  - **`/gatedloop:orchestrator`** verifies each handoff, dispatches one `tdd-implementer` per change, merges on READY and reports. It asks for the lane count; there is no default.
+  - Both restate their role on every run, so re-running the command after a compaction puts the session back in its role.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Check your surfaces** if you declare scoped `ci` or `unit` overrides: add `openspec/**` (and any other path that should stay scoped) to a surface, or accept the full runs.
+3. No new settings; `/gatedloop:upgrade` has nothing new to ask.
+
 ## 0.9.0 — 2026-10-28
 
 Each task can now declare the gate that proves it, every task's token cost is recorded, a solo project's merge counts as its acceptance, and the earlier `specloop` names stop working.
