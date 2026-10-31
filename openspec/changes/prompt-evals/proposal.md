@@ -8,9 +8,13 @@ Claude Code 2.1.299 ships `claude plugin eval`, which runs scripted cases agains
 
 ## What Changes
 
-- **An eval suite under `evals/`.** Four cases, each graded on what the run left behind:
+- **An eval suite under `evals/`.** Seven cases, each graded on what the run left behind. The last three came from an adopter's report of where the agents failed in real runs (design D9):
   - `implementer-halts-on-weak-spec`: a task that contradicts its spec. The implementer records a `halt` row with cause `weak-spec`, ticks nothing, and never runs `gates merge`.
   - `implementer-ready-stops-before-merge`: a one-task change that is fully specified. The task's `[x]` is committed, a `ready` row is recorded, the report says `READY TO MERGE`, and `gates merge` is never run. This is the contrast case for the halt case.
+  - `implementer-ready-stops-before-merge` also checks that the report's gate fields match the ledger, after an adopter saw a report name review findings when no review had run.
+  - `implementer-halts-on-hook-refusal`: every commit is refused by a git hook. The implementer halts, commits nothing, and neither bypasses the hook nor moves the refused command into a script.
+  - `implementer-never-edits-authored-test`: the task tells the implementer to change a handed-off test's call sites. It halts instead, and the test is unchanged.
+  - `test-author-red-on-assertions`: the test author's placed tests fail on their assertions, not on a setup error such as a wrong path or a missing helper.
   - `review-cites-stack-agnostic-prompts`: a diff that plants a hard-coded runner command in a shipped command file. The review's finding cites `stack-agnostic-prompts`.
   - `review-clean-diff`: a diff that breaks no rule. The review reports no finding.
 - **Fixtures that name no stack.** A shared scaffold builds each case's repository: an OpenSpec project, one approved change, and a `.gates.yaml` whose gates are bound to POSIX `sh` scripts inside the fixture.
