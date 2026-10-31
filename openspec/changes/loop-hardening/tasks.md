@@ -13,7 +13,7 @@
 
 ## 3. Denials that name their cause (D6, D7, D8)
 
-- [ ] 3.1 Catch manifest parse errors in `_load` on both YAML paths and exit with D6's one-line message. Verify with tests: a conflicted `.gates.yaml` under PyYAML and under `_mini_yaml` (forced) gives the same message shape, names the position and the conflict markers, and prints no traceback, for `validate` and for `discipline check-worktree` [oracle: unit]
+- [x] 3.1 Catch manifest parse errors in `_load` on both YAML paths and exit with D6's one-line message. Verify with tests: a conflicted `.gates.yaml` under PyYAML and under `_mini_yaml` (forced) gives the same message shape, names the position and the conflict markers, and prints no traceback, for `validate` and for `discipline check-worktree` [oracle: unit]
 - [ ] 3.2 Drop `gate-commit.sh`'s own shared-branch line in favour of the shim's message. Verify with hook tests: a conflicted manifest denies without mentioning another worktree, and a branch in two worktrees still names both [oracle: unit]
 - [ ] 3.3 Expand `~`, `~/`, `$HOME` and `${HOME}` in `_resolve_cd_chain`, read a leading subshell, and exit 3 with the reason for an unresolvable `cd` chain. Make every hook that calls `git-cwd` deny on 3. Verify with resolver tests for each form, and with a commit-hook test that `cd "$LANE" && git commit` is denied naming `$LANE` [oracle: unit]
 

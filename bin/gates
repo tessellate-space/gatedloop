@@ -357,11 +357,49 @@ def _parse_yaml_text(text: str) -> dict:
         return _mini_yaml(text)
 
 
+_CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
+
+
+class ManifestParseError(ValueError):
+    """loop-hardening D6: a YAML file that could not be parsed, as one line
+    naming the file, the position and the reason. A `ValueError`, so a caller
+    that already treats a parse failure as "cannot decide" still does."""
+
+
+def _yaml_parse_error(path: Path, text: str, exc: Exception | None) -> ManifestParseError:
+    """D6's one line. Conflict markers are found by scanning, never left to
+    the parser: PyYAML stops on them with a scanner error, but `_mini_yaml`
+    reads a marker line as a key, so the two paths would otherwise disagree.
+    Positions are 1-based."""
+    line = col = None
+    reason = ""
+    for n, raw in enumerate(text.splitlines(), 1):
+        marker = next((mk for mk in _CONFLICT_MARKERS if raw.startswith(mk)), None)
+        if marker is not None:
+            line, col = n, 1
+            reason = (f"a line starts with `{marker}` — it holds merge-conflict markers — "
+                      "resolve the conflict first")
+            break
+    if not reason and exc is not None:
+        mark = getattr(exc, "problem_mark", None)
+        if mark is not None:
+            line, col = mark.line + 1, mark.column + 1
+        detail = str(getattr(exc, "problem", None) or exc).strip()
+        reason = detail.splitlines()[0] if detail else type(exc).__name__
+    where = f" at line {line}, column {col}" if line is not None else ""
+    return ManifestParseError(f"gatedloop: {path.name} could not be parsed{where}: {reason}")
+
+
 def _load(path: Path) -> dict:
     text = path.read_text()
     if path.suffix == ".json":
         return json.loads(text)
-    return _parse_yaml_text(text)
+    if any(raw.startswith(_CONFLICT_MARKERS) for raw in text.splitlines()):
+        raise _yaml_parse_error(path, text, None)
+    try:
+        return _parse_yaml_text(text)
+    except Exception as e:  # noqa: BLE001 -- every parser failure is reported the same way
+        raise _yaml_parse_error(path, text, e) from None
 
 
 def _strip_comment(line: str) -> str:
@@ -573,7 +611,10 @@ def load_manifest() -> tuple[dict, Path]:
     path, _ignored = _find_manifest(root)
     if path is None:
         sys.exit(f"gatedloop: no manifest found ({' / '.join(MANIFEST_NAMES)}) at repo root {root}")
-    data = _load(path)
+    try:
+        data = _load(path)
+    except ManifestParseError as e:
+        sys.exit(str(e))
     if not isinstance(data, dict):
         sys.exit(f"gatedloop: {path.name} did not parse to a mapping")
     data["__root__"] = str(root)
