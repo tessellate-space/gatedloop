@@ -43,6 +43,7 @@ matched="0"
 ref=""
 ref_parse=""
 switch_before="1"
+switch_branch=""
 eval "$(printf '%s' "$input" | python3 "${MATCHER}" git-merge 2>/dev/null)"
 
 [ "${matched}" = "1" ] || exit 0
@@ -62,23 +63,42 @@ resolved_repo="$(pwd)"
 # `not-integrating` skips the checks -- an error keeps the merge gated -- and
 # never when the same command switches branches before merging, since the
 # checkout seen here is then not the one the merge lands on.
-merge_scope="$("${GATES}" discipline merge-scope 2>/dev/null)"
-if [ "${merge_scope}" = "not-integrating" ] && [ "${switch_before}" = "0" ]; then
-  exit 0
+#
+# friction-fixes D5: when the command switches first, the branch the switch
+# names decides instead (`merge-scope --branch`). A switch the matcher could
+# not resolve to one branch leaves `switch_branch` empty and the merge gated,
+# and every denial below then says how to get past it.
+if [ "${switch_before}" = "1" ] && [ -n "${switch_branch}" ]; then
+  merge_scope="$("${GATES}" discipline merge-scope --branch "${switch_branch}" 2>/dev/null)"
+  if [ "${merge_scope}" = "not-integrating" ]; then
+    exit 0
+  fi
+else
+  merge_scope="$("${GATES}" discipline merge-scope 2>/dev/null)"
+  if [ "${merge_scope}" = "not-integrating" ] && [ "${switch_before}" = "0" ]; then
+    exit 0
+  fi
 fi
+
+deny() {
+  if [ "${switch_before}" = "1" ] && [ -z "${switch_branch}" ]; then
+    echo "gatedloop: this command switches branches before merging, and the hook could not tell which branch the merge lands on; run the merge as its own command after the switch." >&2
+  fi
+  exit 2
+}
 
 # hook-correctness D1: a merge that names no single incoming ref is denied
 # for THAT reason. Falling back to HEAD's tree here used to report a "stale"
 # marker for a live-check that was green all along.
 if [ "${ref_parse}" = "failed" ]; then
   echo "gatedloop: merge denied — no incoming ref could be parsed from the command. Run the merge as a bare \`git merge --squash <change>\` line." >&2
-  exit 2
+  deny
 fi
 
 head_tree="$(git rev-parse --verify --quiet HEAD^{tree} 2>/dev/null)"
 if [ -z "${head_tree}" ]; then
   echo "gatedloop: could not resolve HEAD's tree in '${resolved_repo}' — denying the merge until the git state is resolved." >&2
-  exit 2
+  deny
 fi
 
 # design D4 (see header): try the incoming ref's tree first, then HEAD's.
@@ -116,7 +136,7 @@ done
 if [ "${ok}" != "1" ]; then
   printf '%s' "${denial}" >&2
   echo "gatedloop: merge denied in '${resolved_repo}' — run \`gates run live-check\` on the change branch's head; it must pass green before the merge." >&2
-  exit 2
+  deny
 fi
 
 # scale-gate-cost D2: "full ci is always the last word" — a per-task commit
@@ -131,7 +151,7 @@ fi
 if ! ci_out="$("${GATES}" gate-marker check ci "${matched_tree}" --require-scope full ${ref_args[@]+"${ref_args[@]}"} 2>&1)"; then
   echo "${ci_out}" >&2
   echo "gatedloop: merge denied — the branch head needs an unscoped \`gates run ci\` (stage nothing, then run it) before the merge." >&2
-  exit 2
+  deny
 fi
 
 # Effect-layer taint (enforce-at-the-effect D7): even with a green live-check on
@@ -164,7 +184,7 @@ fi
 if [ "${taint_rc}" -ne 0 ]; then
   echo "${taint_out}" >&2
   echo "gatedloop: merge denied in '${resolved_repo}' — this change carries an unresolved taint; re-verify the head with \`gates run ci\`, then merge." >&2
-  exit 2
+  deny
 fi
 
 # >>> acceptance-gate D4
@@ -180,7 +200,7 @@ fi
 if ! acc_out="$("${GATES}" acceptance check "${matched_tree}" 2>&1)"; then
   echo "${acc_out}" >&2
   echo "gatedloop: merge denied in '${resolved_repo}' — the declared acceptance policy requires a human to accept this tree first: \`gates acceptance brief <change>\`, then \`gates acceptance attest <change>\`." >&2
-  exit 2
+  deny
 fi
 # <<< acceptance-gate D4
 

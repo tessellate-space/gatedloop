@@ -343,6 +343,62 @@ def _merge_source_ref(tokens: list[str]) -> str:
     return non_flags[0] if len(non_flags) == 1 else ""
 
 
+# friction-fixes D5: the branch a `git checkout` / `git switch` leaves HEAD on,
+# when the hook can tell. Flags that create (or reset) the branch they name:
+_SWITCH_CREATE_FLAGS = {"checkout": {"-b", "-B", "--orphan"},
+                        "switch": {"-c", "-C", "--orphan", "--create", "--force-create"}}
+_SWITCH_DETACH_FLAGS = {"--detach", "-d"}
+# Global flags that point git at another repository than the shell's own.
+_GIT_DIR_FLAGS = {"-C", "--git-dir", "--work-tree"}
+# Commands that move the shell to another directory.
+_CD_PROGRAMS = {"cd", "pushd", "popd"}
+
+
+def _runs_elsewhere(tokens: list[str]) -> bool:
+    """Whether this git command names another repository (`-C`, `--git-dir`,
+    `--work-tree`) before its subcommand."""
+    _prog, rest = _prog_and_rest(tokens)
+    for tok in rest:
+        if not tok.startswith("-"):
+            return False
+        if tok in _GIT_DIR_FLAGS or tok.split("=", 1)[0] in _GIT_DIR_FLAGS - {"-C"}:
+            return True
+    return False
+
+
+def _switch_target(sub: str, tokens: list[str], rest: list[str]) -> str:
+    """The one branch this `git checkout|switch` names, or "" when it names
+    none or the hook cannot tell (D5): a detached or path checkout, more than
+    one positional, `-`/`@{-N}`, or another repository."""
+    if (_runs_elsewhere(tokens) or "--" in rest
+            or any(t.startswith("--pathspec-from-file") for t in rest)):
+        return ""
+    created = ""
+    positionals: list[str] = []
+    i, n = 0, len(rest)
+    while i < n:
+        tok = rest[i]
+        if tok in _SWITCH_DETACH_FLAGS and (sub == "switch" or tok == "--detach"):
+            return ""
+        if tok in _SWITCH_CREATE_FLAGS[sub]:
+            if i + 1 >= n:
+                return ""
+            created = rest[i + 1]
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        positionals.append(tok)
+        i += 1
+    if created:
+        # A start point may follow; anything more is a path list.
+        return created if len(positionals) <= 1 else ""
+    if len(positionals) != 1 or positionals[0] == "-" or positionals[0].startswith("@{"):
+        return ""
+    return positionals[0]
+
+
 def _flag_value(tokens: list[str], flag: str) -> str:
     """The value of `flag` (e.g. `-b`) within this simple command's
     remaining tokens: a following token, or a glued `-bvalue` form."""
@@ -384,6 +440,7 @@ def _fallback_match(kind: str, command: str) -> dict:
         # Unparsable, so whether a switch precedes the merge is unknown:
         # assume one, keeping the merge gated (design D3: never fail open).
         result["switch_before"] = "1"
+        result["switch_branch"] = ""
     return result
 
 
@@ -410,18 +467,29 @@ def match(kind: str, command: str) -> dict:
         needs_ref = False
         switched = False
         switch_before = False
+        target = ""
+        landings: list[str | None] = []
         for c in commands:
-            if (
-                _match_git_subcommand(c, "checkout") is not None
-                or _match_git_subcommand(c, "switch") is not None
-            ):
-                switched = True
+            for sub in ("checkout", "switch"):
+                sw = _match_git_subcommand(c, sub)
+                if sw is not None:
+                    switched = True
+                    target = _switch_target(sub, c, sw)
+            # friction-fixes D5: after a directory change the merge may run in
+            # another checkout than the one switched, so the switch says
+            # nothing about where it lands.
+            prog, _rest = _prog_and_rest(c)
+            if prog in _CD_PROGRAMS:
+                target = ""
             rest = _match_git_subcommand(c, "merge")
             if rest is None:
                 continue
             # The checkout the hook sees is not the one the merge runs in
             # when the same command switches branches first -- the hook must
             # not judge the merge's scope from it (hook-correctness D2).
+            # friction-fixes D5: the last switch before a merge names the
+            # branch it lands on, when it names exactly one.
+            landings.append(target if switched else None)
             switch_before = switch_before or switched
             matched = True
             if not ref:
@@ -432,9 +500,14 @@ def match(kind: str, command: str) -> dict:
             if not _MERGE_SEQUENCER_FLAGS.intersection(rest):
                 needs_ref = True
         ref_parse = "failed" if matched and needs_ref and not ref else ("ok" if ref else "none")
+        # Every merge of the command must land on the same named branch; a
+        # merge before any switch lands on the checkout the hook sees.
+        switch_branch = landings[0] if landings and all(
+            x and x == landings[0] for x in landings) else ""
         return {
             "matched": 1 if matched else 0, "ref": ref, "ref_parse": ref_parse,
             "switch_before": "1" if switch_before else "0",
+            "switch_branch": switch_branch,
         }
 
     if kind == "openspec-archive":
@@ -489,7 +562,7 @@ def main(argv: list[str]) -> int:
 
     lines = [f"matched={shlex.quote(str(result['matched']))}"]
     lines.append(f"hook_cwd={shlex.quote(hook_cwd)}")
-    for key in ("change", "branch", "ref", "ref_parse", "switch_before"):
+    for key in ("change", "branch", "ref", "ref_parse", "switch_before", "switch_branch"):
         if key in result:
             lines.append(f"{key}={shlex.quote(result[key])}")
     print("\n".join(lines))
