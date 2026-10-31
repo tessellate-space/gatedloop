@@ -4841,7 +4841,17 @@ LEDGER_ROW_FIELDS = (
     # (USAGE_SOURCES). `None` on every other row kind. Appended per the
     # union rule.
     "tokens", "window", "messages", "source",
+    # stability-contract D1: the row version, set by `_append_ledger_row`
+    # itself on every row (as `session` is), so no caller can omit or forge
+    # it. A row without the key was written before the field existed and is
+    # exactly a version-1 row. Bump LEDGER_ROW_VERSION only when a row's
+    # meaning changes (a field renamed or removed, a value reinterpreted);
+    # appending a field under the union rule keeps the version.
+    "v",
 )
+
+# The highest ledger row version this shim writes and reads (D1, D2).
+LEDGER_ROW_VERSION = 1
 
 
 def _ledger_path(root: Path, change: str) -> Path:
@@ -4949,6 +4959,7 @@ def _append_ledger_row(root: Path, row: dict) -> None:
     # escalation-outcomes D5: the same discriminator the git-layer commit hook
     # scopes itself by, so the two mechanisms agree about what a session is.
     full["session"] = "agent" if os.environ.get("CLAUDECODE") else "human"
+    full["v"] = LEDGER_ROW_VERSION
     path = _ledger_path(root, change)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:

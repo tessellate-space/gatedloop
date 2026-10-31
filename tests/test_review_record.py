@@ -54,6 +54,7 @@ LEDGER_FIELDS = {
     "characterization", "kind",
     # token-ledger design D1: usage rows only.
     "tokens", "window", "messages", "source",
+    "v",
 }
 
 

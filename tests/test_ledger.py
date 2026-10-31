@@ -62,6 +62,7 @@ LEDGER_FIELDS = {
     "kind",
     # token-ledger design D1: usage rows only.
     "tokens", "window", "messages", "source",
+    "v",
 }
 
 NO_LIVE_CHECK_ANYWHERE = 'gatesVersion: 1\ngates:\n  ci: "true"\n'
