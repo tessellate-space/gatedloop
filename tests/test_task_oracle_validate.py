@@ -4,8 +4,9 @@ declare its oracle in the plan" requirement and its scenarios).
 
 A tag names a declared gate other than `ci`, `live-check`, `eval` and
 `confirm`; an unknown gate, an excluded gate and a malformed tag each fail,
-naming the change, the task and the tag. A tag on a line the task parser does
-not match (a lettered id, #46) is reported rather than silently ignored.
+naming the change, the task and the tag. A lettered id (`1.2a`) is a task like
+any other (change `friction-fixes`, D1 and D3); a tag on a line whose id is
+outside the grammar is reported rather than silently ignored.
 
 Stdlib only, per `zero-dep-shim`. Each case is a throwaway git repository and
 the shim driven as a subprocess.
@@ -156,19 +157,44 @@ class TestAMalformedTag(unittest.TestCase):
                 self.assertIn(tid, result.stderr)
 
 
-class TestAnUnparsedLine(unittest.TestCase):
-    """Regression guarded: a tag on a lettered task id (#46), which the task
-    parser does not match, silently ignored."""
+class TestALetteredId(unittest.TestCase):
+    """Regression guarded: a lettered task (#46) whose tag is warned about and
+    then ignored, so a wrong gate on it is never caught."""
 
-    def test_reported_naming_the_line(self):
+    def test_a_tagged_lettered_task_draws_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _project(tmp, _plan(
                 "- [ ] 1.2 Work [oracle: unit]",
                 "- [ ] 1.2a Lettered [oracle: unit]",
             ))
             result = _validate(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("1.2a", result.stderr)
+            self.assertNotIn("1.2a", result.stdout)
+
+    def test_an_unknown_gate_on_a_lettered_task_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _project(tmp, _plan("- [ ] 1.2a Lettered [oracle: contract]"))
+            result = _validate(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
             self.assertIn("1.2a", result.stderr)
-            self.assertIn("#46", result.stderr)
+            self.assertIn("contract", result.stderr)
+
+
+class TestAnUnparsedLine(unittest.TestCase):
+    """Regression guarded: a tag on a line whose id the task parser does not
+    read, silently ignored."""
+
+    def test_an_unnumbered_tagged_line_is_reported_naming_the_grammar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _project(tmp, _plan(
+                "- [ ] 1.2 Work [oracle: unit]",
+                "- [ ] Update the docs [oracle: unit]",
+            ))
+            result = _validate(root)
+            self.assertIn("Update", result.stderr)
+            self.assertIn("N.M or N.Ma", result.stderr)
+            self.assertNotIn("#46", result.stderr)
 
 
 class TestOnlyActiveChanges(unittest.TestCase):

@@ -1975,14 +1975,31 @@ _NON_ORACLE_REASONS = {
     "eval": "it is an advisory score",
     "confirm": "it runs only on the merged tree",
 }
+# friction-fixes D1: a task id is two or more dot-separated numbers, the last
+# optionally followed by one lowercase letter (`1.2a`, a plan amendment's
+# insert). Every `tasks.md` reader builds its pattern from this one.
+TASK_ID_PATTERN = r"\d+(?:\.\d+)+[a-z]?"
+def _task_sort_key(tid: str) -> tuple:
+    """friction-fixes D2: the one order every task listing uses -- by number,
+    segment by segment, a lettered id after the same id bare (`1.2` < `1.2a`
+    < `1.10`). A segment outside the grammar sorts after every numeric one,
+    as a string, so a legacy ledger id never crashes a listing."""
+    out = []
+    for seg in str(tid).split("."):
+        mt = re.fullmatch(r"(\d+)([a-z]?)", seg)
+        out.append((0, int(mt.group(1)), mt.group(2)) if mt else (1, 0, seg))
+    return tuple(out)
+
+
 _UNPARSED_TASK_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\S+)")
 
 
 def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
     """task-oracle D1: `(errors, warnings)` for every oracle tag in the
     active changes' `tasks.md`. An unknown gate, an excluded gate and a
-    malformed tag are errors; a tag on a line the task parser does not match
-    (a lettered id, #46) is a warning, so it is never silently ignored."""
+    malformed tag are errors; a tag on a line whose id is outside the task-id
+    grammar (friction-fixes D1, D3) is a warning, so it is never silently
+    ignored."""
     gates = m.get("gates") if isinstance(m.get("gates"), dict) else {}
     can = [g for g in gates if g not in NON_ORACLE_GATES]
     can_text = ", ".join(f"`{g}`" for g in can) + (", or " if can else "") + "`none`"
@@ -1999,9 +2016,9 @@ def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
                 if lone and _ORACLE_TAG_RE.search(line.strip()):
                     warns.append(
                         f"change '{d.name}': the task line '{lone.group(1)}' carries an "
-                        "oracle tag, but the task parser does not read lettered or "
-                        "unnumbered ids (#46), so the tag is ignored. Number the task "
-                        "N.M for its tag to count."
+                        "oracle tag, but the task parser reads ids of the form N.M or "
+                        "N.Ma, so the tag is ignored. Number the task N.M for its tag "
+                        "to count."
                     )
                 continue
             tid = mt.group(1)
@@ -6164,7 +6181,7 @@ def _tests_place(m: dict, root: Path, args) -> int:
 # staged with the row is in the same commit (or in none), so a halt in
 # flight cannot be carried past its void by ticking the task with it.
 
-_CHECKED_TASK_RE = re.compile(r"^\s*-\s*\[[xX]\]\s+(\d+(?:\.\d+)+)(?:\s|$)")
+_CHECKED_TASK_RE = re.compile(rf"^\s*-\s*\[[xX]\]\s+({TASK_ID_PATTERN})(?:\s|$)")
 
 
 class _LedgerRewritten(Exception):
@@ -6861,8 +6878,7 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     tasks: dict[str, dict] = {}
     oracles = _change_task_oracles(root, change)
     if state is not None:
-        for task in sorted(set(state["tests"]) | set(state["no_behaviour"]),
-                           key=lambda t: [int(x) if x.isdigit() else x for x in t.split(".")]):
+        for task in sorted(set(state["tests"]) | set(state["no_behaviour"]), key=_task_sort_key):
             log = defect_log.get(task, [])
             tasks[task] = {
                 "oracle": _oracle_label(oracles.get(task)),
@@ -6921,7 +6937,7 @@ def _tests_show(m: dict, root: Path, args) -> int:
 # nothing decided: paths, rule-ids, the bound command (never run), and "none"
 # lines where the project has nothing to offer.
 
-_TASK_LINE_RE = re.compile(r"^\s*-\s*\[[ xX]\]\s+(\d+(?:\.\d+)+)\s+(.*)$")
+_TASK_LINE_RE = re.compile(rf"^\s*-\s*\[[ xX]\]\s+({TASK_ID_PATTERN})\s+(.*)$")
 _PATH_SPAN_RE = re.compile(r"`([^`\s<>]+)`")
 _TEST_NAME_RE = re.compile(r"(^|[._-])(tests?|specs?)([._-]|$)", re.IGNORECASE)
 _TEST_DIR_NAMES = frozenset({"test", "tests", "spec", "specs", "__tests__"})
@@ -7572,7 +7588,7 @@ def _usage_show(root: Path, args) -> int:
             f"{(r.get('messages') if counted else '-'):>8}  "
             f"{(usage_total(r.get('tokens')) if counted else '-'):>12}")
     lines.append("")
-    for task in sorted(by_task):
+    for task in sorted(by_task, key=_task_sort_key):
         lines.append(f"{task:<15} {by_task[task]:>12}")
     lines.append(f"{'total':<15} {total:>12}")
     print("\n".join(lines))
@@ -8031,7 +8047,7 @@ def tokens_from_rows(rows: list[dict]) -> dict:
         task = r.get("task")
         _token_add(tasks.setdefault(task, _token_bucket()) if task else unattributed, r["tokens"])
     known = {r.get("task") for r in rows if r.get("task") and r.get("gate") != USAGE_EVENT}
-    unrecorded = sorted(t for t in known if t not in tasks)
+    unrecorded = sorted((t for t in known if t not in tasks), key=_task_sort_key)
     stamps = sorted(k for k in (_utc_key(r.get("ts")) for r in rows) if k is not None)
     span_ms = uncovered = 0
     if stamps:
@@ -8097,7 +8113,7 @@ def _cost_format_human(cost: dict) -> list[str]:
     cur = cost["currency"] or ""
     scope = "priced models only" if cost["unpriced"] else "every recorded model priced"
     lines = [f"cost ({cur}): {cost['total']:.4f} total ({scope})"]
-    for task in sorted(cost["tasks"]):
+    for task in sorted(cost["tasks"], key=_task_sort_key):
         lines.append(f"  {task:<15} {cost['tasks'][task]:>12.4f}")
     if cost["unattributed"]:
         lines.append(f"  {'(unattributed)':<15} {cost['unattributed']:>12.4f}")
@@ -8180,7 +8196,7 @@ def _stats_format_human(doc: dict) -> str:
             )
         lines.append("")
         lines.append("task            active      gate  failed")
-        for name in sorted(c["tasks"]):
+        for name in sorted(c["tasks"], key=_task_sort_key):
             t = c["tasks"][name]
             lines.append(
                 f"{name:<15} {_stats_fmt_ms(t['active_ms']):>8}  "
@@ -8230,7 +8246,7 @@ def _tokens_format_human(t: dict) -> list[str]:
         "covered by a usage window",
         f"{'task':<15} {'tokens':>12}",
     ]
-    for name in sorted(set(t["tasks"]) | set(u["tasks"])):
+    for name in sorted(set(t["tasks"]) | set(u["tasks"]), key=_task_sort_key):
         value = t["tasks"][name]["total"] if name in t["tasks"] else "unrecorded"
         lines.append(f"{name:<15} {value:>12}")
     if t["unattributed"]["total"]:
@@ -9907,6 +9923,23 @@ def _is_integrating(root: Path) -> bool:
     return head is not None and head == _rev(root, target)
 
 
+def _is_integrating_on(root: Path, branch: str) -> bool:
+    """`_is_integrating` for a merge run after switching to `branch`
+    (friction-fixes D5): the target's own branch integrates; an existing local
+    branch, or a name that resolves to nothing (one the switch creates), does
+    not; any other ref would detach HEAD there, which integrates exactly when
+    it sits at the target's tip. An unresolvable target integrates."""
+    target, _reason = _resolve_merge_target(root)
+    if target is None or not branch:
+        return True
+    if branch == target.split("/")[-1]:
+        return True
+    if _rev(root, f"refs/heads/{branch}") is not None:
+        return False
+    at = _rev(root, branch)
+    return at is not None and at == _rev(root, target)
+
+
 def _untracked_unproposed_change_dirs(root: Path) -> list[str]:
     """`openspec/changes/<name>` directories that are wholly untracked --
     debris from an earlier scaffold that was refused or abandoned before
@@ -10737,6 +10770,11 @@ def _cmd_discipline_other(m: dict, root: Path, args) -> int:
         # `integrating` or `not-integrating`; the hook skips its marker work
         # on the latter alone, so any other outcome (an error, no output)
         # keeps the merge gated -- this can fail closed, never open.
+        # friction-fixes D5: `--branch` asks about the branch a switch earlier
+        # in the same command lands on, instead of the current checkout.
+        if args.branch is not None:
+            print("integrating" if _is_integrating_on(root, args.branch) else "not-integrating")
+            return 0
         print("integrating" if _is_integrating(root) else "not-integrating")
         return 0
 
@@ -13394,6 +13432,7 @@ def main() -> int:
     sp_wt = disc_sub.add_parser("check-worktree", help="exit 1 if the current branch is checked out in more than one worktree, naming each")
     sp_wt.set_defaults(fn=cmd_discipline)
     sp_ms = disc_sub.add_parser("merge-scope", help="print 'integrating' if a merge here lands on the integration target (its branch, or a detached HEAD at its tip), else 'not-integrating'")
+    sp_ms.add_argument("--branch", help="judge a merge run after switching to this branch, not the current checkout (the merge hook's switch-then-merge case)")
     sp_ms.set_defaults(fn=cmd_discipline)
     sp_arch = disc_sub.add_parser("check-archive", help="exit 1 if <change> is not yet merged to the target branch")
     sp_arch.add_argument("change")
