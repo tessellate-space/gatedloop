@@ -6239,7 +6239,27 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
             + "\n  - ".join(contradictions) + "\n"
         )
 
-    known_base = (_authoring_state(_read_ledger_rows(root, change)) or {}).get("base", {})
+    rows = _read_ledger_rows(root, change)
+    if only is None:
+        # loop-hardening D10: a full handoff states the whole set, so one
+        # missing a placed task would drop that task's tests and its
+        # declarations silently. Re-authoring part of the set is `--task`.
+        try:
+            placed = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+        except _LedgerRewritten:
+            placed = _active_placements(rows)
+        dropped = sorted((t for t in placed if t not in held_tests and t not in reasons),
+                         key=_task_sort_key)
+        if dropped:
+            return _tests_refuse(
+                f"refusing the full handoff for '{change}' — it holds nothing for "
+                f"task(s) {', '.join(dropped)}, already placed, so it would drop their "
+                "tests and declarations. Hand off only the tasks being re-authored: "
+                + ", ".join(f"`gates tests handoff {change} --task {t}`"
+                            for t in sorted(set(held_tests) | set(reasons), key=_task_sort_key))
+                + "."
+            )
+    known_base = (_authoring_state(rows) or {}).get("base", {})
     tests: dict[str, dict[str, str]] = {}
     base: dict[str, str | None] = {}
     for task, files in held_tests.items():
