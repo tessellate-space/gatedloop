@@ -6296,6 +6296,21 @@ def _placed_blobs_by_path(rows: list[dict]) -> dict[str, set]:
     return out
 
 
+def _merge_base_with_target(root: Path) -> str | None:
+    """`git merge-base HEAD <target>`, or `None` when no target resolves."""
+    target, _reason = _resolve_merge_target(root)
+    if target is None:
+        return None
+    out = _git(root, "merge-base", "HEAD", target)
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
+def _blob_at_commit(root: Path, commit: str, path: str) -> str | None:
+    """The blob id of `path` at `commit`, or `None` where it has none."""
+    out = _git(root, "rev-parse", "--verify", "--quiet", f"{commit}:{path}")
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
 def _tests_place(m: dict, root: Path, args) -> int:
     change = _tests_change_or_refuse(root, args, "place tests for")
     if change is None:
@@ -6334,6 +6349,11 @@ def _tests_place(m: dict, root: Path, args) -> int:
 
     wanted = state["tests"][task]
     placed_before = _placed_blobs_by_path(rows)
+    # loop-hardening D9: the content the branch last received from the
+    # target is not the author's to answer for -- a pre-existing test main
+    # changed after the handoff is placed over, not called a test defect.
+    # No resolvable target leaves the set as it was: placement fails closed.
+    synced = _merge_base_with_target(root)
     problems: list[str] = []
     contents: dict[str, bytes] = {}
     for path, blob in wanted.items():
@@ -6352,6 +6372,8 @@ def _tests_place(m: dict, root: Path, args) -> int:
             continue
         current = _file_blob(root, path)
         allowed = {state["base"].get(path), blob} | placed_before.get(path, set())
+        if synced is not None:
+            allowed.add(_blob_at_commit(root, synced, path))
         if current not in allowed:
             problems.append(
                 f"{path} changed since authoring (it matches neither its content "

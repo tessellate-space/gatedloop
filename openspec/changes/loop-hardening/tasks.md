@@ -19,7 +19,7 @@
 
 ## 4. The handoff (D9, D10)
 
-- [ ] 4.1 Add the file's blob at `merge-base HEAD <target>` to placement's allowed set. Verify with a real-repo test: main changes a pre-existing test file after the handoff, the branch syncs, and placement succeeds; a lane-only edit still refuses as a test defect [oracle: unit]
+- [x] 4.1 Add the file's blob at `merge-base HEAD <target>` to placement's allowed set. Verify with a real-repo test: main changes a pre-existing test file after the handoff, the branch syncs, and placement succeeds; a lane-only edit still refuses as a test defect [oracle: unit]
 - [ ] 4.2 Make a full `tests handoff` refuse when a placed task is absent from the holding area. Verify with a test: 1.1 placed (characterization), a full handoff holding only 1.2 exits 1 naming 1.1 and the `--task` route, and the authoring state is unchanged [oracle: unit]
 
 ## 5. The READY report (D11)
