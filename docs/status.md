@@ -151,8 +151,9 @@ has the steps.
 ## Upstream coupling
 
 gatedloop does not author anything; OpenSpec does, and the shim reads what OpenSpec
-prints. Tested against **OpenSpec 1.14.3**. `gates doctor` warns, without failing, on
-any other version.
+prints. Supported: **OpenSpec 1.14.3 to 1.14.3**, the range [`stability.md`](./stability.md)
+declares; ci tests both ends, and a weekly job runs OpenSpec's latest release. `gates doctor`
+warns, without failing, outside the range.
 
 | gatedloop relies on | Used by | When upstream changes it |
 |---|---|---|

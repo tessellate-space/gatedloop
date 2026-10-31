@@ -206,6 +206,26 @@ It then runs these steps in a fixed order:
 The tag is created only after the commit is on the remote, so a tag never
 exists without its pushed commit.
 
+## Breaking changes
+
+What adopters may rely on is written down in [`docs/stability.md`](./docs/stability.md)
+and recorded in `tests/contract.json`, which ci compares with the code. Retiring a
+covered surface takes three steps:
+
+1. Deprecate it with a warning on use, naming the replacement.
+2. Keep it for at least one further release.
+3. Remove it, regenerate the snapshot (`python3 tests/test_contract.py --write`), and
+   ship the removal under `### Breaking` with a migration step.
+
+`status` lists each public entry removed from the snapshot since the latest tag, and a
+raised ledger row version, under breaking (in text and in `--json`). It still suggests
+only `minor` or `patch`: while the version is 0.x a removal may ship in a minor, and
+from 1.0 only in a major, so the level stays your call. `cut` drafts one
+`- <entry>: TODO` line per removal under `### Breaking`; replace each `TODO` with the
+migration step. `publish` refuses, before its first write, while a `TODO` remains in
+that subsection. A tag that predates the snapshot skips the comparison, and `status`
+says so.
+
 ## Publishing the public repository
 
 gatedloop is published as a fresh public repository, `tessellate-space/gatedloop`, and this private one, `tessellate-space/specloop`, stays as the archive (`go-public-migration`). Renaming would expose the full history: most commits carry the maintainer's personal email, and every closed PR's `refs/pull/*` keeps the old commits reachable. `scripts/go-public` does the move. Like `scripts/release`, it is repo-local and never shipped. Every subcommand takes `--dry-run`, which prints each outward action (`gh issue transfer`, `gh api -X PATCH`, the git steps of `push`) instead of running it.

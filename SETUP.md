@@ -12,6 +12,8 @@ gatedloop does not author artifacts — OpenSpec does, through its own `/opsx:` 
    openspec init --tools claude     # creates openspec/ AND .claude/commands/opsx/*
    ```
 
+   Supported: OpenSpec `1.14.3` to `1.14.3`, on macOS or Linux (Windows is not supported; the hooks are bash). [`docs/stability.md`](./docs/stability.md) declares the range, and `gates doctor` warns outside it.
+
    Non-negotiable — the workflow is built around it. `openspec list --json` working proves the first half; `.claude/commands/opsx/` existing proves the second. Without the `--tools claude` half you get the CLI but no way to author a change, and the loop has nothing to consume. `/gatedloop:gates-init` checks both and offers to fix the second.
 2. **A task runner** — any of `just` / `npm` / `make` / `cargo` / … You write the recipe bodies; gatedloop only calls their names.
 3. **Python 3.9+** on PATH for the `gates` shim. No required third-party dependencies; PyYAML is optional and enables full schema inspection. Every gate, hook and the loop's dispatch decision (`gates schema dispatch`) work without it — the shim falls back to a built-in minimal parser for the manifest (a `.gates.json` manifest needs nothing either way) and to a scoped reader for the two schema keys dispatch needs. Only `gates schema inspect`, which parses a whole third-party `schema.yaml`, requires it. `gates doctor` reports whether it is importable. To install: `python3 -m pip install --user pyyaml`, or `pipx`/`uv` if your Python is externally managed (PEP 668), where a plain `pip install` is refused.

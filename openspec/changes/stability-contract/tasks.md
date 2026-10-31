@@ -21,4 +21,4 @@
 
 ## 5. The policy and the docs (D8)
 
-- [ ] 5.1 Write `docs/stability.md`, add RELEASING.md's "Breaking changes" section, and state the supported range in README.md, SETUP.md and the "Upstream coupling" section of `docs/status.md`, leaving "What's next" as it is. Add the test in `tests/test_contract.py` asserting that `OPENSPEC_MIN`/`OPENSPEC_MAX_TESTED` match `docs/stability.md`. Verify that `scripts/release docs` reports no gap, `openspec validate stability-contract --strict` passes and `gates run ci` is green [oracle: unit]
+- [x] 5.1 Write `docs/stability.md`, add RELEASING.md's "Breaking changes" section, and state the supported range in README.md, SETUP.md and the "Upstream coupling" section of `docs/status.md`, leaving "What's next" as it is. Add the test in `tests/test_contract.py` asserting that `OPENSPEC_MIN`/`OPENSPEC_MAX_TESTED` match `docs/stability.md`. Verify that `scripts/release docs` reports no gap, `openspec validate stability-contract --strict` passes and `gates run ci` is green [oracle: unit]

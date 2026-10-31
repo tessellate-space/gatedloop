@@ -1,6 +1,6 @@
 # gatedloop
 
-**Status.** Built for the author's own projects, and it works there. It is 0.x, so it changes without notice. It is tested against OpenSpec 1.14.3. No support is promised: one maintainer has run the loop so far, and [`docs/status.md`](./docs/status.md) says what has been exercised and where it is fragile. It is for people already running unattended coding agents who have been burned by "the agent said it ran the tests". Issues are welcome: run `/gatedloop:feedback`, or open a GitHub issue.
+**Status.** Built for the author's own projects, and it works there. It is 0.x, so it changes without notice. It is tested against OpenSpec 1.14.3 to 1.14.3 on macOS and Linux; [`docs/stability.md`](./docs/stability.md) says what is covered and how a part of it is retired. No support is promised: one maintainer has run the loop so far, and [`docs/status.md`](./docs/status.md) says what has been exercised and where it is fragile. It is for people already running unattended coding agents who have been burned by "the agent said it ran the tests". Issues are welcome: run `/gatedloop:feedback`, or open a GitHub issue.
 
 Issue numbers before 0.7.0 were remapped when the issues moved here from the private archive repository. PR references in the history and the changelog name that archive, not this repository.
 
@@ -40,7 +40,7 @@ A task is done exactly when its code, its checkbox and its ledger row are commit
 
 ## Quickstart
 
-You need Claude Code, the OpenSpec CLI (tested at 1.14.3), Python 3.9+, and `gh` for the pull-request steps. In Claude Code:
+You need Claude Code, the OpenSpec CLI (1.14.3 to 1.14.3, the range [`docs/stability.md`](./docs/stability.md) declares), Python 3.9+, and `gh` for the pull-request steps. In Claude Code:
 
 ```bash
 /plugin marketplace add tessellate-space/gatedloop
@@ -290,7 +290,7 @@ conventions:
 
 ## Requirements
 
-- **OpenSpec, with its Claude Code integration** (`openspec init --tools claude`) — a hard prerequisite, not a variable. This release is tested against OpenSpec **1.14.3**; `gates doctor` warns, without failing, on any other version. The loop consumes four specific things from it, and each has a distinct failure mode when absent:
+- **OpenSpec, with its Claude Code integration** (`openspec init --tools claude`) — a hard prerequisite, not a variable. This release supports OpenSpec **1.14.3** to **1.14.3**; `gates doctor` warns, without failing, outside that range. The loop consumes four specific things from it, and each has a distinct failure mode when absent:
 
   | The loop consumes | Without it |
   |---|---|
