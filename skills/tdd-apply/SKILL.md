@@ -106,6 +106,8 @@ git commit -m '<imperative lowercase description>'
 ```
 Commit convention: imperative lowercase, ≤72 chars, no ticket prefix; tests + implementation together; must not break the build.
 
+Bring the merge target into the branch with `git merge --no-commit <target>`, then `gates run ci`, then `git commit` — never a merge that commits by itself: git runs no commit hook for a merge commit, so the merge hook denies one (loop-hardening D3).
+
 Every task names its oracle. A task that adds no test, because an existing test already covers its behaviour (5c question 2), names that test in a commit trailer:
 ```
 Covered-by: <test identifier as the project's runner names it>
