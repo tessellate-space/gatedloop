@@ -25,12 +25,14 @@ mostly one host: Claude Code, locally and on the web.
 | The SessionStart brief and `/gatedloop:start` | yes, by one person | in the maintainer's repositories only |
 | Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
 | Token usage rows, `gates stats --cost` and `loop.token-budget` | lightly | usage recorded on this repository's own changes since `token-ledger` merged; the budget has not halted a real change |
+| `/gatedloop:planner` and `/gatedloop:orchestrator` | not yet | new in 0.10.0; the planner/orchestrator split they encode has run by hand, as in [`topology.md`](./topology.md) |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
 The prompts (commands, skills, agents) have no automated oracle. `ci` here says the
 shim still parses, the version fields agree and the plugin still loads. It says
 nothing about whether a prompt is right; running it is the only test the prompt
-surface has.
+surface has. `prompt-evals` (planned) adds an on-demand `claude plugin eval` suite for the
+implementer and the convention review.
 
 ## Sharp edges
 
@@ -92,6 +94,18 @@ e2e task tagged `[oracle: integration]` goes red under `integration` instead of 
 declared `CHARACTERIZATION`. An untagged task is still the author's to decide from the
 prose, and a wrong guess there shows only as a `green` defect. `loop.task-oracle:
 required` refuses untagged tasks at handoff; it is off by default.
+
+### A scoped `ci` or `unit` errs full on an unmatched path — *shipped*
+
+Before 0.10.0 a diff holding one surface's file and a file no surface matched ran
+that surface's narrow command, and a task spanning several surfaces ran only the
+global `unit`, which could miss a surface's own tests and read a required red as
+green (#61, #45). Now any changed path no non-catch-all surface matches runs the
+global gate and the announcement names it; the loop's own `.gatedloop/` state never
+counts. A multi-surface `unit` runs each hot surface's override, plus the global
+`unit` once for a surface with none. The visible cost: if your surfaces don't cover
+`openspec/**`, every task commit now runs the full `ci`, because it stages the
+change's `tasks.md`. Add `openspec/**` to a surface to scope those commits again.
 
 ### Statuses posted from a laptop are self-reported — *shipped, by design*
 
