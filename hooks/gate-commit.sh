@@ -53,9 +53,12 @@ resolved_repo="$(pwd)"
 
 # hook-correctness D7: a branch another worktree also holds is refused before
 # any marker work -- the commit would move the ref under that checkout.
+# loop-hardening D7: the shim's own output names the cause -- the worktrees
+# holding the branch, or a manifest it could not parse -- so the hook adds
+# no verdict of its own on top of it.
 if ! wt_out="$("${GATES}" discipline check-worktree 2>&1)"; then
   echo "${wt_out}" >&2
-  echo "gatedloop: commit denied in '${resolved_repo}' — this branch is shared with another worktree." >&2
+  echo "gatedloop: commit denied in '${resolved_repo}' — see above." >&2
   exit 2
 fi
 
