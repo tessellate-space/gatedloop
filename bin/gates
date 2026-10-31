@@ -5122,8 +5122,52 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
             f"gatedloop: recorded '{change}' as ready in {_ledger_path(root, change)} — "
             "commit that row on its own (ledger grade) before reporting READY TO MERGE"
         )
+        # loop-hardening D11: the report's gate fields, read from the ledger
+        # and the markers, so the implementer copies them instead of
+        # choosing a value the schema happens to allow.
+        print(f"gatedloop: gates {json.dumps(_ready_gates(m, root, change, head))}")
         return 0
     sys.exit(f"gatedloop: unknown ledger subcommand '{args.ledger_cmd}'")
+
+
+def _ready_gates(m: dict, root: Path, change: str, head: str | None) -> dict:
+    """D11's block for the READY report: `ci` is `pass` when a green unscoped
+    `ci` row names the head's normalized tree; `review` folds the latest
+    per-task review row of every completed task (`none` with no review row
+    at all, `findings` when any latest one is, `partial` when a completed
+    task has none, else `clean`); `live_check` is the head tree's marker --
+    `na` for a skip verdict, or when nothing declares one."""
+    rows = _read_ledger_rows(root, change)
+    norm = _normalize_tree(root, head) if head else None
+    ci = "pass" if norm and any(
+        r.get("gate") == "ci" and r.get("exit") == 0 and (r.get("scope") or "full") == "full"
+        and r.get("tree") and _normalize_tree(root, r["tree"]) == norm
+        for r in rows
+    ) else "fail"
+
+    latest: dict[str, str] = {}
+    for r in rows:
+        if r.get("gate") == "review" and r.get("task") and r.get("scope") != "authored":
+            latest[r["task"]] = "clean" if r.get("exit") == 0 else "findings"
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    done = _checked_task_ids(tasks_md.read_text() if tasks_md.is_file() else None)
+    if not latest:
+        review = "none"
+    elif any(latest.get(t) == "findings" for t in done):
+        review = "findings"
+    elif any(t not in latest for t in done):
+        review = "partial"
+    else:
+        review = "clean"
+
+    marker = _read_marker(root, "live-check", norm) if norm else None
+    declared = bool((m.get("gates") or {}).get("live-check")) or any(
+        isinstance(sf, dict) and sf.get("live-check") for sf in (m.get("surfaces") or []))
+    if marker is not None:
+        live = "na" if (marker.get("verdict") or "pass") == "skip" else "pass"
+    else:
+        live = "fail" if declared else "na"
+    return {"ci": ci, "review": review, "live_check": live}
 
 
 # ---------- post-hoc reflog audit + ledger taint (enforce-at-the-effect D6/D7) --
