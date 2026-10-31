@@ -4,6 +4,7 @@
 Which commands, skills and templates gatedloop ships, and which it leaves to upstream OpenSpec. Authoring stays with the maintained `/opsx:*` commands, a gatedloop command may only delegate to add a guarantee upstream lacks, and onboarding checks that the upstream commands the prompts reference are actually installed.
 
 ## Requirements
+
 ### Requirement: gatedloop ships no command that duplicates a maintained upstream asset
 The plugin SHALL NOT ship a command, skill, or template that reproduces the content of an asset installed and maintained by OpenSpec or by a community schema. Artifact authoring SHALL be deferred to the upstream `/opsx:*` commands. A command MAY delegate to an upstream command in order to add a guarantee upstream does not make, provided it holds no copy of the upstream prompt.
 
@@ -110,3 +111,22 @@ The rules-doc SHALL carry a stable rule-id forbidding forked upstream assets, re
 - **WHEN** `gates rules` resolves rule-ids for a diff touching `commands/`
 - **THEN** `no-forked-upstream-assets` is among the resolvable ids, and a review finding can cite it
 
+### Requirement: Planner and orchestrator roles ship as commands over shipped primitives
+
+The plugin SHALL ship `/gatedloop:planner` and `/gatedloop:orchestrator` as prompt
+commands that add no shim code. The planner command SHALL forbid dispatching,
+implementing, merging and archiving, and SHALL send a handoff only after `gates
+handoff` exits 0. The orchestrator command SHALL require running a handoff's `verify`
+command before queueing and SHALL rebuild its queue from git, not messages, when
+unsure. Each SHALL tell the agent to re-run it after compaction.
+
+#### Scenario: A refused handoff
+
+- **WHEN** a planner runs `gates handoff <change>` and it exits 1
+- **THEN** the planner command directs reporting the reason to the user and sending
+  nothing
+
+#### Scenario: A handoff that no longer verifies
+
+- **WHEN** the orchestrator receives a payload whose `verify` command fails
+- **THEN** the orchestrator command directs dropping it and reporting why
