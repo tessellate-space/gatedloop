@@ -263,6 +263,12 @@ between them, and the forge is the checkpoint.
 - **The orchestrator** is the only session that dispatches. It runs §1–§7: it selects,
   dispatches the author and the implementers, merges and archives.
 
+Two commands load these roles into a session: `/gatedloop:planner` and
+`/gatedloop:orchestrator`. Each is a prompt over the commands below, with no code of
+its own, and begins with a short role block to restate in a summary. A session that
+was compacted, or isn't sure of its role, re-runs its command; a prompt cannot detect
+a compaction itself, so this is as far as the guarantee goes.
+
 **The flow.**
 
 1. A planner runs `/gatedloop:propose`, which opens the plan PR from `plan/<change>`.
