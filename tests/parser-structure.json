@@ -27,7 +27,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -65,7 +65,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -163,7 +163,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -216,7 +216,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -294,7 +294,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -377,7 +377,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -415,7 +415,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -428,7 +428,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -506,7 +506,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -544,7 +544,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -642,7 +642,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -680,7 +680,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    }
   ],
@@ -743,7 +743,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -781,7 +781,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -819,7 +819,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -932,7 +932,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1000,7 +1000,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1108,7 +1108,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1171,7 +1171,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1234,7 +1234,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1272,7 +1272,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1350,7 +1350,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1388,7 +1388,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    },
    {
@@ -1441,7 +1441,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1649,7 +1649,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1687,7 +1687,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1700,7 +1700,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1770,7 +1770,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    }
   ],
@@ -1808,7 +1808,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1845,7 +1845,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -1883,7 +1883,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -1966,7 +1966,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2019,7 +2019,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2063,7 +2063,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    }
   ],
@@ -2206,7 +2206,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2244,7 +2244,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2327,7 +2327,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2365,7 +2365,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2418,7 +2418,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2456,7 +2456,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2534,7 +2534,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2572,7 +2572,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2585,7 +2585,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2623,7 +2623,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2676,7 +2676,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2739,7 +2739,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2777,7 +2777,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -2818,7 +2818,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2973,7 +2973,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -2986,7 +2986,7 @@
     "metavar": null,
     "nargs": "*",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    },
    {
@@ -3114,7 +3114,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -3152,7 +3152,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    },
    {
@@ -3220,7 +3220,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    },
    {
@@ -3473,7 +3473,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -3566,7 +3566,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -3659,7 +3659,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -3727,7 +3727,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -3765,7 +3765,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],
@@ -3873,7 +3873,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -3960,7 +3960,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -4028,7 +4028,7 @@
     "metavar": null,
     "nargs": null,
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    },
    {
@@ -4081,7 +4081,7 @@
     "metavar": null,
     "nargs": "?",
     "option_strings": [],
-    "required": false,
+    "required": null,
     "type": null
    },
    {
@@ -4134,7 +4134,7 @@
     "metavar": null,
     "nargs": "A...",
     "option_strings": [],
-    "required": true,
+    "required": null,
     "type": null
    }
   ],

@@ -11,7 +11,8 @@ before and after the move, by stopping `parse_args` the moment `main()`
 calls it. Its structure, not `--help`'s rendered text, is compared with
 `tests/parser-structure.json`: argparse renders the same parser differently
 across the Python versions ci runs (3.9 says "optional arguments:", 3.13
-merges a flag's aliases), and that difference is not an interface change.
+merges a flag's aliases, and 3.9 derives a positional's `required` from its
+`nargs` differently), and that difference is not an interface change.
 
     python3 tests/test_parser_characterization.py --write   # regenerate
 
@@ -76,7 +77,11 @@ def _arg(action: argparse.Action) -> dict:
         "type": getattr(action.type, "__name__", _plain(action.type)),
         "choices": None if isinstance(action, argparse._SubParsersAction)
         else _plain(list(action.choices) if action.choices is not None else None),
-        "required": action.required,
+        # A positional's `required` is derived from its `nargs` (pinned above),
+        # and the derivation differs by Python version: 3.9 marks an
+        # `nargs="?"` positional required, 3.13 does not. Only an option's
+        # `required` is a choice the shim makes.
+        "required": action.required if action.option_strings else None,
         "help": action.help,
         "metavar": _plain(action.metavar),
     }
