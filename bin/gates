@@ -8784,6 +8784,32 @@ def _approval_check_at(root: Path, change: str, m: dict | None = None) -> tuple[
     return True, ref, f"change '{change}' is merged to '{ref}' and approved by {approved_by}{advisory}"
 
 
+def _plan_approval_refusal(m: dict, root: Path, change: str, head: str, what: str) -> str | None:
+    """loop-hardening D1/D2: `None` when `change`'s plan is the approved one,
+    else the refusal. Two checks: the approval recorded on the merge target
+    still matches the plan there (`_approval_check_at`, #101), and the plan
+    at `head` -- the tree about to be merged or accepted -- hashes to that
+    recorded `approved_sha`, so a branch that edited its own plan after
+    approval is caught too. An untagged `tasks.md` is outside the sha, so a
+    tick never needs re-approval. `what` finishes "before ..."."""
+    ok, ref, reason = _approval_check_at(root, change, m)
+    if not ok:
+        return f"gatedloop: {reason}"
+    _by, _at, approved_sha = _approval_meta(_openspec_yaml_at_ref(root, change, ref) or {})
+    at_head = _approval_sha_ref(root, change, head)
+    if at_head != approved_sha:
+        shown = head if len(head) < 40 else head[:12]
+        return (
+            f"gatedloop: change '{change}''s plan at {shown} differs from the plan approved "
+            f"on '{ref}' (approved_sha {str(approved_sha)[:12]}, {shown} hashes to "
+            f"{str(at_head)[:12]}) — its proposal, design, specs or oracle tags changed "
+            f"after approval. Get the plan re-approved (`gates approval attest {change} "
+            "--local` under a self policy, or a fresh PR review), or bring the branch level "
+            f"with '{ref}', before {what}"
+        )
+    return None
+
+
 def cmd_approval(m: dict, root: Path, args) -> int:
     if args.approval_cmd == "policy":
         print(f"plan={_approval_policy(m)}")
@@ -12358,6 +12384,11 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
     tree = _commit_tree(root, f"refs/heads/{change}")
     if tree is None:
         raise _MergeHalt(1, f"could not resolve the tree of '{change}'.")
+    # loop-hardening D1: the plan approval first, in both modes -- no evidence
+    # about a tree is worth reading for a plan nobody approved.
+    stale = _plan_approval_refusal(m, root, change, f"refs/heads/{change}", "merging")
+    if stale:
+        raise _MergeHalt(1, "the plan is not the approved one:\n" + stale)
     rows = _change_ledger_rows(root, change, f"refs/heads/{change}")
     problems: list[str] = []
 

@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _approved_plan import record_approval
+
 REPO = Path(__file__).resolve().parent.parent
 GATES_SHIM = REPO / "bin" / "gates"
 
@@ -216,6 +218,7 @@ class MergeRepo:
             "## ADDED Requirements\n\n### Requirement: Thing\n\nThe system SHALL work.\n\n"
             f"#### Scenario: {SCENARIO_TITLE}\n\n- **WHEN** it runs\n- **THEN** it works\n"
         )
+        self.approve_plan()
         git(p, "add", "-A")
         git(p, "commit", "-q", "-m", "plan: add-thing")
 
@@ -230,6 +233,12 @@ class MergeRepo:
         git(self.tmp, "clone", "-q", str(self.bare), str(self.other))
         git(self.other, "config", "user.email", "o@example.com")
         git(self.other, "config", "user.name", "O")
+
+    def approve_plan(self, cwd=None) -> str:
+        """Record the plan's approval in its `.openspec.yaml`, as an attest
+        would: `gates merge` and every acceptance writer refuse a plan whose
+        recorded approval does not match it (loop-hardening D1, D2)."""
+        return record_approval(Path(cwd or self.primary), CHANGE)
 
     def start_change(self, lane: bool) -> Path:
         """Cut branch `add-thing` off `main`: in the primary checkout

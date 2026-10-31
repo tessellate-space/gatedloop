@@ -24,6 +24,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from _approved_plan import record_approval
+
 REPO = Path(__file__).resolve().parent.parent
 GATES_SHIM = REPO / "bin" / "gates"
 CHANGE = "tagged-e2e"
@@ -109,8 +111,10 @@ class TestATaggedPlanEndToEnd(unittest.TestCase):
             _git(root, "config", "user.name", "T")
             _write(root, ".gates.yaml", MANIFEST)
             _write(root, ".gitignore", "unit.rc\nintegration.rc\n")
-            _write(root, f"{CDIR}/.openspec.yaml", "schema: spec-driven\n")
+            _write(root, f"{CDIR}/proposal.md", "# Proposal: tagged\n\n## Why\n\nBecause.\n")
             _write(root, f"{CDIR}/tasks.md", TASKS)
+            # `gates merge` step 1 proves the plan approval first (loop-hardening D1).
+            record_approval(root, CHANGE)
             _write(root, "src/app.py", "def app():\n    return 1\n")
             _git(root, "add", "-A")
             _git(root, "commit", "-m", "plan")
