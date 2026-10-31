@@ -13201,7 +13201,9 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
 
 # ---------- cli -----------------------------------------------------------
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """The whole `gates` command line (stability-contract D3): built here so
+    `tests/test_contract.py` can walk it without running a command."""
     p = argparse.ArgumentParser(prog="gates", description="gatedloop gate/surface shim")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -13598,7 +13600,11 @@ def main() -> int:
         help="exit 0 if a variable `discipline.agent-env` lists (default CLAUDECODE) is set, else 1 -- the git-layer hooks no-op on 1",
     )
 
-    args = p.parse_args()
+    return p
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
     if args.cmd == "discipline" and args.discipline_cmd == "agent-session":
         # Special-cased ahead of everything (git-layer-enforcement D1): the
         # git hooks ask it first, in any repository, with or without a

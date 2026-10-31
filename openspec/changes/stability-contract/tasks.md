@@ -7,7 +7,7 @@
 
 ## 2. The contract snapshot (D3, D4)
 
-- [ ] 2.1 Move the parser construction in `main()` into `_build_parser()`, with no change in behaviour. Verify that `gates --help` and every subcommand's `--help` print the same text before and after [oracle: unit characterization]
+- [x] 2.1 Move the parser construction in `main()` into `_build_parser()`, with no change in behaviour. Verify that `gates --help` and every subcommand's `--help` print the same text before and after [oracle: unit characterization]
 - [ ] 2.2 Add `tests/test_contract.py` with the generator, `CONTRACT_INTERNAL` and its reasons, and the `--write` mode, plus the generated `tests/contract.json`. Verify with tests that a renamed flag, an added subcommand, a removed status context and a removed ledger field each fail with a diff naming them, and that `--write` makes the test pass again [oracle: unit]
 
 ## 3. Release reporting (D5)
