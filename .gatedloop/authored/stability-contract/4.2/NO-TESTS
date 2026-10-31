@@ -1,0 +1,1 @@
+Task 4.2 edits only the GitHub Actions workflows (the ci matrix and a scheduled OpenSpec-latest run); nothing under tests/ can run a workflow, and the plan verifies it on the implementation PR's own checks, as its [oracle: none] tag declares.

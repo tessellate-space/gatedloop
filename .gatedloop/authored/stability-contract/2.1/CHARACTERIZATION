@@ -1,0 +1,1 @@
+Task 2.1 moves main()'s parser construction into _build_parser() with no change in behaviour, so its tests pin the command line the tree already has (every subcommand, flag, positional, default, choice and help string, captured from main() itself) and must pass before and after the move; a red run means the refactor changed the interface.

@@ -1,0 +1,4312 @@
+{
+ "acceptance": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "acceptance_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the human acceptance of the increment: policy, attest, reject",
+  "prog": "gates acceptance"
+ },
+ "acceptance attest": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "pr",
+    "help": "the implementation pull request's number",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--pr"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "merged",
+    "help": "the merged implementation pull request's number: its merger, merge time and merge commit's tree are the acceptance; legitimate only under `approval.acceptance: self`",
+    "metavar": "PR",
+    "nargs": null,
+    "option_strings": [
+     "--merged"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "local",
+    "help": "accept as the configured git identity; legitimate only under `approval.acceptance: self`",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--local"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "as_name",
+    "help": "override accepted_by's display name (--local only; never affects the tree)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--as"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append an `accept` ledger row pinned to the change branch's head tree -- from the PR's approving review (--pr) or, under a declared self policy, the git identity (--local) or the merged PR's merge commit (--merged)",
+  "prog": "gates acceptance attest"
+ },
+ "acceptance brief": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "out",
+    "help": "write the brief to this path instead of stdout (documented location: .gatedloop/runs/<change>.acceptance.md)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--out"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the deterministic acceptance brief: spec scenarios (covered / check by hand), verdicts for the head tree, what it cannot claim",
+  "prog": "gates acceptance brief"
+ },
+ "acceptance check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "tree",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "read only this change's ledger (default: the current branch; every ledger on the merge target)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 if no acceptance policy is declared or the latest acceptance row for <tree> is an accept, else 1 (merge gate)",
+  "prog": "gates acceptance check"
+ },
+ "acceptance policy": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the declared acceptance policy (acceptance=review|self|none)",
+  "prog": "gates acceptance policy"
+ },
+ "acceptance reject": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "cause",
+    "help": "one of: weak-spec, missing-oracle",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--cause"
+    ],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "detail",
+    "help": "required: what the behaviour did and what was meant",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--detail"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "as_name",
+    "help": "override accepted_by's display name",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--as"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append a `reject` ledger row pinned to the change branch's head tree -- an escalation with a cause",
+  "prog": "gates acceptance reject"
+ },
+ "adoption": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "adoption_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "what this plugin version asks the project to decide: status, record",
+  "prog": "gates adoption"
+ },
+ "adoption record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "id",
+    "help": "a catalogue item id (see `gates adoption status`)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "decision",
+    "help": "one of: adopted, declined, later",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "write a decision to .gatedloop/adoption.json (adopted | declined | later)",
+  "prog": "gates adoption record"
+ },
+ "adoption status": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one document: {\"version\", \"undecided\": [{id, since, what}]}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "list the adoption items this project hasn't decided on; exit non-zero only when it cannot decide",
+  "prog": "gates adoption status"
+ },
+ "approval": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "approval_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "plan approval: policy, hash, check, attest from a PR review",
+  "prog": "gates approval"
+ },
+ "approval attest": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "pr",
+    "help": "the plan pull request's number",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--pr"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "merged",
+    "help": "the merged plan pull request's number: its merger and merge time are the approval; legitimate only under the declared self policy",
+    "metavar": "PR",
+    "nargs": null,
+    "option_strings": [
+     "--merged"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "local",
+    "help": "write approval keys machine-side; legitimate only under the declared self policy",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--local"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "as_name",
+    "help": "override approved_by's display name (--local only; never affects the sha)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--as"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "write x-gatedloop-approved-by/at/sha -- from the PR's approving review (--pr) or, under a declared self policy, from the plan PR's merge (--merged) or machine-computed (--local)",
+  "prog": "gates approval attest"
+ },
+ "approval check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 if <change> is merged AND approved, else 1",
+  "prog": "gates approval check"
+ },
+ "approval migrate": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "rename the earlier approved_by/at/sha keys to x-gatedloop-approved-* in each active change's .openspec.yaml (or <change>'s)",
+  "prog": "gates approval migrate"
+ },
+ "approval policy": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the declared plan-approval policy (plan=review|self)",
+  "prog": "gates approval policy"
+ },
+ "approval sha": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the plan-artifact content hash for a change",
+  "prog": "gates approval sha"
+ },
+ "attempt": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "attempt_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the retry budget: attempt notes per task, and fresh restarts",
+  "prog": "gates attempt"
+ },
+ "attempt note": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id the note belongs to (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "hypothesis",
+    "help": "what you believed was wrong",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--hypothesis"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "changed",
+    "help": "what you changed to test it",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--changed"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "oracle",
+    "help": "what the gate said",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--oracle"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "next",
+    "help": "what to rule out next",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--next"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append an `attempt-note` row: four required one-line fields, at most 200 characters each",
+  "prog": "gates attempt note"
+ },
+ "attempt notes": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one document: {\"task\", \"notes\": [{attempt, hypothesis, changed, oracle, next}]}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name to read (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print a task's attempt notes, oldest first, across restarts",
+  "prog": "gates attempt notes"
+ },
+ "attempt restart": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id to restart (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record a fresh restart for a task: clean tree only, at most loop.fresh-restarts times; resets its failed-attempt count",
+  "prog": "gates attempt restart"
+ },
+ "audit": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "ref",
+    "help": "audit the change this incoming ref names, in the worktree holding it (the merge gate)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--ref"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "post-hoc reflog audit: taint the ledger on a commit with no green-ci record (Stop hook)",
+  "prog": "gates audit"
+ },
+ "conventions": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "conventions_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "generate config.yaml's rules: from the conventions source",
+  "prog": "gates conventions"
+ },
+ "conventions sync": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "sync openspec/config.yaml's rules: from conventions.rules-doc",
+  "prog": "gates conventions sync"
+ },
+ "discipline": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "discipline_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "OpenSpec git discipline checks (D9)",
+  "prog": "gates discipline"
+ },
+ "discipline agent-session": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 if a variable `discipline.agent-env` lists (default CLAUDECODE) is set, else 1 -- the git-layer hooks no-op on 1",
+  "prog": "gates discipline agent-session"
+ },
+ "discipline check-archive": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 if <change> is not yet merged to the target branch",
+  "prog": "gates discipline check-archive"
+ },
+ "discipline check-commit": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "tree",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "verdict_file",
+    "help": "on success, write one token naming the grade that allowed the commit: ledger, planning or marker (unblock-authored-lock D1)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--verdict-file"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "planning-grade for a planning-only staged diff (D2), else the full ci marker check",
+  "prog": "gates discipline check-commit"
+ },
+ "discipline check-continue": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 + next task line if the Stop hook should continue the loop",
+  "prog": "gates discipline check-continue"
+ },
+ "discipline check-implement": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 unless <change> is merged AND approved (D10)",
+  "prog": "gates discipline check-implement"
+ },
+ "discipline check-propose": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "path",
+    "help": "omit with --scaffold",
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "scaffold",
+    "help": "check the openspec-new-change step itself, before any file exists (design D4)",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--scaffold"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 if <path> is a plan artifact of a change in implementation (off the target or a based plan/* branch); with --scaffold, if the branch is neither",
+  "prog": "gates discipline check-propose"
+ },
+ "discipline check-push": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "sha",
+    "help": "the local sha being pushed (all zeros: a deletion)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "remote_ref",
+    "help": "the remote ref it updates (refs/heads/<branch>); only the merge target's is checked. Omitted: the sha is checked as a push of the target",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--remote-ref"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the pre-push hook's check: exit 1 unless an update of the merge target pushes a proven commit (a merge row records it, or the merge gate's incoming-tree checks hold); other refs and deletions pass",
+  "prog": "gates discipline check-push"
+ },
+ "discipline check-worktree": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 if the current branch is checked out in more than one worktree, naming each",
+  "prog": "gates discipline check-worktree"
+ },
+ "discipline merge-scope": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "branch",
+    "help": "judge a merge run after switching to this branch, not the current checkout (the merge hook's switch-then-merge case)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--branch"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print 'integrating' if a merge here lands on the integration target (its branch, or a detached HEAD at its tip), else 'not-integrating'",
+  "prog": "gates discipline merge-scope"
+ },
+ "discipline next-task": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print '<change>\\t<next unchecked task>' regardless of tree state (PreCompact snapshot)",
+  "prog": "gates discipline next-task"
+ },
+ "doctor": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "onboarding preflight: OpenSpec CLI/version, gatesVersion, plugin registration",
+  "prog": "gates doctor"
+ },
+ "epics": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one document: {\"epics\": [{epic, archived, drained, children: [{change, state, halt_cause, tasks}]}]}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "every epic (a change other changes name in x-gatedloop-epic) with each child's derived state",
+  "prog": "gates epics"
+ },
+ "gate-marker": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate_marker_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "O(1) marker read/check for PreToolUse hooks",
+  "prog": "gates gate-marker"
+ },
+ "gate-marker check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "tree",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "full"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "require_scope",
+    "help": "also refuse a marker whose recorded scope isn't this (scale-gate-cost D2: the completion/pre-merge requirement)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--require-scope"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "ref",
+    "help": "the incoming ref of a merge: when it is a local branch checked out in another worktree, that worktree's marker store is read too (cross-worktree-evidence D2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--ref"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 if the gate's marker matches <tree>, else 1",
+  "prog": "gates gate-marker check"
+ },
+ "gate-marker clear": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate",
+    "help": null,
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "clear a gate's marker (or all markers if omitted)",
+  "prog": "gates gate-marker clear"
+ },
+ "gates": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": "gatedloop gate/surface shim",
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "prog": "gates"
+ },
+ "halt": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "halt_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record why the loop stopped: a `halt` ledger row with a cause from the closed set",
+  "prog": "gates halt"
+ },
+ "halt record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "cause",
+    "help": "one of: missing-oracle, weak-spec, oracle-conflict, stalled, environment, budget, other (`other` requires --detail)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id the loop halted at (e.g. 2.3)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "detail",
+    "help": "free text; required for cause `other`",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--detail"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append a halt row; cause is one of: missing-oracle, weak-spec, oracle-conflict, stalled, environment, budget, other",
+  "prog": "gates halt record"
+ },
+ "handoff": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "the payload as one JSON document",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the planner-to-orchestrator handoff payload for <change>, only if its plan is approved on the merge target (reads only)",
+  "prog": "gates handoff"
+ },
+ "hook": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "hook_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "install the git-layer commit hook (composes with a manager, never clobbers)",
+  "prog": "gates hook"
+ },
+ "hook git-cwd": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "git-commit",
+     "git-merge",
+     "openspec-archive",
+     "implement-branch",
+     "openspec-scaffold"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "kind",
+    "help": "the invocation kind being guarded (omit for a non-command hook, e.g. a Write tool call)",
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the guarded command's effective directory, resolved from hook JSON on stdin (design D1)",
+  "prog": "gates hook git-cwd"
+ },
+ "hook install": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "commit_only",
+    "help": "install or refresh only the pre-commit hook, and record the `git-push-hook` adoption item as declined (a plain install then skips pre-push)",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--commit-only"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "push",
+    "help": "install both hooks even after a decline, and record the `git-push-hook` adoption item as adopted",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--push"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "install/compose the git pre-commit and pre-push hooks; refuses-and-instructs when unsafe",
+  "prog": "gates hook install"
+ },
+ "init": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "write a starter .gates.yaml from the template",
+  "prog": "gates init"
+ },
+ "integration": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the declared integration process (mode + requireApproval)",
+  "prog": "gates integration"
+ },
+ "intervention": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "intervention_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record a human turn in the loop: an `intervention` ledger row",
+  "prog": "gates intervention"
+ },
+ "intervention record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "kind",
+    "help": "one of: ask, human-commit",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id the human turn happened at (e.g. 2.3)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "detail",
+    "help": "free text, e.g. the question asked",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--detail"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append an intervention row; kind is one of: ask, human-commit",
+  "prog": "gates intervention record"
+ },
+ "ledger": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "ledger_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the durable per-change gate-outcome ledger",
+  "prog": "gates ledger"
+ },
+ "ledger record-merge": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "sha",
+    "help": "the squash commit's SHA (default: current HEAD)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--sha"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append the one change -> squash-SHA row at merge time",
+  "prog": "gates ledger record-merge"
+ },
+ "ledger record-ready": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append the `ready` row an implementer commits before reporting READY TO MERGE",
+  "prog": "gates ledger record-ready"
+ },
+ "lock": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "lock_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "inspect the machine-wide locks of serialized gates",
+  "prog": "gates lock"
+ },
+ "lock status": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "emit the same data as one JSON document",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "per serialized gate: free, or held by which pid, since when, alive or not (never kills a holder)",
+  "prog": "gates lock status"
+ },
+ "marker": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "marker_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "gate markers as forge commit statuses: publish, check-remote (needs `gh`)",
+  "prog": "gates marker"
+ },
+ "marker check-remote": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "sha",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 0 only if the latest `gatedloop/<gate>` status on <sha> is a success naming that sha's own normalized tree",
+  "prog": "gates marker check-remote"
+ },
+ "marker publish": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "sha",
+    "help": "the commit to publish on (default: HEAD)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--sha"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "post a `gatedloop/<gate>` success status carrying the tree, on a commit whose tree has a green local marker; `tests` is computed from the authored-test lock at the commit instead (failure names the path, exit 1)",
+  "prog": "gates marker publish"
+ },
+ "merge": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "integrate a change: local-squash-merge in six gated steps (one push at the end), or under pull-request mode prove the head, push, publish statuses and open/update the PR",
+  "prog": "gates merge"
+ },
+ "migrate-name": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "move this project onto the gatedloop names: state directory, change metadata, hook markers; prints the edits it does not make",
+  "prog": "gates migrate-name"
+ },
+ "record-merged": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "sha",
+    "help": "the squash commit the forge made",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "for a forge squash commit: resolve its PR's change, record the merge row, archive, one local commit (never pushes; needs `gh`)",
+  "prog": "gates record-merged"
+ },
+ "review": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "review_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record a convention review's invocation and verdict",
+  "prog": "gates review"
+ },
+ "review record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "clean",
+     "findings"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "verdict",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id the review covered (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "attempt",
+    "help": "attempt number (default: 1)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--attempt"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "authored"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "scope",
+    "help": "`authored`: the review over a change's whole authored test set, before implementation (default: a per-task review)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--scope"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append a review row (and, when clean, a review marker)",
+  "prog": "gates review record"
+ },
+ "rules": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "changed",
+    "help": "explicit changed-file list",
+    "metavar": null,
+    "nargs": "*",
+    "option_strings": [
+     "--changed"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "all",
+    "help": "treat every surface as hot",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--all"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print applicable rule-ids for the changed set",
+  "prog": "gates rules"
+ },
+ "run": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "gate_args",
+    "help": null,
+    "metavar": null,
+    "nargs": "*",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "changed",
+    "help": "explicit changed-file list",
+    "metavar": null,
+    "nargs": "*",
+    "option_strings": [
+     "--changed"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "all",
+    "help": "treat every surface as hot",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--all"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the ledger row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id for the ledger row (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "attempt",
+    "help": "attempt number for the ledger row (default: 1)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--attempt"
+    ],
+    "required": false,
+    "type": "int"
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "verbose",
+    "help": "stream the gate's output unfiltered instead of the default quiet-on-green summary",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--verbose"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "run a gate (or live-check)",
+  "prog": "gates run"
+ },
+ "schema": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "schema_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "inspect a workflow schema before trusting it (design D8)",
+  "prog": "gates schema"
+ },
+ "schema dispatch": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "name",
+    "help": "schema name, resolved via `openspec schema which`",
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "path",
+    "help": "a schema directory, bypassing OpenSpec resolution",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--path"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "machine-readable decision",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the tdd-apply route for a schema: refuse | per-task | regression-first (needs no PyYAML)",
+  "prog": "gates schema dispatch"
+ },
+ "schema inspect": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "name",
+    "help": "schema name, resolved via `openspec schema which`",
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "path",
+    "help": "inspect a schema directory directly, bypassing OpenSpec resolution (e.g. an uninstalled packs/<name>)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--path"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "machine-readable report",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "deterministic report: artifact DAG, apply-block presence, tool-name-shaped strings",
+  "prog": "gates schema inspect"
+ },
+ "stats": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change to report on (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "all",
+    "help": "report every ledger under .gatedloop/runs/",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--all"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "epic",
+    "help": "report an epic's children: state, tasks, gate runs, gate time, red runs, halts, and totals",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--epic"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "emit one machine-readable JSON document",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "outcomes",
+    "help": "report autonomy instead of cost: terminal state, hands-off verdict, halts by cause, interventions by kind",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--outcomes"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "cost",
+    "help": "price the recorded tokens with `economics.prices` (per million tokens, one currency); unpriced models are named, and without prices tokens are printed alone",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--cost"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": 30,
+    "dest": "idle_gap",
+    "help": "idle-gap threshold in minutes (default: 30)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--idle-gap"
+    ],
+    "required": false,
+    "type": "float"
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "report gate economics from the durable ledger",
+  "prog": "gates stats"
+ },
+ "surfaces": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "changed",
+    "help": "explicit changed-file list",
+    "metavar": null,
+    "nargs": "*",
+    "option_strings": [
+     "--changed"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "all",
+    "help": "treat every surface as hot",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--all"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print hot surfaces for the changed set",
+  "prog": "gates surfaces"
+ },
+ "taint": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "taint_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the ledger taint that blocks a merge until the head is re-verified",
+  "prog": "gates taint"
+ },
+ "taint check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "ref",
+    "help": "a merge's incoming ref: read the change it names, and that change's ledger as the ref carries it, instead of the current branch's",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--ref"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 if the change carries an unresolved taint, else 0",
+  "prog": "gates taint check"
+ },
+ "task": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the per-task tree baseline: what has changed since a task began",
+  "prog": "gates task"
+ },
+ "task changed": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name to read the baseline from (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id whose baseline to measure from (default: the latest recorded)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print every path that differs from the task-start tree",
+  "prog": "gates task changed"
+ },
+ "task start": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id the baseline belongs to (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "attempt",
+    "help": "attempt number (default: 1)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--attempt"
+    ],
+    "required": false,
+    "type": "int"
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record the tree at task start (a `task-start` ledger row)",
+  "prog": "gates task start"
+ },
+ "tests": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "tests_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the authored-test lock: handoff, place, check, defect, show, brief",
+  "prog": "gates tests"
+ },
+ "tests brief": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures",
+  "prog": "gates tests brief"
+ },
+ "tests check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "check this task only (default: every placed task and the one in flight)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch; with --ref, the branch the ref names)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "ref",
+    "help": "check this commit's tree and the ledger it carries, every task, instead of the staged index",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--ref"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "exit 1 unless the staged index (or, with --ref, a commit) keeps the authored tests locked (run by both commit hooks)",
+  "prog": "gates tests check"
+ },
+ "tests defect": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "setup",
+     "assertion",
+     "green"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "kind",
+    "help": "setup: the test cannot run as written; assertion: it asserts the wrong behaviour; green: it passed before any implementation",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--kind"
+    ],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "detail",
+    "help": "why the test is wrong",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--detail"
+    ],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record that a task's authored tests are wrong, or green before implementation (a `test-defect` row; per task at most three `setup`, two `assertion`, one `green`)",
+  "prog": "gates tests defect"
+ },
+ "tests handoff": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "re-record one task only; supersedes that task's earlier entry",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "inline",
+    "help": "the implementer authored these itself (loop.test-author: inline)",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--inline"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record the holding area's tests (a `tests-handoff` ledger row)",
+  "prog": "gates tests handoff"
+ },
+ "tests place": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id (e.g. 1.2)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "move one task's held tests onto their real paths (a `tests-placed` row)",
+  "prog": "gates tests place"
+ },
+ "tests show": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name (default: current branch)",
+    "metavar": null,
+    "nargs": "?",
+    "option_strings": [],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one machine-readable JSON document",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print the authoring state: author, each task's tests or reason, placement, defects",
+  "prog": "gates tests show"
+ },
+ "usage": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "usage_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "token usage per task: `usage` ledger rows read from the host session's transcript (counts only)",
+  "prog": "gates usage"
+ },
+ "usage record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "task",
+    "help": "task id (default: the task in flight; none: unattributed)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--task"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "transcript",
+    "help": "the session transcript (a hook input's `transcript_path`); omitted: a `no-transcript` row with null counts",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--transcript"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change name for the row (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "stage",
+    "help": "stage the ledger after appending, so the row lands in the commit being made (the commit hook's form)",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--stage"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "append a `usage` row for the task in flight, counting the transcript since the task's start or its last counted row; exit 0 whatever the source",
+  "prog": "gates usage record"
+ },
+ "usage show": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": "change to show (default: current branch)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--change"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one document: {\"change\", \"rows\", \"tasks\", \"total\"}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "print a change's usage rows and the tokens per task",
+  "prog": "gates usage show"
+ },
+ "validate": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "validate the manifest",
+  "prog": "gates validate"
+ }
+}
