@@ -252,16 +252,16 @@ class TestDoctorHookSubCheck(unittest.TestCase):
         return {title: level for level, title, _ in checks}
 
     def test_omitted_when_not_checked(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", None)
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", None)
         self.assertNotIn("git-commit-hook", self._titles(checks))
 
     def test_wired_is_ok(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", "wired")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", "wired")
         self.assertEqual(self._titles(checks)["git-commit-hook"], "ok")
 
     def test_unwired_states_warn(self):
         for state in ("absent", "manager-uncomposed", "unmanaged-hook"):
-            checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", state)
+            checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", state)
             self.assertEqual(
                 self._titles(checks)["git-commit-hook"], "warn",
                 f"state {state!r} should warn",
@@ -269,7 +269,7 @@ class TestDoctorHookSubCheck(unittest.TestCase):
 
     def test_hook_check_is_never_blocking(self):
         for state in (None, "wired", "absent", "manager-uncomposed", "unmanaged-hook"):
-            for level, _t, _d in gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", state):
+            for level, _t, _d in gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", state):
                 self.assertIn(level, ("ok", "warn"))
 
     def test_no_top_level_hook_status_verb(self):

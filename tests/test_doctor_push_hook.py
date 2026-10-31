@@ -87,7 +87,7 @@ class PushHookStateTest(unittest.TestCase):
 
 class PushHookRowTest(unittest.TestCase):
     def rows(self, state):
-        return [c for c in gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", None,
+        return [c for c in gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", None,
                                                push_hook_state=state)
                 if c[1] == "git-push-hook"]
 

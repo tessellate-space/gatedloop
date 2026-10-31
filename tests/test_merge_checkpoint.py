@@ -59,7 +59,7 @@ def _row(checks: list, title: str):
 
 class DoctorMergeCheckpointTest(unittest.TestCase):
     def _doctor(self, local_settings):
-        return gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p",
+        return gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p",
                                    local_settings=local_settings)
 
     def test_settings_asking_on_every_git_merge_warn_and_name_the_replacement(self):

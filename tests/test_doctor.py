@@ -36,9 +36,9 @@ class TestTestedVersionConstant(unittest.TestCase):
     """§4.1: the tested OpenSpec CLI version is a constant the shim can read."""
 
     def test_constant_is_a_version_string(self):
-        v = gates.TESTED_OPENSPEC_VERSION
+        v = gates.OPENSPEC_MAX_TESTED
         self.assertIsInstance(v, str)
-        self.assertTrue(v.strip(), "TESTED_OPENSPEC_VERSION must be non-empty")
+        self.assertTrue(v.strip(), "OPENSPEC_MAX_TESTED must be non-empty")
         self.assertRegex(v, r"^\d+\.\d+\.\d+", "should look like a semver version")
 
     def test_expected_gates_version_is_one(self):
@@ -76,14 +76,14 @@ class TestDoctorChecks(unittest.TestCase):
 
     def test_all_checks_are_advisory_never_blocking(self):
         # Design D4: doctor warns, never fails. No check is ever a blocking error.
-        for installed in (None, gates.TESTED_OPENSPEC_VERSION, "9.9.9"):
+        for installed in (None, gates.OPENSPEC_MAX_TESTED, "9.9.9"):
             for gv in (None, gates.EXPECTED_GATES_VERSION, 99):
                 for pr in (None, "/some/plugin/root"):
                     for level, _title, _detail in gates.doctor_checks(installed, gv, pr):
                         self.assertIn(level, ("ok", "warn"))
 
     def test_matching_openspec_version_is_ok(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p")
         self.assertEqual(_levels_by_title(checks)["openspec-version"], "ok")
 
     def test_mismatched_openspec_version_warns_naming_both(self):
@@ -93,7 +93,7 @@ class TestDoctorChecks(unittest.TestCase):
         details = _detail_by_title(checks)
         self.assertEqual(levels["openspec-version"], "warn")
         self.assertIn(installed, details["openspec-version"])
-        self.assertIn(gates.TESTED_OPENSPEC_VERSION, details["openspec-version"])
+        self.assertIn(gates.OPENSPEC_MAX_TESTED, details["openspec-version"])
 
     def test_missing_openspec_cli_warns(self):
         checks = gates.doctor_checks(None, 1, "/p")
@@ -101,11 +101,11 @@ class TestDoctorChecks(unittest.TestCase):
 
     def test_no_manifest_is_ok_not_a_warning(self):
         # Doctor runs as gates-init step 0, before any .gates.yaml exists.
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, None, "/p")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, None, "/p")
         self.assertEqual(_levels_by_title(checks)["gates-version"], "ok")
 
     def test_stale_gates_version_warns(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 99, "/p")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 99, "/p")
         self.assertEqual(_levels_by_title(checks)["gates-version"], "warn")
 
 
@@ -132,7 +132,7 @@ class TestShimLocationRow(unittest.TestCase):
         self._tmp.cleanup()
 
     def row(self, shim_path):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, str(shim_path))
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, str(shim_path))
         self.assertNotIn("plugin-registered", _levels_by_title(checks))
         return _levels_by_title(checks)["shim-location"], _detail_by_title(checks)["shim-location"]
 
@@ -183,7 +183,7 @@ class TestShimLocationRow(unittest.TestCase):
         self.assertIn("Bash tool", detail)
 
     def test_omitted_when_not_given(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, None)
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, None)
         self.assertNotIn("shim-location", _levels_by_title(checks))
         self.assertNotIn("plugin-registered", _levels_by_title(checks))
 
@@ -218,11 +218,11 @@ class TestDoctorPyYAMLRow(unittest.TestCase):
     that a PEP 668 Python refuses."""
 
     def test_importable_is_ok(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", yaml_importable=True)
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", yaml_importable=True)
         self.assertEqual(_levels_by_title(checks)["pyyaml"], "ok")
 
     def test_absent_warns_naming_what_needs_it_and_a_pep668_hint(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", yaml_importable=False)
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", yaml_importable=False)
         self.assertEqual(_levels_by_title(checks)["pyyaml"], "warn")
         detail = _detail_by_title(checks)["pyyaml"]
         self.assertIn("gates schema inspect", detail)
@@ -243,8 +243,8 @@ class TestDoctorCommandExitCode(unittest.TestCase):
     warn and still exit 0 — it never blocks onboarding or fails validation."""
 
     def test_mismatch_exits_zero_and_warns(self):
-        original = gates.TESTED_OPENSPEC_VERSION
-        gates.TESTED_OPENSPEC_VERSION = "0.0.1-test-sentinel"  # force a mismatch
+        original = gates.OPENSPEC_MAX_TESTED
+        gates.OPENSPEC_MAX_TESTED = "0.0.1-test-sentinel"  # force a mismatch
         try:
             buf = io.StringIO()
             # The installed CLI is faked: the real `openspec --version` is a
@@ -255,7 +255,7 @@ class TestDoctorCommandExitCode(unittest.TestCase):
                 rc = gates.cmd_doctor(argparse.Namespace())
             out = buf.getvalue()
         finally:
-            gates.TESTED_OPENSPEC_VERSION = original
+            gates.OPENSPEC_MAX_TESTED = original
         self.assertEqual(rc, 0, "doctor must not block/fail on a version mismatch")
         self.assertIn("0.0.1-test-sentinel", out)
 
@@ -274,7 +274,7 @@ class TestTestedVersionIsPinned(unittest.TestCase):
         workflow = (REPO / ".github" / "workflows" / "gatedloop.yml").read_text()
         pins = re.findall(r"@fission-ai/openspec@([0-9][0-9A-Za-z.+-]*)", workflow)
         self.assertTrue(pins, "the workflow must pin the OpenSpec CLI version")
-        self.assertEqual(set(pins), {gates.TESTED_OPENSPEC_VERSION}, pins)
+        self.assertEqual(set(pins), {gates.OPENSPEC_MAX_TESTED}, pins)
 
 
 if __name__ == "__main__":

@@ -71,7 +71,7 @@ class TestDoctorWarnsOnAStaleCopy(unittest.TestCase):
     stays advisory like every doctor row."""
 
     def test_stale_copy_warns_naming_hook_install(self):
-        rows = [c for c in gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p", "stale-copy")
+        rows = [c for c in gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p", "stale-copy")
                 if c[1] == "git-commit-hook"]
         self.assertEqual(len(rows), 1)
         level, _title, detail = rows[0]
