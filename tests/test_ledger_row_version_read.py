@@ -24,6 +24,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _approved_plan import write_approved_plan
 from _merge_fixture import GATES_SHIM, LEDGER_REL, MergeRepo, clean_env, combined, git
 
 _loader = importlib.machinery.SourceFileLoader("gates_shim_row_version_read", str(GATES_SHIM))
@@ -54,6 +55,8 @@ def _repo(tmp: Path) -> Path:
     tasks = root / "openspec" / "changes" / CHANGE / "tasks.md"
     tasks.parent.mkdir(parents=True)
     tasks.write_text("## 1. Do it\n\n- [ ] 1.1 Do the thing\n")
+    # acceptance refuses a change without an approved plan (loop-hardening D2)
+    write_approved_plan(root, CHANGE)
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "checkout", "-q", "-b", CHANGE)

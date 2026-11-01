@@ -357,11 +357,49 @@ def _parse_yaml_text(text: str) -> dict:
         return _mini_yaml(text)
 
 
+_CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
+
+
+class ManifestParseError(ValueError):
+    """loop-hardening D6: a YAML file that could not be parsed, as one line
+    naming the file, the position and the reason. A `ValueError`, so a caller
+    that already treats a parse failure as "cannot decide" still does."""
+
+
+def _yaml_parse_error(path: Path, text: str, exc: Exception | None) -> ManifestParseError:
+    """D6's one line. Conflict markers are found by scanning, never left to
+    the parser: PyYAML stops on them with a scanner error, but `_mini_yaml`
+    reads a marker line as a key, so the two paths would otherwise disagree.
+    Positions are 1-based."""
+    line = col = None
+    reason = ""
+    for n, raw in enumerate(text.splitlines(), 1):
+        marker = next((mk for mk in _CONFLICT_MARKERS if raw.startswith(mk)), None)
+        if marker is not None:
+            line, col = n, 1
+            reason = (f"a line starts with `{marker}` — it holds merge-conflict markers — "
+                      "resolve the conflict first")
+            break
+    if not reason and exc is not None:
+        mark = getattr(exc, "problem_mark", None)
+        if mark is not None:
+            line, col = mark.line + 1, mark.column + 1
+        detail = str(getattr(exc, "problem", None) or exc).strip()
+        reason = detail.splitlines()[0] if detail else type(exc).__name__
+    where = f" at line {line}, column {col}" if line is not None else ""
+    return ManifestParseError(f"gatedloop: {path.name} could not be parsed{where}: {reason}")
+
+
 def _load(path: Path) -> dict:
     text = path.read_text()
     if path.suffix == ".json":
         return json.loads(text)
-    return _parse_yaml_text(text)
+    if any(raw.startswith(_CONFLICT_MARKERS) for raw in text.splitlines()):
+        raise _yaml_parse_error(path, text, None)
+    try:
+        return _parse_yaml_text(text)
+    except Exception as e:  # noqa: BLE001 -- every parser failure is reported the same way
+        raise _yaml_parse_error(path, text, e) from None
 
 
 def _strip_comment(line: str) -> str:
@@ -573,7 +611,10 @@ def load_manifest() -> tuple[dict, Path]:
     path, _ignored = _find_manifest(root)
     if path is None:
         sys.exit(f"gatedloop: no manifest found ({' / '.join(MANIFEST_NAMES)}) at repo root {root}")
-    data = _load(path)
+    try:
+        data = _load(path)
+    except ManifestParseError as e:
+        sys.exit(str(e))
     if not isinstance(data, dict):
         sys.exit(f"gatedloop: {path.name} did not parse to a mapping")
     data["__root__"] = str(root)
@@ -4397,25 +4438,68 @@ def _git_dash_c_and_env_dir(gm, tokens: list[str]) -> str | None:
 
 _UNEVALUABLE_MARKERS = ("$", "`")
 
+# loop-hardening D8: a `cd` the resolver cannot evaluate no longer falls
+# through to the hook's cwd -- that judged the session's checkout, which could
+# allow or deny on evidence about another repository. `hook git-cwd` exits
+# with this code instead, and every hook that guards a kind denies on it.
+GIT_CWD_UNRESOLVED_EXIT = 3
+
+
+class _UnresolvedCd(Exception):
+    """A `cd` before the guarded invocation whose target is not static."""
+
+    def __init__(self, target: str):
+        super().__init__(target)
+        self.target = target
+
+
+def _expand_cd_target(target: str) -> str | None:
+    """`target` with `~`, `~/…`, `$HOME/…` and `${HOME}/…` expanded from this
+    process's `HOME`; `None` for anything else not static (`~user`, `-`,
+    another variable, a command substitution)."""
+    home = os.environ.get("HOME") or ""
+    for prefix in ("${HOME}", "$HOME", "~"):
+        if target == prefix or target.startswith(prefix + "/"):
+            return home + target[len(prefix):] if home else None
+    if target.startswith("~") or target == "-" or any(mk in target for mk in _UNEVALUABLE_MARKERS):
+        return None
+    return target
+
 
 def _resolve_cd_chain(gm, commands: list[list[str]], end: int, base: str) -> str | None:
     """Rung 3: chain every `cd <dir>` before index `end`, starting from
-    `base` (the hook cwd). A target this can't statically evaluate (a shell
-    variable or command substitution) abandons the WHOLE chain -- D1's own
-    non-goal is explicit that fall-through, not a partial answer, is the
-    safe behavior here."""
-    current = base
+    `base` (the hook cwd). A bare `cd` goes home, as the shell's does. A
+    leading `(` opens a subshell and a trailing `)` closes it, restoring the
+    directory, so a `cd` inside one governs only that subshell's commands
+    (D8). Raises `_UnresolvedCd` when the directory in force at `end` came
+    from a `cd` this can't statically evaluate -- never a partial answer."""
+    current: str | _UnresolvedCd = base
     saw_cd = False
+    stack: list[tuple[str | _UnresolvedCd, bool]] = []
     for c in commands[:end]:
-        if not c or c[0] != "cd":
-            continue
-        if len(c) < 2:
-            continue
-        target = c[1]
-        if any(marker in target for marker in _UNEVALUABLE_MARKERS):
-            return None
-        current = target if target.startswith("/") or not current else str(Path(current) / target)
-        saw_cd = True
+        toks = list(c)
+        while toks and toks[0] == "(":
+            toks.pop(0)
+            stack.append((current, saw_cd))
+        closes = 0
+        while toks and toks[-1] == ")":
+            toks.pop()
+            closes += 1
+        if toks and toks[0] == "cd":
+            target = toks[1] if len(toks) > 1 else "~"
+            expanded = _expand_cd_target(target)
+            if expanded is None:
+                current = _UnresolvedCd(target)
+            elif expanded.startswith("/") or not current:
+                current = expanded
+            elif isinstance(current, str):
+                current = str(Path(current) / expanded)
+            saw_cd = True
+        for _ in range(closes):
+            if stack:
+                current, saw_cd = stack.pop()
+    if isinstance(current, _UnresolvedCd):
+        raise current
     return current if saw_cd else None
 
 
@@ -4447,7 +4531,16 @@ def _hook_git_cwd(kind: str | None) -> int:
 
     resolved = None
     if command and kind:
-        resolved = _resolve_command_cwd(command, kind, hook_cwd)
+        try:
+            resolved = _resolve_command_cwd(command, kind, hook_cwd)
+        except _UnresolvedCd as e:
+            print(
+                f"gatedloop: could not resolve the directory of `cd {e.target}` — use an "
+                "absolute path or `git -C <dir>`, so the hook judges the repository the "
+                "command runs in.",
+                file=sys.stderr,
+            )
+            return GIT_CWD_UNRESOLVED_EXIT
     if resolved:
         print(resolved)
         return 0
@@ -5029,8 +5122,52 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
             f"gatedloop: recorded '{change}' as ready in {_ledger_path(root, change)} — "
             "commit that row on its own (ledger grade) before reporting READY TO MERGE"
         )
+        # loop-hardening D11: the report's gate fields, read from the ledger
+        # and the markers, so the implementer copies them instead of
+        # choosing a value the schema happens to allow.
+        print(f"gatedloop: gates {json.dumps(_ready_gates(m, root, change, head))}")
         return 0
     sys.exit(f"gatedloop: unknown ledger subcommand '{args.ledger_cmd}'")
+
+
+def _ready_gates(m: dict, root: Path, change: str, head: str | None) -> dict:
+    """D11's block for the READY report: `ci` is `pass` when a green unscoped
+    `ci` row names the head's normalized tree; `review` folds the latest
+    per-task review row of every completed task (`none` with no review row
+    at all, `findings` when any latest one is, `partial` when a completed
+    task has none, else `clean`); `live_check` is the head tree's marker --
+    `na` for a skip verdict, or when nothing declares one."""
+    rows = _read_ledger_rows(root, change)
+    norm = _normalize_tree(root, head) if head else None
+    ci = "pass" if norm and any(
+        r.get("gate") == "ci" and r.get("exit") == 0 and (r.get("scope") or "full") == "full"
+        and r.get("tree") and _normalize_tree(root, r["tree"]) == norm
+        for r in rows
+    ) else "fail"
+
+    latest: dict[str, str] = {}
+    for r in rows:
+        if r.get("gate") == "review" and r.get("task") and r.get("scope") != "authored":
+            latest[r["task"]] = "clean" if r.get("exit") == 0 else "findings"
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    done = _checked_task_ids(tasks_md.read_text() if tasks_md.is_file() else None)
+    if not latest:
+        review = "none"
+    elif any(latest.get(t) == "findings" for t in done):
+        review = "findings"
+    elif any(t not in latest for t in done):
+        review = "partial"
+    else:
+        review = "clean"
+
+    marker = _read_marker(root, "live-check", norm) if norm else None
+    declared = bool((m.get("gates") or {}).get("live-check")) or any(
+        isinstance(sf, dict) and sf.get("live-check") for sf in (m.get("surfaces") or []))
+    if marker is not None:
+        live = "na" if (marker.get("verdict") or "pass") == "skip" else "pass"
+    else:
+        live = "fail" if declared else "na"
+    return {"ci": ci, "review": review, "live_check": live}
 
 
 # ---------- post-hoc reflog audit + ledger taint (enforce-at-the-effect D6/D7) --
@@ -5389,11 +5526,41 @@ def _maybe_resolve_taint(root: Path, change: str, tree: str) -> None:
     )
 
 
-def _taint_refusal(change: str) -> str:
+def _unresolved_taint_shas(rows: list[dict]) -> list[str]:
+    """The commits of the taint rows after the last `taint-clear`, in ledger
+    order and without repeats -- the incidents `_taint_unresolved` reports."""
+    shas: list[str] = []
+    for r in rows:
+        g = r.get("gate")
+        if g == "taint-clear":
+            shas = []
+        elif g == "taint" and r.get("sha") and r["sha"] not in shas:
+            shas.append(r["sha"])
+    return shas
+
+
+def _taint_refusal(change: str, rows: list[dict] | None = None, root: Path | None = None) -> str:
+    """loop-hardening D5: the refusal names each tainted commit -- short sha
+    and subject -- and marks a merge commit, the usual way one slips the
+    hooks (git runs no pre-commit hook for it). The remedy is unchanged."""
+    lines = []
+    for sha in _unresolved_taint_shas(rows or []):
+        subject, merge = "", False
+        if root is not None:
+            shown = _git(root, "log", "-1", "--format=%P%x1f%s", sha)
+            if shown.returncode == 0 and "\x1f" in shown.stdout:
+                parents, subject = shown.stdout.rstrip("\n").split("\x1f", 1)
+                merge = len(parents.split()) > 1
+        line = f"\n  - {sha[:12]}" + (f" {subject}" if subject else "")
+        if merge:
+            line += (" (merge commit — see the sync route: `git merge --no-commit <ref>`, "
+                     "then `gates run ci`, then `git commit`)")
+        lines.append(line)
     return (
         f"gatedloop: change '{change}' carries an unresolved taint — the reflog audit "
         "found a commit with no green-ci record (it slipped the commit hooks, issue "
-        "#2). Run `gates run ci` green on the branch head to re-verify and clear it "
+        "#2)" + (":" + "".join(lines) + "\n" if lines else ". ")
+        + "Run `gates run ci` green on the branch head to re-verify and clear it "
         "before merging."
     )
 
@@ -5493,15 +5660,17 @@ def cmd_taint(m: dict, root: Path, args) -> int:
     if ref:
         change = _resolve_change_name(root, given) if given else _change_for_ref(root, ref)
         if change is not None:
-            if _taint_unresolved(_change_ledger_rows(root, change, ref)):
-                print(_taint_refusal(change), file=sys.stderr)
+            rows = _change_ledger_rows(root, change, ref)
+            if _taint_unresolved(rows):
+                print(_taint_refusal(change, rows, root), file=sys.stderr)
                 return 1
             return 0
     change = _resolve_change_name(root, given)
     if change is None:
         return 0
-    if _taint_unresolved(_read_ledger_rows(root, change)):
-        print(_taint_refusal(change), file=sys.stderr)
+    rows = _read_ledger_rows(root, change)
+    if _taint_unresolved(rows):
+        print(_taint_refusal(change, rows, root), file=sys.stderr)
         return 1
     return 0
 
@@ -6114,7 +6283,27 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
             + "\n  - ".join(contradictions) + "\n"
         )
 
-    known_base = (_authoring_state(_read_ledger_rows(root, change)) or {}).get("base", {})
+    rows = _read_ledger_rows(root, change)
+    if only is None:
+        # loop-hardening D10: a full handoff states the whole set, so one
+        # missing a placed task would drop that task's tests and its
+        # declarations silently. Re-authoring part of the set is `--task`.
+        try:
+            placed = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
+        except _LedgerRewritten:
+            placed = _active_placements(rows)
+        dropped = sorted((t for t in placed if t not in held_tests and t not in reasons),
+                         key=_task_sort_key)
+        if dropped:
+            return _tests_refuse(
+                f"refusing the full handoff for '{change}' — it holds nothing for "
+                f"task(s) {', '.join(dropped)}, already placed, so it would drop their "
+                "tests and declarations. Hand off only the tasks being re-authored: "
+                + ", ".join(f"`gates tests handoff {change} --task {t}`"
+                            for t in sorted(set(held_tests) | set(reasons), key=_task_sort_key))
+                + "."
+            )
+    known_base = (_authoring_state(rows) or {}).get("base", {})
     tests: dict[str, dict[str, str]] = {}
     base: dict[str, str | None] = {}
     for task, files in held_tests.items():
@@ -6171,6 +6360,21 @@ def _placed_blobs_by_path(rows: list[dict]) -> dict[str, set]:
     return out
 
 
+def _merge_base_with_target(root: Path) -> str | None:
+    """`git merge-base HEAD <target>`, or `None` when no target resolves."""
+    target, _reason = _resolve_merge_target(root)
+    if target is None:
+        return None
+    out = _git(root, "merge-base", "HEAD", target)
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
+def _blob_at_commit(root: Path, commit: str, path: str) -> str | None:
+    """The blob id of `path` at `commit`, or `None` where it has none."""
+    out = _git(root, "rev-parse", "--verify", "--quiet", f"{commit}:{path}")
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
 def _tests_place(m: dict, root: Path, args) -> int:
     change = _tests_change_or_refuse(root, args, "place tests for")
     if change is None:
@@ -6209,6 +6413,11 @@ def _tests_place(m: dict, root: Path, args) -> int:
 
     wanted = state["tests"][task]
     placed_before = _placed_blobs_by_path(rows)
+    # loop-hardening D9: the content the branch last received from the
+    # target is not the author's to answer for -- a pre-existing test main
+    # changed after the handoff is placed over, not called a test defect.
+    # No resolvable target leaves the set as it was: placement fails closed.
+    synced = _merge_base_with_target(root)
     problems: list[str] = []
     contents: dict[str, bytes] = {}
     for path, blob in wanted.items():
@@ -6227,6 +6436,8 @@ def _tests_place(m: dict, root: Path, args) -> int:
             continue
         current = _file_blob(root, path)
         allowed = {state["base"].get(path), blob} | placed_before.get(path, set())
+        if synced is not None:
+            allowed.add(_blob_at_commit(root, synced, path))
         if current not in allowed:
             problems.append(
                 f"{path} changed since authoring (it matches neither its content "
@@ -8784,6 +8995,32 @@ def _approval_check_at(root: Path, change: str, m: dict | None = None) -> tuple[
     return True, ref, f"change '{change}' is merged to '{ref}' and approved by {approved_by}{advisory}"
 
 
+def _plan_approval_refusal(m: dict, root: Path, change: str, head: str, what: str) -> str | None:
+    """loop-hardening D1/D2: `None` when `change`'s plan is the approved one,
+    else the refusal. Two checks: the approval recorded on the merge target
+    still matches the plan there (`_approval_check_at`, #101), and the plan
+    at `head` -- the tree about to be merged or accepted -- hashes to that
+    recorded `approved_sha`, so a branch that edited its own plan after
+    approval is caught too. An untagged `tasks.md` is outside the sha, so a
+    tick never needs re-approval. `what` finishes "before ..."."""
+    ok, ref, reason = _approval_check_at(root, change, m)
+    if not ok:
+        return f"gatedloop: {reason}"
+    _by, _at, approved_sha = _approval_meta(_openspec_yaml_at_ref(root, change, ref) or {})
+    at_head = _approval_sha_ref(root, change, head)
+    if at_head != approved_sha:
+        shown = head if len(head) < 40 else head[:12]
+        return (
+            f"gatedloop: change '{change}''s plan at {shown} differs from the plan approved "
+            f"on '{ref}' (approved_sha {str(approved_sha)[:12]}, {shown} hashes to "
+            f"{str(at_head)[:12]}) — its proposal, design, specs or oracle tags changed "
+            f"after approval. Get the plan re-approved (`gates approval attest {change} "
+            "--local` under a self policy, or a fresh PR review), or bring the branch level "
+            f"with '{ref}', before {what}"
+        )
+    return None
+
+
 def cmd_approval(m: dict, root: Path, args) -> int:
     if args.approval_cmd == "policy":
         print(f"plan={_approval_policy(m)}")
@@ -9366,6 +9603,17 @@ def _accepted_already(root: Path, change: str, tree: str) -> dict | None:
     return latest if latest is not None and latest.get("verdict") == "accept" else None
 
 
+def _acceptance_plan_refusal(m: dict, root: Path, change: str) -> str | None:
+    """loop-hardening D2 for `--local` and `--pr`: the head they pin is the
+    change branch's (`_acceptance_branch_head`), so that is where the plan
+    must still be the approved one."""
+    _raw, head = _acceptance_branch_head(root, change)
+    if head is None:
+        return None  # `_append_acceptance_row` refuses a headless change itself
+    stale = _plan_approval_refusal(m, root, change, head, "accepting it")
+    return f"{stale}. Nothing was written." if stale else None
+
+
 def _acceptance_attest_merged(m: dict, root: Path, change: str, pr: int) -> int:
     """`gates acceptance attest <change> --merged <pr>` (merged-acceptance
     D1): under `self`, the owner's merge of the implementation PR is the
@@ -9375,6 +9623,10 @@ def _acceptance_attest_merged(m: dict, root: Path, change: str, pr: int) -> int:
         print(reason, file=sys.stderr)
         return 1
     accepted_by, ts, tree, commit = accepted
+    stale = _plan_approval_refusal(m, root, change, commit, "accepting it")
+    if stale:
+        print(f"{stale}. Nothing was written.", file=sys.stderr)
+        return 1
     existing = _accepted_already(root, change, tree)
     if existing is not None:
         print(
@@ -9426,6 +9678,10 @@ def _acceptance_attest(m: dict, root: Path, args) -> int:
                 file=sys.stderr,
             )
             return 1
+        stale = _acceptance_plan_refusal(m, root, change)
+        if stale:
+            print(stale, file=sys.stderr)
+            return 1
         return _append_acceptance_row(root, change, "accept", who, _now_iso())
 
     review, reason = _first_approving_review(
@@ -9433,6 +9689,10 @@ def _acceptance_attest(m: dict, root: Path, args) -> int:
     )
     if review is None:
         print(reason, file=sys.stderr)
+        return 1
+    stale = _acceptance_plan_refusal(m, root, change)
+    if stale:
+        print(stale, file=sys.stderr)
         return 1
     return _append_acceptance_row(
         root, change, "accept", review["login"], review["submittedAt"] or _now_iso(),
@@ -10660,7 +10920,7 @@ def _push_tree_problems(m: dict, root: Path, sha: str, changes: list[str]) -> li
                 f"(ledger-normalized) tree {norm!r}.\n  -> run `gates run verify` on it.")
     for change in changes:
         if _taint_unresolved(change_rows[change]):
-            problems.append(_taint_refusal(change))
+            problems.append(_taint_refusal(change, change_rows[change], root))
         try:
             lock = _lock_at_commit(root, change, sha)
         except _ForgeRefusal as refusal:
@@ -12358,6 +12618,11 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
     tree = _commit_tree(root, f"refs/heads/{change}")
     if tree is None:
         raise _MergeHalt(1, f"could not resolve the tree of '{change}'.")
+    # loop-hardening D1: the plan approval first, in both modes -- no evidence
+    # about a tree is worth reading for a plan nobody approved.
+    stale = _plan_approval_refusal(m, root, change, f"refs/heads/{change}", "merging")
+    if stale:
+        raise _MergeHalt(1, "the plan is not the approved one:\n" + stale)
     rows = _change_ledger_rows(root, change, f"refs/heads/{change}")
     problems: list[str] = []
 
@@ -12397,7 +12662,7 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
         print("gatedloop: step 1 — `verify` is not declared; nothing to require of it")
 
     if _taint_unresolved(rows):
-        problems.append(_taint_refusal(change))
+        problems.append(_taint_refusal(change, rows, root))
     elif lane is None:
         unrecorded = _unrecorded_commits(root, change, rows)
         if unrecorded:
@@ -13162,7 +13427,15 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
     # written before the merge row and committed with it. Never a merge
     # recorded without its acceptance: a refusal discards the whole attempt.
     accepted = ""
+    # loop-hardening D2: the forge merge happened, so its merge row is still
+    # recorded; an unapproved plan only withholds the acceptance, and the job
+    # exits non-zero naming the re-approval.
+    stale = None
     if _acceptance_policy(m) == "self":
+        stale = _plan_approval_refusal(m, root, change, sha, "its merge counts as the acceptance")
+    if stale:
+        accepted = " No acceptance was recorded: the plan is not the approved one."
+    elif _acceptance_policy(m) == "self":
         rc, out, err = _captured(_acceptance_attest_merged, m, root, change, number)
         if rc != 0:
             _discard_record_attempt(root, before)
@@ -13217,6 +13490,9 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
         f"archived it in {new[:12]} ({len(files)} file(s)). Nothing was pushed — landing "
         f"this commit is the caller's.{accepted}"
     )
+    if stale:
+        print(stale, file=sys.stderr)
+        return 1
     return 0
 
 

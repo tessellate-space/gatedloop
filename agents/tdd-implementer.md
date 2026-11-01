@@ -64,6 +64,7 @@ acceptance the loop records is self-reported, which is the one thing it must not
 - Record every review's verdict with `gates review record <clean|findings> --task <N.M>` as soon as it returns, and commit that row with the task. Unattended, your word is not evidence: a "convention-clean" claim with no recorded review against the committed tree is a claim nobody can check.
 - A denied gate call means the gate is unsatisfied — satisfy it and retry the *same* call; never rephrase the invocation to slip past a denial (a subprocess, a script), which is a loop violation, not a solution, and the git-layer hook and post-hoc audit catch it regardless (issue #2).
 - Run every gate in the foreground, with the longest timeout the host's shell tool allows, and read its exit code in the same turn; never background a gate, and never end a turn waiting on one.
+- Sync the merge target into your branch with `git merge --no-commit <target>`, then `gates run ci`, then `git commit` — never a merge that commits by itself: git runs no commit hook for a merge commit, so the merge hook denies it, and the audit taints the change at the merge.
 - Never `git checkout -f`, `--ignore-other-worktrees`, or `git switch --discard-changes` onto a branch another worktree holds — a commit there moves the ref under that checkout. If a checkout is refused, HALT with cause `environment`.
 - Delete lines in a test file with Edit, or remove the whole file with `git rm` — never with a line-range stream edit, which the host's auto-mode classifier reads as removing tests.
 
@@ -127,7 +128,11 @@ json`) or another agent reads back; do not nest gate results under it as prose, 
 not omit a field even when it doesn't apply (use `null`):
 ```
 <one-line summary>
-{"change": "<name>", "tasks_done": <int>, "tasks_total": <int>, "branch": "<change-name>", "gates": {"ci": "pass|fail", "review": "clean|findings", "live_check": "pass|fail|na"}, "outcome": "READY TO MERGE" | "HALTED AT task <N.M>: <reason + what's needed>", "cause": null | "<the cause recorded by gates halt record>", "acceptance": "required" | "not-required"}
+{"change": "<name>", "tasks_done": <int>, "tasks_total": <int>, "branch": "<change-name>", "gates": {"ci": "pass|fail", "review": "clean|findings|partial|none", "live_check": "pass|fail|na"}, "outcome": "READY TO MERGE" | "HALTED AT task <N.M>: <reason + what's needed>", "cause": null | "<the cause recorded by gates halt record>", "acceptance": "required" | "not-required"}
 ```
-`cause` is `null` on `READY TO MERGE`. `acceptance` is read from `gates acceptance
-policy` (§4), never decided by you. Be terse. Do not merge. Do not editorialize.
+`cause` is `null` on `READY TO MERGE`. `gates` is copied unchanged from the
+`gatedloop: gates {...}` line `gates ledger record-ready` prints, never filled in by you:
+`review` is `none` when no review was recorded and `partial` when a completed task has
+none. On a halt, where no `ready` row is recorded, report what the ledger shows the same
+way. `acceptance` is read from `gates acceptance policy` (§4), never decided by you. Be
+terse. Do not merge. Do not editorialize.

@@ -28,6 +28,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _approved_plan import write_approved_plan
+
 REPO = Path(__file__).resolve().parent.parent
 GATES_SHIM = REPO / "bin" / "gates"
 
@@ -102,6 +104,9 @@ def _make_branch_repo(root: Path, manifest: str, change: str = "my-change") -> N
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "T")
     (root / ".gates.yaml").write_text(manifest)
+    # An acceptance is refused for a plan that is not the approved one
+    # (loop-hardening D2), so the plan lands on main with its approval.
+    write_approved_plan(root, change)
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "init")
     _git(root, "checkout", "-b", change)

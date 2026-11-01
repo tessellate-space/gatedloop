@@ -13,8 +13,10 @@ in the precedence order design D1 states:
   4. the hook input's own `cwd`
   5. `CLAUDE_PROJECT_DIR`, then the process's own pwd
 
-It reuses `hooks/_gate_match.py`'s tokenizer (one parser, two consumers) and
-fails through — never open — on anything it cannot statically evaluate.
+It reuses `hooks/_gate_match.py`'s tokenizer (one parser, two consumers).
+A `cd` it cannot statically evaluate exits 3 rather than falling through to
+the hook cwd (loop-hardening D8), so the hook denies instead of judging the
+wrong repository.
 
 Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
 """
@@ -133,14 +135,19 @@ class TestCdChain(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(Path(r.stdout.strip()).resolve(), b.resolve())
 
-    def test_unevaluable_cd_target_falls_through_to_hook_cwd(self):
+    def test_unevaluable_cd_target_exits_3_naming_it(self):
+        """loop-hardening D8: falling through to the hook cwd judged the
+        session's checkout instead of the one the command runs in. An
+        unresolvable `cd` now exits 3 with the reason, printing no directory."""
         with tempfile.TemporaryDirectory() as session:
             r = _git_cwd(
                 "git-commit",
                 {"tool_input": {"command": "cd $SOME_VAR && git commit -m x"}, "cwd": session},
             )
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(Path(r.stdout.strip()).resolve(), Path(session).resolve())
+            self.assertEqual(r.returncode, 3, r.stdout)
+            self.assertEqual(r.stdout.strip(), "")
+            self.assertIn("cd $SOME_VAR", r.stderr)
+            self.assertIn("git -C <dir>", r.stderr)
 
     def test_cd_after_the_guarded_token_is_not_considered(self):
         """Only a `cd` BEFORE the guarded token matters -- one issued after
