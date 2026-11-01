@@ -12,6 +12,16 @@
 #                     That branch names no change, so when the follow-up PR
 #                     merges, this job runs again and skips it.
 #
+# The ci job runs on the environment docs/stability.md declares
+# (stability-contract D6): each supported OS, the minimum and the latest
+# Python, and the OpenSpec minimum and highest tested version (one value
+# while OPENSPEC_MIN == OPENSPEC_MAX_TESTED in bin/gates; widening the range
+# adds the other end here). Every leg runs `gates run ci`, and a red leg
+# fails the run, but only the primary leg (ubuntu, latest Python, highest
+# tested OpenSpec) publishes the `gatedloop/*` statuses, so branch
+# protection keeps reading one context per gate. The weekly run against
+# OpenSpec's latest release is openspec-latest.yml.
+#
 # Differences from the example: the shim is this checkout's own ./bin/gates
 # (no clone), and `ci` here also needs the Claude Code CLI (`claude plugin
 # validate .`) and the OpenSpec CLI (the tests that use it, and the archive).
@@ -41,19 +51,34 @@ env:
 jobs:
   ci:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    name: ci (${{ matrix.os }}, python ${{ matrix.python }}, openspec ${{ matrix.openspec }})
+    strategy:
+      fail-fast: false   # every leg reports, so one red leg doesn't hide another
+      matrix:
+        os: [ubuntu-24.04, macos-latest]   # pinned: ubuntu-latest (26.04) has no Python 3.9 build
+        python: ['3.9', '3.13']
+        openspec: ['1.14.3']   # OPENSPEC_MIN .. OPENSPEC_MAX_TESTED in bin/gates
+    runs-on: ${{ matrix.os }}
+    env:
+      PRIMARY: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.13' && matrix.openspec == '1.14.3' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}   # the head, not the merge preview
           fetch-depth: 0                                   # scripts/release check reads v* tags
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install -g @fission-ai/openspec@1.14.3 @anthropic-ai/claude-code
+      - run: npm install -g @fission-ai/openspec@${{ matrix.openspec }} @anthropic-ai/claude-code
+      - run: python3 --version && openspec --version
       - run: ./bin/gates run ci
-      - run: ./bin/gates marker publish ci
-      - run: ./bin/gates marker publish tests
+      - if: env.PRIMARY == 'true'
+        run: ./bin/gates marker publish ci
+      - if: env.PRIMARY == 'true'
+        run: ./bin/gates marker publish tests
 
   record:
     if: github.event_name == 'push'

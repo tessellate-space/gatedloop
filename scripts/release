@@ -60,6 +60,9 @@ ADDED = re.compile(r"^## ADDED Requirements\s*$", re.MULTILINE)
 MAIN = "main"
 REMOTE = "origin"
 CHANGELOG = "CHANGELOG.md"
+CONTRACT = "tests/contract.json"  # stability-contract D3: the public surface's snapshot
+BREAKING_HEADING = "### Breaking"
+MIGRATION_TODO = "TODO"
 ADOPTION_CATALOG = "adoption/catalog.json"
 CHANGELOG_HEADER = "# Changelog\n"
 DATE_ENV = "GATEDLOOP_RELEASE_DATE"  # overrides today's date in a cut section (tests)
@@ -202,6 +205,67 @@ def qualifies_for_minor(root, tag, archive_dir):
     return False
 
 
+def contract_entries(snapshot):
+    """Every public entry of a contract snapshot, as the line a breaking note
+    names it by. `internal` subcommands, and the flags of a subcommand that is
+    itself gone, are left out (stability-contract D5)."""
+    entries = {}
+    subs = snapshot.get("subcommands") or {}
+    for path, sub in subs.items():
+        if sub.get("visibility") != "public":
+            continue
+        entries[("subcommand", path)] = f"subcommand `gates {path}` removed"
+        for opt in sub.get("options") or []:
+            entries[("flag", path, opt)] = f"flag `gates {path} {opt}` removed"
+        for name in sub.get("positionals") or []:
+            entries[("positional", path, name)] = f"positional `{name}` of `gates {path}` removed"
+    for code in snapshot.get("exit_codes") or {}:
+        entries[("exit", code)] = f"exit code {code} removed"
+    for code in snapshot.get("merge_exit_codes") or {}:
+        entries[("merge exit", code)] = f"`gates merge` exit code {code} removed"
+    for context in snapshot.get("status_contexts") or []:
+        entries[("status", context)] = f"status context `{context}` removed"
+    for key in snapshot.get("manifest_keys") or []:
+        entries[("manifest", key)] = f"manifest key `{key}` removed"
+    for name, keys in (snapshot.get("documents") or {}).items():
+        for key in keys:
+            entries[("document", name, key)] = f"key `{key}` of `gates {name} --json` removed"
+    for field in snapshot.get("ledger_fields") or []:
+        entries[("ledger", field)] = f"ledger field `{field}` removed"
+    return entries
+
+
+def _snapshot_at(root, ref):
+    shown = git(root, "show", f"{ref}:{CONTRACT}", check=False)
+    if shown.returncode != 0:
+        return None
+    try:
+        return json.loads(shown.stdout)
+    except json.JSONDecodeError as exc:
+        raise ReleaseError(f"{CONTRACT} at {ref} is not valid JSON: {exc}")
+
+
+def contract_breaking(root, tag):
+    """(breaking entries, note): the public entries of the snapshot at `tag`
+    that `HEAD`'s no longer has, plus a raised ledger row version. Additions
+    are never breaking. A side with no snapshot skips the comparison, said in
+    the note, rather than reporting everything as removed."""
+    old = _snapshot_at(root, tag)
+    if old is None:
+        return [], "contract comparison skipped: the tag has no snapshot"
+    new = _snapshot_at(root, "HEAD")
+    if new is None:
+        return [], f"contract comparison skipped: HEAD has no {CONTRACT}"
+    before, after = contract_entries(old), contract_entries(new)
+    gone_subs = {key[1] for key in before if key[0] == "subcommand" and key not in after}
+    breaking = [line for key, line in sorted(before.items())
+                if key not in after and not (key[0] in ("flag", "positional") and key[1] in gone_subs)]
+    old_v, new_v = old.get("ledger_row_version"), new.get("ledger_row_version")
+    if isinstance(old_v, int) and isinstance(new_v, int) and new_v > old_v:
+        breaking.append(f"ledger row version raised from {old_v} to {new_v}")
+    return breaking, None
+
+
 def status_report(root):
     """The unreleased-work document `status --json` prints."""
     tag = latest_tag(root)
@@ -215,8 +279,12 @@ def status_report(root):
         suggested = "minor"
     else:
         suggested = "patch"
+    # D5: removals are reported, never turned into a level; the maintainer
+    # chooses it under docs/stability.md's policy.
+    breaking, contract_note = contract_breaking(root, tag[0])
     return {"tag": tag[0], "version": ".".join(map(str, tag[1])), "due": bool(commits),
-            "shipped_commits": commits, "archived_changes": changes, "suggested": suggested}
+            "shipped_commits": commits, "archived_changes": changes, "suggested": suggested,
+            "breaking": breaking, "contract_note": contract_note}
 
 
 # ------------------------------------------------------------------------- cut
@@ -267,11 +335,31 @@ def changelog_section(root, version, date, doc):
     names = [c["name"] for c in doc["archived_changes"]]
     others = [c["subject"] for c in doc["shipped_commits"]
               if not is_bookkeeping(c["subject"]) and not is_change_squash(root, c["sha"], names)]
+    if doc.get("breaking"):
+        # D5: one entry per removal, its migration left for the maintainer;
+        # `publish` refuses while a TODO remains here.
+        lines += ["", BREAKING_HEADING, ""]
+        lines += [f"- {entry}: {MIGRATION_TODO}" for entry in doc["breaking"]]
     if others:
-        if doc["archived_changes"]:
+        if doc["archived_changes"] or doc.get("breaking"):
             lines += ["", "### Other changes", ""]
         lines += [f"- {subject}" for subject in others]
     return "\n".join(lines) + "\n"
+
+
+def breaking_todos(notes):
+    """The lines of a section's `### Breaking` subsection still holding a TODO."""
+    todos, inside = [], False
+    for line in notes.splitlines():
+        if line.startswith("### "):
+            inside = line.strip() == BREAKING_HEADING
+            continue
+        if line.startswith("## "):
+            inside = False
+            continue
+        if inside and MIGRATION_TODO in line:
+            todos.append(line.strip())
+    return todos
 
 
 def is_change_squash(root, sha, names):
@@ -552,6 +640,10 @@ def publish_preconditions(root):
         notes = section_text(changelog, version)
         if notes is None:
             failures.append(f"{CHANGELOG} has no '## {version}' section; run scripts/release cut")
+        else:
+            for line in breaking_todos(notes):
+                failures.append(f"the {BREAKING_HEADING} entry still has a {MIGRATION_TODO} "
+                                f"migration step; write it: {line}")
         try:
             failures += unreleased_adoption_items(root, version)
         except ReleaseError as exc:
@@ -716,6 +808,13 @@ def cmd_status(root, args):
         print(f"  {c['name']} ({why})")
     if not doc["archived_changes"]:
         print("  (none)")
+    if doc["breaking"]:
+        print(f"\nBreaking: removed from the public contract since {doc['tag']} "
+              f"({len(doc['breaking'])}):")
+        for entry in doc["breaking"]:
+            print(f"  {entry}")
+    if doc["contract_note"]:
+        print(f"\n({doc['contract_note']})")
     print(f"\nSuggested level: {doc['suggested']}")
     print(f"Next: /release-docs (review + merge its PR), then scripts/release docs, "
           f"then scripts/release cut {doc['suggested']}")

@@ -195,16 +195,16 @@ def _details(checks):
 
 class TestDoctorRow(unittest.TestCase):
     def test_omitted_when_not_checked(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p")
         self.assertNotIn("approval-keys", _levels(checks))
 
     def test_ok_when_no_change_carries_an_old_key(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p",
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p",
                                      old_approval_changes=[])
         self.assertEqual(_levels(checks)["approval-keys"], "ok")
 
     def test_warns_naming_the_changes_the_command_and_strict(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p",
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p",
                                      old_approval_changes=["alpha", "beta"])
         self.assertEqual(_levels(checks)["approval-keys"], "warn")
         detail = _details(checks)["approval-keys"]

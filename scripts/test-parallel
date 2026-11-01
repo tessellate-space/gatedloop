@@ -22,6 +22,8 @@ let a task commit through sooner; it cannot let a change merge.
 
 Exits 1 if any module fails, printing each failed module's full output; stdlib only.
 """
+from __future__ import annotations
+
 import argparse
 import atexit
 import fnmatch

@@ -54,11 +54,11 @@ class TestGatesOnPathRow(unittest.TestCase):
         self._tmp.cleanup()
 
     def checks(self, found):
-        return gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1,
+        return gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1,
                                    shim_path=str(self.shim), gates_on_path=found)
 
     def test_omitted_when_not_checked(self):
-        checks = gates.doctor_checks(gates.TESTED_OPENSPEC_VERSION, 1, "/p")
+        checks = gates.doctor_checks(gates.OPENSPEC_MAX_TESTED, 1, "/p")
         self.assertIsNone(_row(checks, "gates-on-path"))
 
     def test_found_as_the_running_shim_is_ok_naming_the_path(self):

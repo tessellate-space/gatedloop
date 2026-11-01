@@ -1,0 +1,741 @@
+{
+ "documents": {
+  "handoff": [
+   "approval",
+   "change",
+   "epic",
+   "handoff",
+   "schema",
+   "target",
+   "target_head",
+   "tasks",
+   "verify"
+  ],
+  "stats": [
+   "changes",
+   "idle_gap_ms",
+   "totals"
+  ]
+ },
+ "exit_codes": {
+  "0": "success",
+  "1": "failure, refusal or a red gate",
+  "2": "usage error (the command line did not parse)",
+  "75": "a precondition failed; the gate did not run"
+ },
+ "ledger_fields": [
+  "ts",
+  "gate",
+  "exit",
+  "duration_ms",
+  "change",
+  "task",
+  "tree",
+  "attempt",
+  "approved_by",
+  "sha",
+  "verdict",
+  "outcome",
+  "precondition",
+  "precondition_exit",
+  "scope",
+  "cause",
+  "detail",
+  "session",
+  "accepted_by",
+  "author",
+  "tests",
+  "base",
+  "no_behaviour",
+  "note",
+  "restart_available",
+  "characterization",
+  "kind",
+  "tokens",
+  "window",
+  "messages",
+  "source",
+  "v"
+ ],
+ "ledger_row_version": 1,
+ "manifest_keys": [
+  "acceptance",
+  "approval",
+  "concurrency",
+  "conventions",
+  "discipline",
+  "economics",
+  "gates",
+  "gatesVersion",
+  "integration",
+  "loop",
+  "surfaces",
+  "taskSource"
+ ],
+ "merge_exit_codes": {
+  "1": "step 0 or 1 refused (75 when the merge lock is busy)",
+  "2": "step 2, integrate",
+  "3": "step 3, prove the merged tree",
+  "4": "step 4, record",
+  "5": "step 5, confirm",
+  "6": "step 6, archive and publish"
+ },
+ "status_contexts": [
+  "gatedloop/ci",
+  "gatedloop/live-check",
+  "gatedloop/tests"
+ ],
+ "subcommands": {
+  "acceptance": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "acceptance attest": {
+   "options": [
+    "--as",
+    "--local",
+    "--merged",
+    "--pr"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "acceptance brief": {
+   "options": [
+    "--out"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "acceptance check": {
+   "options": [
+    "--change"
+   ],
+   "positionals": [
+    "tree"
+   ],
+   "visibility": "public"
+  },
+  "acceptance policy": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "acceptance reject": {
+   "options": [
+    "--as",
+    "--cause",
+    "--detail"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "adoption": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "adoption record": {
+   "options": [],
+   "positionals": [
+    "id",
+    "decision"
+   ],
+   "visibility": "public"
+  },
+  "adoption status": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "approval": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "approval attest": {
+   "options": [
+    "--as",
+    "--local",
+    "--merged",
+    "--pr"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "approval check": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "approval migrate": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "approval policy": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "approval sha": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "attempt": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "attempt note": {
+   "options": [
+    "--change",
+    "--changed",
+    "--hypothesis",
+    "--next",
+    "--oracle"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "attempt notes": {
+   "options": [
+    "--change",
+    "--json"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "attempt restart": {
+   "options": [
+    "--change"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "audit": {
+   "options": [
+    "--change",
+    "--ref"
+   ],
+   "positionals": [],
+   "reason": "called only by the bundled Stop hook (hooks/continue-loop.sh)",
+   "visibility": "internal"
+  },
+  "conventions": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "conventions sync": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "discipline": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline agent-session": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-archive": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-commit": {
+   "options": [
+    "--verdict-file"
+   ],
+   "positionals": [
+    "tree"
+   ],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-continue": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-implement": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-propose": {
+   "options": [
+    "--scaffold"
+   ],
+   "positionals": [
+    "path"
+   ],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-push": {
+   "options": [
+    "--remote-ref"
+   ],
+   "positionals": [
+    "sha"
+   ],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline check-worktree": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline merge-scope": {
+   "options": [
+    "--branch"
+   ],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "discipline next-task": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled hooks (hooks/*.sh, templates/git-hooks/*)",
+   "visibility": "internal"
+  },
+  "doctor": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "epics": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "gate-marker": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled commit hooks, which check the ci marker",
+   "visibility": "internal"
+  },
+  "gate-marker check": {
+   "options": [
+    "--ref",
+    "--require-scope"
+   ],
+   "positionals": [
+    "gate",
+    "tree"
+   ],
+   "reason": "called only by the bundled commit hooks, which check the ci marker",
+   "visibility": "internal"
+  },
+  "gate-marker clear": {
+   "options": [],
+   "positionals": [
+    "gate"
+   ],
+   "reason": "called only by the bundled commit hooks, which check the ci marker",
+   "visibility": "internal"
+  },
+  "halt": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "halt record": {
+   "options": [
+    "--change",
+    "--detail",
+    "--task"
+   ],
+   "positionals": [
+    "cause"
+   ],
+   "visibility": "public"
+  },
+  "handoff": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "hook": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "hook git-cwd": {
+   "options": [],
+   "positionals": [
+    "kind"
+   ],
+   "reason": "called only by the bundled hooks, to resolve a guarded command's directory",
+   "visibility": "internal"
+  },
+  "hook install": {
+   "options": [
+    "--commit-only",
+    "--push"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "init": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "integration": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "intervention": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "intervention record": {
+   "options": [
+    "--change",
+    "--detail",
+    "--task"
+   ],
+   "positionals": [
+    "kind"
+   ],
+   "visibility": "public"
+  },
+  "ledger": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "ledger record-merge": {
+   "options": [
+    "--sha"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "reason": "called only by the bundled merge (gates merge step 4)",
+   "visibility": "internal"
+  },
+  "ledger record-ready": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "lock": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "lock status": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "marker": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "marker check-remote": {
+   "options": [],
+   "positionals": [
+    "gate",
+    "sha"
+   ],
+   "visibility": "public"
+  },
+  "marker publish": {
+   "options": [
+    "--sha"
+   ],
+   "positionals": [
+    "gate"
+   ],
+   "visibility": "public"
+  },
+  "merge": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "migrate-name": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "record-merged": {
+   "options": [],
+   "positionals": [
+    "sha"
+   ],
+   "visibility": "public"
+  },
+  "review": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "review record": {
+   "options": [
+    "--attempt",
+    "--change",
+    "--scope",
+    "--task"
+   ],
+   "positionals": [
+    "verdict"
+   ],
+   "visibility": "public"
+  },
+  "rules": {
+   "options": [
+    "--all",
+    "--changed"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "run": {
+   "options": [
+    "--all",
+    "--attempt",
+    "--change",
+    "--changed",
+    "--task",
+    "--verbose"
+   ],
+   "positionals": [
+    "gate",
+    "gate_args"
+   ],
+   "visibility": "public"
+  },
+  "schema": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "schema dispatch": {
+   "options": [
+    "--json",
+    "--path"
+   ],
+   "positionals": [
+    "name"
+   ],
+   "visibility": "public"
+  },
+  "schema inspect": {
+   "options": [
+    "--json",
+    "--path"
+   ],
+   "positionals": [
+    "name"
+   ],
+   "visibility": "public"
+  },
+  "stats": {
+   "options": [
+    "--all",
+    "--change",
+    "--cost",
+    "--epic",
+    "--idle-gap",
+    "--json",
+    "--outcomes"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "surfaces": {
+   "options": [
+    "--all",
+    "--changed"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "taint": {
+   "options": [],
+   "positionals": [],
+   "reason": "called only by the bundled commit hooks and the merge",
+   "visibility": "internal"
+  },
+  "taint check": {
+   "options": [
+    "--change",
+    "--ref"
+   ],
+   "positionals": [],
+   "reason": "called only by the bundled commit hooks and the merge",
+   "visibility": "internal"
+  },
+  "task": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "task changed": {
+   "options": [
+    "--change",
+    "--task"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "task start": {
+   "options": [
+    "--attempt",
+    "--change"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "tests": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "tests brief": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "tests check": {
+   "options": [
+    "--change",
+    "--ref",
+    "--task"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "tests defect": {
+   "options": [
+    "--change",
+    "--detail",
+    "--kind"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "tests handoff": {
+   "options": [
+    "--inline",
+    "--task"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "tests place": {
+   "options": [
+    "--change"
+   ],
+   "positionals": [
+    "task"
+   ],
+   "visibility": "public"
+  },
+  "tests show": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "usage": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "usage record": {
+   "options": [
+    "--change",
+    "--stage",
+    "--task",
+    "--transcript"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "usage show": {
+   "options": [
+    "--change",
+    "--json"
+   ],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "validate": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  }
+ }
+}

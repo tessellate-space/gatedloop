@@ -56,12 +56,17 @@ REQUIRED_GATES = ("ci",)
 # first-class signal. Adopters who declare `requires` are told the shim
 # owns 75 (SETUP.md's gate contract).
 PRECONDITION_EXIT_CODE = 75
-# The OpenSpec CLI version this shim was last verified against (F5). `gates
-# doctor` compares the installed `openspec --version` to it and WARNS on a
-# mismatch — never a hard failure, because a pre-1.0, fast-moving CLI's version
-# drift is informative, not conclusive (design D4). Bump this when the shim is
-# re-verified against a newer OpenSpec release.
-TESTED_OPENSPEC_VERSION = "1.14.3"
+# The OpenSpec CLI versions this shim is verified against (F5). `gates doctor`
+# compares the installed `openspec --version` to them and WARNS outside the
+# range — never a hard failure, because a pre-1.0, fast-moving CLI's version
+# drift is informative, not conclusive (design D4).
+#
+# stability-contract D7: a range, not one version. OPENSPEC_MIN is the
+# lowest release ci runs; OPENSPEC_MAX_TESTED the highest. Widening it is
+# these two values plus the ci matrix leg that proves the new end, and
+# `docs/stability.md` states the same pair (tests/test_stability_doc.py).
+OPENSPEC_MIN = "1.14.3"
+OPENSPEC_MAX_TESTED = "1.14.3"
 # The `gatesVersion` this shim writes and validates. `gates doctor` reports a
 # manifest whose version differs so an adopter knows to migrate.
 EXPECTED_GATES_VERSION = 1
@@ -1533,6 +1538,21 @@ def _parse_openspec_version(raw: str | None) -> str | None:
     return m.group(0) if m else None
 
 
+def _version_tuple(version: str) -> tuple | None:
+    """`1.14.3` (or `1.15.0-rc.1`) as `(1, 14, 3)`; None when it doesn't start
+    with three dotted numbers."""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", version or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def _openspec_in_range(installed: str) -> bool:
+    """Whether `installed` lies in OPENSPEC_MIN..OPENSPEC_MAX_TESTED, compared
+    as numbers (D7). An unparseable version is outside it."""
+    got = _version_tuple(installed)
+    low, high = _version_tuple(OPENSPEC_MIN), _version_tuple(OPENSPEC_MAX_TESTED)
+    return got is not None and low is not None and high is not None and low <= got <= high
+
+
 def _openspec(args: list, cwd, **kw) -> subprocess.CompletedProcess:
     """Run `openspec <args>` with `OPEN_SPEC_INTERACTIVE=0` added to a copy of
     the environment (openspec-1-14-compat D5). The shim starts OpenSpec from
@@ -1628,11 +1648,11 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
             "OpenSpec CLI not found on PATH. gatedloop requires it; onboarding "
             "step 1 offers to install it (`npm install -g @fission-ai/openspec`).",
         ))
-    elif installed_openspec != TESTED_OPENSPEC_VERSION:
+    elif not _openspec_in_range(installed_openspec):
         checks.append((
             "warn", "openspec-version",
-            f"OpenSpec CLI is {installed_openspec}; gatedloop was last verified "
-            f"against {TESTED_OPENSPEC_VERSION}. A pre-1.0 CLI can drift — this is "
+            f"OpenSpec CLI is {installed_openspec}; gatedloop supports "
+            f"{OPENSPEC_MIN} to {OPENSPEC_MAX_TESTED}. A pre-1.0 CLI can drift — this is "
             "a heads-up, not a failure. If `gates validate` behaves oddly, check "
             "`openspec schemas --json`'s shape, and re-run `gates doctor` after "
             "`openspec update`.",
@@ -1640,7 +1660,8 @@ def doctor_checks(installed_openspec, gates_version, shim_path=None, hook_state=
     else:
         checks.append((
             "ok", "openspec-version",
-            f"OpenSpec CLI {installed_openspec} matches the tested contract version.",
+            f"OpenSpec CLI {installed_openspec} is in the supported range "
+            f"({OPENSPEC_MIN} to {OPENSPEC_MAX_TESTED}).",
         ))
 
     # 2. gatesVersion currency (None = no manifest yet, which is fine at step 0).
@@ -4841,7 +4862,17 @@ LEDGER_ROW_FIELDS = (
     # (USAGE_SOURCES). `None` on every other row kind. Appended per the
     # union rule.
     "tokens", "window", "messages", "source",
+    # stability-contract D1: the row version, set by `_append_ledger_row`
+    # itself on every row (as `session` is), so no caller can omit or forge
+    # it. A row without the key was written before the field existed and is
+    # exactly a version-1 row. Bump LEDGER_ROW_VERSION only when a row's
+    # meaning changes (a field renamed or removed, a value reinterpreted);
+    # appending a field under the union rule keeps the version.
+    "v",
 )
+
+# The highest ledger row version this shim writes and reads (D1, D2).
+LEDGER_ROW_VERSION = 1
 
 
 def _ledger_path(root: Path, change: str) -> Path:
@@ -4949,6 +4980,7 @@ def _append_ledger_row(root: Path, row: dict) -> None:
     # escalation-outcomes D5: the same discriminator the git-layer commit hook
     # scopes itself by, so the two mechanisms agree about what a session is.
     full["session"] = "agent" if os.environ.get("CLAUDECODE") else "human"
+    full["v"] = LEDGER_ROW_VERSION
     path = _ledger_path(root, change)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
@@ -5035,6 +5067,29 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
 # never reaches the taint-relevant code path (`cmd_run` returns before it).
 
 
+def _ledger_row_ok(obj, source) -> dict | None:
+    """stability-contract D2: the one check every ledger reader applies to a
+    parsed line. Returns the row when it is readable, `None` when it is not a
+    row (not an object, or a `v` that is not an integer -- each reader treats
+    that exactly as a line of malformed JSON). A row of a version newer than
+    LEDGER_ROW_VERSION exits 1: skipping it would read an accept or merge row
+    as "never happened", and reading it as version 1 would misread it."""
+    if not isinstance(obj, dict):
+        return None
+    v = obj.get("v")
+    if v is None:
+        return obj
+    if not isinstance(v, int) or isinstance(v, bool):
+        return None
+    if v > LEDGER_ROW_VERSION:
+        sys.exit(
+            f"gatedloop: `{source}` holds a ledger row of version `{v}`; this plugin "
+            f"reads up to `{LEDGER_ROW_VERSION}`. Update the plugin (a teammate's "
+            "newer gatedloop wrote it)."
+        )
+    return obj
+
+
 def _read_ledger_rows(root: Path, change: str) -> list[dict]:
     p = _ledger_path(root, change)
     if not p.exists():
@@ -5045,9 +5100,12 @@ def _read_ledger_rows(root: Path, change: str) -> list[dict]:
         if not line:
             continue
         try:
-            rows.append(json.loads(line))
+            obj = json.loads(line)
         except Exception:
             continue
+        row = _ledger_row_ok(obj, p)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -5411,7 +5469,7 @@ def _change_ledger_rows(root: Path, change: str, ref: str) -> list[dict]:
             cwd=root, capture_output=True, text=True,
         )
         if blob.returncode == 0:
-            take(_parse_jsonl_rows(blob.stdout))
+            take(_parse_jsonl_rows(blob.stdout, f"{ref}:{prefix}/{change}.jsonl"))
             break
     holder = _worktree_holding(root, ref.removeprefix("refs/heads/"))
     if holder is not None:
@@ -6295,7 +6353,7 @@ def _task_completion(root: Path, change: str, ref: str) -> _Completion:
     checked: set[str] = set()
     for k, commit in enumerate(commits):
         text = _blob_at(root, commit, ledger_rel)
-        count = len(_parse_jsonl_rows(text)) if text else 0
+        count = len(_parse_jsonl_rows(text, f"{commit[:12]}:{ledger_rel}")) if text else 0
         now = _checked_task_ids(_blob_at(root, commit, tasks_rel))
         if count < len(row_at):
             raise _LedgerRewritten(
@@ -8187,10 +8245,11 @@ def _read_ledger_rows_and_skipped(root: Path, change: str) -> tuple[list[dict], 
         except Exception:
             skipped += 1
             continue
-        if not isinstance(obj, dict):
+        row = _ledger_row_ok(obj, p)
+        if row is None:
             skipped += 1
             continue
-        rows.append(obj)
+        rows.append(row)
     return rows, skipped
 
 
@@ -9419,7 +9478,9 @@ def _acceptance_reject(m: dict, root: Path, args) -> int:
     )
 
 
-def _parse_jsonl_rows(text: str) -> list[dict]:
+def _parse_jsonl_rows(text: str, source: str = "a ledger file") -> list[dict]:
+    """The rows of a ledger's text, through `_ledger_row_ok`; `source` names
+    the file (a path, or `<commit>:<path>` for a blob) in its refusal."""
     rows: list[dict] = []
     for line in text.splitlines():
         line = line.strip()
@@ -9429,8 +9490,9 @@ def _parse_jsonl_rows(text: str) -> list[dict]:
             obj = json.loads(line)
         except Exception:
             continue
-        if isinstance(obj, dict):
-            rows.append(obj)
+        row = _ledger_row_ok(obj, source)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -9474,7 +9536,7 @@ def _acceptance_rows_for(root: Path, tree: str, change: str | None) -> list[dict
                 cwd=root, capture_output=True, text=True,
             )
             if blob.returncode == 0:
-                take(_parse_jsonl_rows(blob.stdout))
+                take(_parse_jsonl_rows(blob.stdout, f"{tree[:12]}:{rel}"))
 
     runs = _state_dir(root) / "runs"
     if runs.is_dir():
@@ -9482,7 +9544,7 @@ def _acceptance_rows_for(root: Path, tree: str, change: str | None) -> list[dict
             if names is not None and p.name not in names:
                 continue
             try:
-                take(_parse_jsonl_rows(p.read_text()))
+                take(_parse_jsonl_rows(p.read_text(), str(p)))
             except OSError:
                 continue
     return out
@@ -10520,7 +10582,7 @@ def _ledger_rows_at(root: Path, sha: str) -> list[dict]:
                 continue
             blob = _git(root, "cat-file", "blob", f"{sha}:{rel}")
             if blob.returncode == 0:
-                rows.extend(_parse_jsonl_rows(blob.stdout))
+                rows.extend(_parse_jsonl_rows(blob.stdout, f"{sha[:12]}:{rel}"))
     return rows
 
 
@@ -12221,7 +12283,8 @@ def _merge_recover(root: Path, change: str) -> None:
     if state.get("change") != change or not position:
         return
     blob = _git(root, "cat-file", "blob", f"HEAD:{_ledger_rel(change, root)}")
-    rows = _parse_jsonl_rows(blob.stdout) if blob.returncode == 0 else []
+    rows = (_parse_jsonl_rows(blob.stdout, f"HEAD:{_ledger_rel(change, root)}")
+            if blob.returncode == 0 else [])
     if not any(
         r.get("gate") == "merge" and r.get("sha") and _is_ancestor(root, r["sha"], "HEAD")
         for r in rows
@@ -13159,7 +13222,9 @@ def cmd_record_merged(m: dict, root: Path, args) -> int:
 
 # ---------- cli -----------------------------------------------------------
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """The whole `gates` command line (stability-contract D3): built here so
+    `tests/test_contract.py` can walk it without running a command."""
     p = argparse.ArgumentParser(prog="gates", description="gatedloop gate/surface shim")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -13556,7 +13621,11 @@ def main() -> int:
         help="exit 0 if a variable `discipline.agent-env` lists (default CLAUDECODE) is set, else 1 -- the git-layer hooks no-op on 1",
     )
 
-    args = p.parse_args()
+    return p
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
     if args.cmd == "discipline" and args.discipline_cmd == "agent-session":
         # Special-cased ahead of everything (git-layer-enforcement D1): the
         # git hooks ask it first, in any repository, with or without a
