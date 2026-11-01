@@ -3370,6 +3370,23 @@ def _first_unmatched_path(m: dict, changed: list[str]) -> str | None:
     return None
 
 
+def _scope_paths(root: Path, changed: list[str] | None) -> list[str] | None:
+    """`changed` without the current change's own `tasks.md` (scope-own-tasks
+    D1-D3, #122): every task commit stages its `[x]` beside its code, so
+    counting it made every task commit err full -- unmatched, or a second hot
+    surface. The current change is the one the branch resolves to; another
+    change's `tasks.md` stays an ordinary path, and off a change branch
+    nothing is dropped. Applied once in `gates run`, before every scope
+    decision; the hot set `gates surfaces`/`rules` report is unchanged."""
+    if not changed:
+        return changed
+    change = _resolve_change_name(root, None)
+    if not change:
+        return changed
+    own = f"openspec/changes/{change}/tasks.md"
+    return [p for p in changed if p != own]
+
+
 def _select_scoped_gate(m: dict, gate: str, changed: list[str] | None) -> tuple[str | dict | None, str]:
     """Select the manifest spec to run for a scopable gate (`ci`/`unit`) and
     the scope it ran under -- a surface name, or `"full"` for the globally
@@ -12014,7 +12031,8 @@ def cmd_run(m: dict, root: Path, args) -> int:
         # the global gate identically, the err-full direction. The selected
         # value is a raw manifest spec (scalar or {run, requires}) and goes
         # through `_gate_spec` below like any other gate value.
-        changed_for_scope = _staged_diff_paths(root) if gate == "ci" else _working_set_files()
+        changed_for_scope = _scope_paths(
+            root, _staged_diff_paths(root) if gate == "ci" else _working_set_files())
         if getattr(args, "full", False):
             # merge-step D2 step 3: the merged tree gets the full oracle,
             # whatever the staged squash would otherwise scope to.
