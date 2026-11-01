@@ -9,6 +9,41 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.11.0 — 2026-11-01
+
+Task commits get their scoped `ci` back, the merge checks the plan is still the approved one, a lane can no longer sync main past the hooks, and gatedloop now states which of its surfaces you may build on and checks them in ci.
+
+**Scoped task commits work again**
+
+- **scope-own-tasks** (#127). Fixes #122.
+  - **The change's own `tasks.md` no longer counts toward scope selection.** In 0.10.0 every task commit's `[x]` tick either matched no surface or added a second hot surface, so a task commit always ran the full `ci`. Another change's `tasks.md` still counts, and nothing is exempt on `main` or a plan branch.
+  - **The 0.10.0 advice to add `openspec/**` to a surface is withdrawn.** It couldn't work. If you added it, you can remove it.
+
+**The loop, hardened from an adopter's report**
+
+- **loop-hardening** (#119). Fixes #101, #108, #109, #110, #111 and #112.
+  - **`gates merge` and every acceptance writer refuse a change whose plan changed after approval.** Before step 1 the merge compares the recorded `approved_sha` with the plan on the merge tree. `record-merged` writes no acceptance for a stale plan. Re-attest the amended plan to go on.
+  - **A plain `git merge origin/main` inside a lane is denied.** Git runs no pre-commit hook for a merge commit, so the sync reached the branch unchecked and only showed up as a taint at merge time. Sync with `git merge --no-commit origin/main`, then `gates run ci`, then `git commit`, or rebase. The implementer prompts now say so. A taint refusal names the commits it found.
+  - **The hooks resolve `cd ~/…`, `cd $HOME/…` and subshell `cd` targets. A `cd` target they still can't resolve is denied** instead of being judged by the session's directory.
+  - **A conflicted or unparseable `.gates.yaml` fails in one line.** The commit hook used to report it as "branch is shared with another worktree".
+  - **Re-handoffs:** placement accepts a file's content as it is on main, so a re-handoff after main changed an existing test places. A full handoff that would drop already-placed tasks is refused.
+  - **The READY report's gate block comes from the ledger:** `gates ledger record-ready` prints `ci`, `review` (`clean`, `findings`, `partial` or `none`) and `live_check`, so a report can't claim a review that never ran.
+
+**What you may build on**
+
+- **stability-contract** (#118).
+  - **`docs/stability.md`** says which surfaces are covered: the `gates` subcommands and flags, the exit codes, the `gatedloop/<gate>` statuses, the `.gates.yaml` keys, the `handoff --json` and `stats --json` keys, and the ledger row. It also sets the deprecation policy: warn, keep it one more release, then remove it with migration steps. While the version is 0.x a removal may ship in a minor; from 1.0, only in a major.
+  - **Every ledger row carries `"v": 1`.** A row without `v` reads as version 1. A row written by a newer plugin makes the reading command exit 1, naming the file and both versions, instead of being misread.
+  - **ci runs on Ubuntu and macOS, Python 3.9 and 3.13.** A weekly run watches OpenSpec's latest release. `gates doctor` warns when OpenSpec is outside the supported range, which is 1.14.3.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start. The git-layer hooks didn't change, so there's no need to re-run `gates hook install`.
+2. **Check every in-flight change's approval** before its next merge: `gates approval check <change>`. A change whose plan was amended without a re-attest is now refused at merge. Re-attest it.
+3. **Tell lane agents and scripts how to sync main:** `--no-commit`, then ci, then commit, or rebase. A plain merge is now denied.
+4. **If you added `openspec/**` to a surface on 0.10.0's advice, you can drop it.**
+5. No new settings; `/gatedloop:upgrade` has nothing new to ask.
+
 ## 0.10.0 — 2026-11-01
 
 A scoped `ci` or `unit` no longer runs narrower than it should, lettered task ids work everywhere, a lane can sync its branch without a hook refusal, and two role commands set up the planner/orchestrator split.
