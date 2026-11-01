@@ -192,7 +192,13 @@ that fails:
   published (an item is added with the change that introduces its setting, so it
   carries the next version until `cut`; one tagged for a later release is named);
 - the tag `vX.Y.Z` exists neither locally nor on `origin`;
-- `gh auth status` succeeds.
+- `gh auth status` succeeds;
+- it is not running inside an agent session (`gates discipline agent-session`, the
+  same check the git hooks use). A release is the maintainer's act, and the
+  pre-push hook refuses an agent's push of the release commit anyway (#125). Run
+  `publish` from a terminal outside Claude Code. Run inside a session, it refuses,
+  writes the notes to `.gatedloop/out/release-notes-vX.Y.Z.md` and prints the exact
+  command sequence below to paste into such a terminal.
 
 It then runs these steps in a fixed order:
 

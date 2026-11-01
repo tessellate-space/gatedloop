@@ -92,7 +92,9 @@ wall with one clearly-marked door that is then reported."
   push is), or the merge gate's incoming-tree checks hold for its tree: a `live-check`
   and a full `ci` marker, `verify` where declared, and for each change it carries in,
   no unresolved taint, the authored-test lock and acceptance where a policy is
-  declared. A denial names each unmet check and `gates merge <change>` as the remedy.
+  declared. A denial names each unmet check and `gates merge <change>` as the remedy,
+  naming only a change whose own commits the push carries in; a commit no change owns
+  (a release commit, say) is refused as belonging to no change in flight.
   Other branches and deletions pass silently, and no gate runs inside either hook.
   Both hooks enforce **only inside a declared agent session**: `gates discipline
   agent-session` exits 0 when a variable `discipline.agent-env` lists is set (default
