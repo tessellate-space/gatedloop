@@ -55,12 +55,12 @@ jobs:
     strategy:
       fail-fast: false   # every leg reports, so one red leg doesn't hide another
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]   # pinned: ubuntu-latest (26.04) has no Python 3.9 build
         python: ['3.9', '3.13']
         openspec: ['1.14.3']   # OPENSPEC_MIN .. OPENSPEC_MAX_TESTED in bin/gates
     runs-on: ${{ matrix.os }}
     env:
-      PRIMARY: ${{ matrix.os == 'ubuntu-latest' && matrix.python == '3.13' && matrix.openspec == '1.14.3' }}
+      PRIMARY: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.13' && matrix.openspec == '1.14.3' }}
     steps:
       - uses: actions/checkout@v4
         with:
