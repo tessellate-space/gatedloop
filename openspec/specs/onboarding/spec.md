@@ -218,23 +218,23 @@ SHALL NOT be described as reaching `openspec/config.yaml`.
 
 ### Requirement: The OpenSpec contract version is probed, not assumed
 
-The shim SHALL record the OpenSpec CLI version it was last verified against. A
-doctor check SHALL compare it against the installed `openspec --version` and warn
-loudly on a mismatch. A version mismatch SHALL NOT fail `gates validate` or block
-onboarding.
+The shim SHALL record the OpenSpec CLI range it supports, as a minimum and the highest version it was verified against. The values SHALL match the range `docs/stability.md` declares. A doctor check SHALL compare the installed `openspec --version` against that range. It SHALL warn loudly when the version is below the minimum or above the highest verified. A version outside the range SHALL NOT fail `gates validate` or block onboarding.
 
 #### Scenario: The installed OpenSpec CLI matches the tested version
 
-- **WHEN** the doctor check runs and the installed OpenSpec CLI version matches the
-  recorded tested version
+- **WHEN** the doctor check runs and the installed OpenSpec CLI version is between the recorded minimum and the highest verified version, inclusive
 - **THEN** no warning is produced
 
 #### Scenario: The installed OpenSpec CLI version differs
 
-- **WHEN** the doctor check runs and the installed OpenSpec CLI version differs from
-  the recorded tested version
-- **THEN** it warns loudly, naming both versions
+- **WHEN** the doctor check runs and the installed version is above the highest verified version
+- **THEN** it warns loudly, naming the installed version and the range
 - **AND** it does not fail `gates validate` or stop onboarding on that basis alone
+
+#### Scenario: The installed OpenSpec CLI is older than the minimum
+
+- **WHEN** the doctor check runs and the installed version is below the recorded minimum
+- **THEN** it warns loudly, naming the installed version and the range
 
 ### Requirement: A doctor preflight diagnoses the reachable states of an invisible install
 
