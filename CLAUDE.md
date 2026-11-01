@@ -30,6 +30,7 @@ python3 scripts/test-parallel --affected   # only modules the branch's changes r
 ./bin/gates surfaces               # which surfaces are hot for the current diff
 ./bin/gates rules                  # which rule-ids apply to the current diff
 ./bin/gates init                   # drop templates/gates.yaml.template as .gates.yaml
+python3 tests/test_contract.py --write   # rewrite tests/contract.json after an intended change to the public surface
 
 openspec list --json              # active changes (the session brief + most commands read this)
 openspec status --change <name> --json
@@ -223,14 +224,11 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.10.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.11.0. Read a change's
 `design.md` before touching the area it covers:
 
-- `stability-contract`: a versioned ledger row, a checked-in snapshot of the public `gates`
-  contract (`tests/contract.json`), breaking-change detection in `scripts/release`, a wider ci
-  matrix and `docs/stability.md`'s deprecation policy.
-- `prompt-evals`: an on-demand `claude plugin eval` suite under `evals/` for the implementer and
-  the convention review, run by `scripts/eval-prompts`; no `eval` gate.
+- `prompt-evals`: an on-demand `claude plugin eval` suite under `evals/` for the implementer, the
+  test author and the convention review, run by `scripts/eval-prompts`; no `eval` gate.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 
