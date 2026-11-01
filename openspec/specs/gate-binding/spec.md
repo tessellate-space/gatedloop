@@ -145,6 +145,13 @@ hot surface without the override — the globally declared gate SHALL run, excep
 below for `unit`. The fallback direction is pinned: scoping may only ever narrow to a
 declared scoped command, never skip; when in doubt the full gate runs.
 
+For this decision, the relevant diff SHALL leave out the loop's own state under
+`.gatedloop/` and the current change's own `openspec/changes/<change>/tasks.md`, where
+the current change is the one the branch resolves to. Neither SHALL count as an
+unmatched path or make a surface hot. Any other change's `tasks.md`, and every other
+plan artifact, SHALL count as an ordinary path. The hot set reported for convention
+review and live-check SHALL NOT change.
+
 When `unit` is invoked and its working set selects two or more such surfaces with no
 unmatched changed file, it SHALL run every hot surface's `unit` override and, once,
 the global `unit` when any hot surface declares none. The run SHALL fail when any of
@@ -190,6 +197,30 @@ command ran.
 - **WHEN** the working set selects one surface with a `unit` override and one
   without, and every changed path is matched
 - **THEN** `gates run unit` runs the override and the global `unit`, once each
+
+#### Scenario: A task commit's own tick does not widen the scope
+
+- **WHEN** on a change branch, the staged diff holds one file of a surface that
+  declares a scoped `ci` and the change's own `tasks.md`, and no surface covers
+  `openspec/**`
+- **THEN** `gates run ci` runs the scoped command
+
+#### Scenario: The tick does not make a second hot surface
+
+- **WHEN** the same diff is staged and `openspec/**` belongs to a surface of its own
+- **THEN** `gates run ci` runs the scoped command
+
+#### Scenario: Another change's tasks.md still errs full
+
+- **WHEN** on a change branch, the staged diff holds one file of a scoped surface and
+  another change's `tasks.md`, which no surface matches
+- **THEN** the global `ci` runs, and its output names that `tasks.md` as unmatched
+
+#### Scenario: Off a change branch nothing is exempt
+
+- **WHEN** on `main`, the staged diff holds one file of a scoped surface and a
+  change's `tasks.md`, which no surface matches
+- **THEN** the global `ci` runs
 
 ### Requirement: The record names the oracle that ran, and the merge requires the full one
 
