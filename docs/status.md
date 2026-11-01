@@ -1,6 +1,6 @@
 # gatedloop status
 
-**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3.** Nobody
+**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3, on macOS and Linux with Python 3.9 and 3.13.** Nobody
 else has reported running the loop end to end. This page says what has been
 exercised, where the plugin is fragile, and what depends on OpenSpec staying the way
 it is. It is kept current with each release; [`README.md`](../README.md) has the
@@ -26,6 +26,8 @@ mostly one host: Claude Code, locally and on the web.
 | Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
 | Token usage rows, `gates stats --cost` and `loop.token-budget` | lightly | usage recorded on this repository's own changes since `token-ledger` merged; the budget has not halted a real change |
 | `/gatedloop:planner` and `/gatedloop:orchestrator` | not yet | new in 0.10.0; the planner/orchestrator split they encode has run by hand, as in [`topology.md`](./topology.md) |
+| The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
+| The READY report's gate block (`gates ledger record-ready`) | lightly | this repository's own changes since `loop-hardening` |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
 The prompts (commands, skills, agents) have no automated oracle. `ci` here says the
@@ -103,9 +105,30 @@ global `unit`, which could miss a surface's own tests and read a required red as
 green (#61, #45). Now any changed path no non-catch-all surface matches runs the
 global gate and the announcement names it; the loop's own `.gatedloop/` state never
 counts. A multi-surface `unit` runs each hot surface's override, plus the global
-`unit` once for a surface with none. The visible cost: if your surfaces don't cover
-`openspec/**`, every task commit now runs the full `ci`, because it stages the
-change's `tasks.md`. Add `openspec/**` to a surface to scope those commits again.
+`unit` once for a surface with none. Since 0.11.0 (`scope-own-tasks`) the current
+change's own `tasks.md` doesn't count either, so the tick every task commit stages
+no longer forces the full `ci`; in 0.10.0 it did, and the `openspec/**` remedy the
+0.10.0 docs suggested only added a second hot surface (#122). Another change's
+`tasks.md` is an ordinary path.
+
+### The merge rechecks the plan approval, and some commands are now denied — *shipped*
+
+Since 0.11.0 (`loop-hardening`) a few things that used to pass are refused, each
+naming its route (#101, #108, #110):
+
+- `gates merge` step 1 and every acceptance writer refuse a change whose plan no
+  longer matches its recorded approval. Re-approve the amendment first; a `tasks.md`
+  tick never needs it.
+- A plain `git merge <target>` into a change branch is denied, because git runs no
+  commit hook for a merge commit. Sync with `git merge --no-commit <target>`, then
+  `gates run ci`, then `git commit`. A fast-forward or an already up-to-date sync
+  passes.
+- A guarded command behind a `cd` the hooks can't resolve (a variable other than
+  `$HOME`, `~user`, a command substitution) is denied instead of being judged against
+  the session's checkout. Use an absolute path or `git -C <dir>`.
+
+[`AUTOMATION.md`](../AUTOMATION.md) has the full list, including the one-line
+manifest parse error and the handoff that refuses to drop placed tests.
 
 ### Statuses posted from a laptop are self-reported — *shipped, by design*
 
@@ -176,9 +199,10 @@ and check `gates doctor` first after any upgrade.
 
 The planned changes live in `openspec/changes/`, each with its proposal, design and
 tasks; ideas that aren't scheduled are in [`candidates.md`](./candidates.md). Open
-issues are the rest. Work on readiness (support, stability, a 1.0) waits until a
-second person has run one loop end to end; until then the plugin stays 0.x and
-changes without notice.
+issues are the rest. [`stability.md`](./stability.md) says what the public contract
+covers and how a part of it is retired. A 1.0, and any support promise, waits until a
+second person has run one loop end to end; until then the plugin stays 0.x, and a
+removal may ship in a minor release with its migration steps.
 
 So a missing feature is likely *coming*, or out of scope by the rejection test. A
 gate that commits on red, an agent that merges on its own, or a session brief that
