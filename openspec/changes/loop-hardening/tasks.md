@@ -25,7 +25,7 @@
 ## 5. The READY report (D11)
 
 - [x] 5.1 Make `record-ready` print the derived `gates` block. Verify with tests for `review` `none`, `partial`, `findings` and `clean`, for `ci` pass and fail, and for `live_check` `na` when undeclared [oracle: unit]
-- [ ] 5.2 Update the report schema in `agents/tdd-implementer.md` to `clean|findings|partial|none` and say to copy `record-ready`'s block unchanged. Verify by convention review [oracle: none]
+- [x] 5.2 Update the report schema in `agents/tdd-implementer.md` to `clean|findings|partial|none` and say to copy `record-ready`'s block unchanged. Verify by convention review [oracle: none]
 
 ## 6. Docs
 

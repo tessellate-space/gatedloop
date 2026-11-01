@@ -128,7 +128,11 @@ json`) or another agent reads back; do not nest gate results under it as prose, 
 not omit a field even when it doesn't apply (use `null`):
 ```
 <one-line summary>
-{"change": "<name>", "tasks_done": <int>, "tasks_total": <int>, "branch": "<change-name>", "gates": {"ci": "pass|fail", "review": "clean|findings", "live_check": "pass|fail|na"}, "outcome": "READY TO MERGE" | "HALTED AT task <N.M>: <reason + what's needed>", "cause": null | "<the cause recorded by gates halt record>", "acceptance": "required" | "not-required"}
+{"change": "<name>", "tasks_done": <int>, "tasks_total": <int>, "branch": "<change-name>", "gates": {"ci": "pass|fail", "review": "clean|findings|partial|none", "live_check": "pass|fail|na"}, "outcome": "READY TO MERGE" | "HALTED AT task <N.M>: <reason + what's needed>", "cause": null | "<the cause recorded by gates halt record>", "acceptance": "required" | "not-required"}
 ```
-`cause` is `null` on `READY TO MERGE`. `acceptance` is read from `gates acceptance
-policy` (§4), never decided by you. Be terse. Do not merge. Do not editorialize.
+`cause` is `null` on `READY TO MERGE`. `gates` is copied unchanged from the
+`gatedloop: gates {...}` line `gates ledger record-ready` prints, never filled in by you:
+`review` is `none` when no review was recorded and `partial` when a completed task has
+none. On a halt, where no `ready` row is recorded, report what the ledger shows the same
+way. `acceptance` is read from `gates acceptance policy` (§4), never decided by you. Be
+terse. Do not merge. Do not editorialize.
