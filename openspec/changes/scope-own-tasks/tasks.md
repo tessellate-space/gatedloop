@@ -7,7 +7,7 @@
 
 ## 2. Docs (D5)
 
-- [ ] 2.1 Replace the wrong remedy in SETUP.md "Scoped `ci`/`unit`" with the rule (the current change's `tasks.md` is not counted; another change's is). Verify that `scripts/release docs` reports no gap [oracle: none]
+- [x] 2.1 Replace the wrong remedy in SETUP.md "Scoped `ci`/`unit`" with the rule (the current change's `tasks.md` is not counted; another change's is). Verify that `scripts/release docs` reports no gap [oracle: none]
 
 ## Workflow follow-up
 
