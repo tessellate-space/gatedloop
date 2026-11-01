@@ -12031,9 +12031,8 @@ def cmd_run(m: dict, root: Path, args) -> int:
         # the global gate identically, the err-full direction. The selected
         # value is a raw manifest spec (scalar or {run, requires}) and goes
         # through `_gate_spec` below like any other gate value.
-        changed_for_scope = _staged_diff_paths(root) if gate == "ci" else _working_set_files()
-        if gate == "ci":
-            changed_for_scope = _scope_paths(root, changed_for_scope)
+        changed_for_scope = _scope_paths(
+            root, _staged_diff_paths(root) if gate == "ci" else _working_set_files())
         if getattr(args, "full", False):
             # merge-step D2 step 3: the merged tree gets the full oracle,
             # whatever the staged squash would otherwise scope to.
