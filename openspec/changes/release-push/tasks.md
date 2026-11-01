@@ -4,4 +4,4 @@
 
 ## 2. Release tooling
 
-- [ ] 2.1 `scripts/release publish` refuses, before its first write, inside an agent session (`gates discipline agent-session` exits 0), writing the notes to `.gatedloop/out/release-notes-vX.Y.Z.md` and printing the full command sequence; RELEASING.md's `publish` section says it runs outside an agent session (design D1) [oracle: unit]
+- [x] 2.1 `scripts/release publish` refuses, before its first write, inside an agent session (`gates discipline agent-session` exits 0), writing the notes to `.gatedloop/out/release-notes-vX.Y.Z.md` and printing the full command sequence; RELEASING.md's `publish` section says it runs outside an agent session (design D1) [oracle: unit]

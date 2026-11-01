@@ -664,10 +664,39 @@ def publish_preconditions(root):
         if auth.returncode != 0:
             failures.append(f"`gh auth status` failed (exit {auth.returncode}); "
                             "run `gh auth login`")
+    if in_agent_session(root):
+        failures.append(agent_session_refusal(root, version, notes))
     if failures:
         raise ReleaseError("refusing to publish; nothing was written:\n" +
                            "\n".join(f"  - {f}" for f in failures))
     return version, notes
+
+
+def in_agent_session(root):
+    """release-push D1: the same decision the git hooks make
+    (`gates discipline agent-session`, reading `discipline.agent-env`)."""
+    shim = Path(__file__).resolve().parent.parent / "bin" / "gates"
+    result = subprocess.run([sys.executable, str(shim), "discipline", "agent-session"],
+                            cwd=root, capture_output=True, text=True)
+    return result.returncode == 0
+
+
+def agent_session_refusal(root, version, notes):
+    """The refusal for a publish run inside an agent session: a release is the
+    maintainer's act, and the pre-push hook would refuse the release commit
+    anyway (#125). Writes the notes to a stable path when they resolve and
+    prints the commands `publish` would run, for a terminal outside the session."""
+    text = ("this is an agent session, and a release is published outside one "
+            "(the pre-push hook refuses an agent's push of the release commit)")
+    if version is None or notes is None:
+        return text
+    notes_rel = f"{STATE_DIR}/out/release-notes-v{version}.md"
+    (root / notes_rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / notes_rel).write_text(notes)
+    sequence = " && ".join(shlex.join(cmd) for _, cmds in publish_steps(version, notes_rel)
+                           for cmd in cmds)
+    return (f"{text}; the notes are in {notes_rel}. Run this in a terminal outside the "
+            f"agent session, from {root}:\n\n    {sequence}\n")
 
 
 def publish_steps(version, notes_file):
