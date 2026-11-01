@@ -29,7 +29,7 @@
 
 ## 6. Docs
 
-- [ ] 6.1 Document the approval check at merge, the sync route, the resolved `cd` forms and the exit-3 denial in SETUP.md and AUTOMATION.md. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
+- [x] 6.1 Document the approval check at merge, the sync route, the resolved `cd` forms and the exit-3 denial in SETUP.md and AUTOMATION.md. Verify that `scripts/release docs` reports no gap and `gates run ci` is green [oracle: none]
 
 ## Workflow follow-up
 

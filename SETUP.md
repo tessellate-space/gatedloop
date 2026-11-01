@@ -297,9 +297,9 @@ A change's failing tests are written **once per change, before its first task**,
 The authoring phase:
 1. The author reads `gates tests brief <change>` — the change's artifacts and task lines, each task's declared oracle (or that the author decides, for an untagged task), your `tests` rules, each task's surface rules, the built-in rule, the command `unit` is bound to (printed, never run), existing test *paths* near each task's code, and your shared fixtures. It reads public interfaces, never function bodies and never the contents of existing tests.
 2. It writes every task's tests into the **holding area**, `.gatedloop/authored/<change>/<N.M>/<real path>.authored` (the full intended file after that task), or `<N.M>/NO-TESTS` with a reason for a task that changes no behaviour. A task whose tests **all** pin behaviour the tree already has (characterization tests before a refactor, a guard for output the task must not change) also gets `<N.M>/CHARACTERIZATION` with its reason, beside its tests; a task with both `CHARACTERIZATION` and `NO-TESTS` is refused at handoff. A task mixing new red tests with such guards needs no declaration. The `.authored` suffix means no test runner discovers them, so `ci` stays green while they are committed.
-3. `gates tests handoff <change>` records every blob in the ledger; convention review checks the whole set once (`gates review record … --scope authored`); the holding area and the ledger are committed as `author tests: <change>`.
+3. `gates tests handoff <change>` records every blob in the ledger; convention review checks the whole set once (`gates review record … --scope authored`); the holding area and the ledger are committed as `author tests: <change>`. Once a task is placed, its holding directory is empty, so a later full handoff would drop it: `gates tests handoff` without `--task` then refuses, naming the placed task, and the tasks being re-authored are handed off with `--task <N.M>`.
 
-Per task, `gates tests place <N.M>` moves that task's tests onto their real paths, `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it.
+Per task, `gates tests place <N.M>` moves that task's tests onto their real paths (over the file as it was before the change, as main last delivered it at `git merge-base HEAD <target>`, or as an earlier placement left it — any other content is a test defect), `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it.
 
 A test the implementer judges wrong, or placed tests that pass before anything is implemented, go back to the author with `gates tests defect <N.M> --kind setup|assertion|green --detail …`. The kind is required, and each has its own cap per task:
 
@@ -474,7 +474,7 @@ merge requirement, are unaffected.
 ## `gates` command reference
 
 ```bash
-gates validate                 # check the manifest; exit 1 on any error
+gates validate                 # check the manifest; exit 1 on any error (a file that does not parse: one line naming its position, and any conflict markers)
 gates run ci                   # run the ci gate; exit with its code
 gates run unit                 # run the unit gate (skips cleanly if undeclared)
 gates run live-check           # run every hot surface's live-check
@@ -507,8 +507,8 @@ gates marker check-remote <gate> <sha>           # exit 0 only if the latest `ga
 gates record-merged <sha>                        # for a forge squash commit: record the change's merge row (under acceptance: self, its accept row first), archive it, one local commit; never pushes (a plan/<change> PR under self: attest it from the merge)
 gates approval attest <change> --merged <pr>     # under approval.plan: self, the plan PR's merge is the approval (merger, merge time; sha over the merge commit)
 gates handoff <change> [--json]                  # the planner-to-orchestrator payload, printed only when the plan is approved on the merge target; reads only
-gates ledger record-ready <change>               # append the `ready` row the implementer commits before READY TO MERGE
-gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint; --ref reads the change a merge's incoming ref names
+gates ledger record-ready <change>               # append the `ready` row the implementer commits before READY TO MERGE; prints the report's `gatedloop: gates {...}` block (ci, review: clean|findings|partial|none, live_check) from the ledger
+gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint, naming each tainted commit (a merge commit marked with the sync route); --ref reads the change a merge's incoming ref names
 gates lock status [--json]                       # each serialized gate's lock: free, or held by pid N (alive|dead?) for how long; flags "possibly hung"; names a merge waiting with priority
 gates tests brief <change>                       # the test author's inputs: artifacts, test and surface rules, runner, nearby test paths, fixtures
 gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger
@@ -626,6 +626,17 @@ matches the plan's current content. The policy is consulted by the *writers* onl
 which command is a legitimate way to populate the keys — never by the gate that
 reads them back. Declaring `self` does not weaken what the gate enforces; it only
 adds a second, machine-computed way to satisfy it.
+
+**The same check runs again at the merge and at acceptance.** `gates merge` step 1
+checks the plan approval before any evidence, in both modes, and every `gates
+acceptance attest` writer checks it before writing: the approval recorded on the merge
+target must still match the plan there, and the plan at the head being merged or
+accepted must hash to that recorded `approved_sha`. A plan amended on the target
+without a re-attest, or edited on the change branch after approval, stops there with
+the re-approval route. Under `approval.acceptance: self`, `gates record-merged` still
+records the merge row of such a change, because the forge merge happened, but no
+acceptance, and exits non-zero. An untagged `tasks.md` is outside the sha, so ticking
+or adding a task never needs re-approval.
 
 **"Present on the merge target" accepts a local counterpart, under `self` only.**
 Under `review`, "the merge target" is unconditionally the origin ref — a PR's
@@ -1137,6 +1148,7 @@ once the plugin is enabled — nothing in your project needs to opt in for these
 | Never commit on red `ci` | `PreToolUse` on `Bash(git commit *)` | Denies unless the staged diff is planning-grade (below) or a fresh `ci` marker's tree matches `git write-tree` of the staged index |
 | The implementer never edits an authored test, and runs it red first | `PreToolUse` on `Bash(git commit *)`, and the git `pre-commit` hook | After the `ci` marker check, `gates tests check` denies a placed or held test that differs from the handoff, and a placement with no failing `unit` run recorded after it. Past the hooks, `gates merge` step 1 runs `gates tests check --ref` on the branch head, and CI's `gates marker publish tests` posts the result as `gatedloop/tests` for branch protection to require |
 | `live-check` blocks the merge | `PreToolUse` on `Bash(git merge *)` | Denies unless a fresh `live-check` marker matches the branch-head tree |
+| A sync never commits past the gate | `PreToolUse` on `Bash(git merge *)` | Into a change branch, passes only a merge that creates no commit of its own (`--no-commit`, `--squash`, `--ff-only`, `--abort`, a fast-forward or an already-up-to-date merge). Git runs no commit hook for a merge commit, so any other is denied with the route: `git merge --no-commit <ref>`, then `gates run ci`, then `git commit` |
 | A human accepted the behaviour (only under a declared `approval.acceptance`) | `PreToolUse` on `Bash(git merge *)` | Denies unless the latest `acceptance` ledger row for the same tree is an `accept` |
 | Proposals run on the merge target or a `plan/*` branch based on it | `PreToolUse` on `Write` | Denies authoring a plan artifact (`proposal.md`/`design.md`/`specs/**`) on any other branch |
 | The scaffold obeys the same discipline | `PreToolUse` on `Bash(openspec new change *)` | Denies the scaffold step itself, before any change directory exists, on the same terms as authoring |
@@ -1166,6 +1178,13 @@ directory would check a commit against the *wrong* worktree's index and an *empt
 marker store, denying a genuinely green commit. A denial always names the repository
 it evaluated, so a mis-resolution is diagnosable from the message alone. There is
 nothing to configure here; it is how every hook above already resolves its repo.
+
+A `cd` target may be absolute, relative, `~`, `~/…`, `$HOME/…` or `${HOME}/…`, and a
+`cd` inside a leading `( … )` subshell governs only that subshell's commands. A target
+the hook cannot evaluate — another variable such as `cd "$LANE"`, `~user`, or a command
+substitution — is **denied** rather than judged against the session's checkout: the
+message names the `cd` and says to use an absolute path or `git -C <dir>`. (`gates hook
+git-cwd` exits 3 for it; every guarding hook turns that into the denial.)
 
 **A merge counts the lane's evidence.** Markers stay per worktree, so a lane's green
 `live-check` and unscoped `ci` are recorded in the lane's own store. When a merge brings

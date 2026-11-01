@@ -10,7 +10,7 @@ The workflow's hard rules used to live only in prompt text:
 |---|---|---|
 | Never commit on red `ci` | `skills/tdd-apply/SKILL.md` §Guardrails | `hooks/gate-commit.sh` (`PreToolUse` on `Bash(git commit *)`) |
 | Convention review clean before commit | `skills/tdd-apply/SKILL.md` §5f | the *verdict* stays a prompt instruction (an LLM judgement has no oracle), but the *invocation* is now recorded: `gates review record <clean\|findings>` appends a ledger row pinned to the reviewed tree, so the claim is auditable after the fact — see the note under §0.3 below |
-| `live-check` blocks the merge | `skills/tdd-apply/SKILL.md` §7.5 | `hooks/gate-merge.sh` (`PreToolUse` on `Bash(git merge *)`). Only a merge into the integration target is gated (`gates discipline merge-scope`); a sync of the target into a change branch passes. A command that switches branches before it merges (`git checkout my-change && git merge --ff-only origin/main`) is judged by the branch the switch names (`merge-scope --branch`, friction-fixes D5); a switch the hook cannot resolve to one branch (detached, a path checkout, another directory) stays gated, and the denial says to run the merge as its own command. Both marker checks pass `--ref <incoming>`, so the store of the worktree holding that branch is read after the merging worktree's own (cross-worktree-evidence D1–D2); a denial names every store it read |
+| `live-check` blocks the merge | `skills/tdd-apply/SKILL.md` §7.5 | `hooks/gate-merge.sh` (`PreToolUse` on `Bash(git merge *)`). Only a merge into the integration target is gated (`gates discipline merge-scope`); a sync of the target into a change branch passes when it creates no commit of its own (`--no-commit`, `--squash`, `--ff-only`, `--abort`, a fast-forward or an already-up-to-date merge) and is denied otherwise, naming the route (`git merge --no-commit <ref>`, `gates run ci`, `git commit`; loop-hardening D3). A command that switches branches before it merges (`git checkout my-change && git merge --ff-only origin/main`) is judged by the branch the switch names (`merge-scope --branch`, friction-fixes D5); a switch the hook cannot resolve to one branch (detached, a path checkout, another directory) stays gated, and the denial says to run the merge as its own command. Both marker checks pass `--ref <incoming>`, so the store of the worktree holding that branch is read after the merging worktree's own (cross-worktree-evidence D1–D2); a denial names every store it read |
 | Full `ci` is always the last word — a scoped marker gates a commit, never the merge | `openspec/changes/scale-gate-cost/design.md` D2 | `hooks/gate-merge.sh` also requires `gates gate-marker check ci <tree> --require-scope full` on the branch head; scoped = per-commit locality (this tree, this task), full = pre-merge truth (the whole declared `ci`) |
 | Agent stops before the merge | `agents/tdd-implementer.md` §4 | still a prompt instruction for the agent's own restraint, but `requireApproval: true` integration mode now makes it structural too — nothing except a human can supply the review a PR-based merge needs. Where the opt-in permission scaffolding is in place (§3), its `ask` rule on `Bash(gates merge *)`, the command that integrates, prompts a human; a lane's routine `git merge` sync of the target into its own branch does not (merge-lane-friction D4), and `gates doctor`'s `merge-checkpoint` row flags the earlier `Bash(git merge *)` rule |
 | Resumable — done ⟺ committed | `agents/tdd-implementer.md` §2 | unchanged in mechanism (git itself), but now also backed by the durable per-change ledger (`.gatedloop/runs/<change>.jsonl`) and `hooks/persist-loop-state.sh` |
@@ -547,3 +547,49 @@ path, so the gap was a reader:
   by the task in flight, which is recorded at its commit or the session stop.
 
 See the `token-ledger` change's design, D1–D8.
+
+
+## Update (`loop-hardening`): the plan approval at the merge, and denials that name their cause
+
+An adopter's orchestrator report, checked on 0.10, found five places where a
+guarantee was stated but not enforced, or a denial named the wrong cause:
+
+- **The plan approval is checked at the merge and at acceptance.** The approval
+  was checked when implementation started, and never again. `gates merge` step 1
+  now runs it first, in both modes: the approval recorded on the target must still
+  match the plan there, and the plan on the branch head must hash to that recorded
+  sha. Every acceptance writer (`--local`, `--pr`, `--merged`) runs the same check
+  before writing. Under `approval.acceptance: self`, `gates record-merged` still
+  records the merge row, because the forge merge happened, but no acceptance, and
+  exits non-zero naming the re-approval. An untagged `tasks.md` stays outside the
+  sha, so a tick never needs re-approval (D1, D2; #101).
+- **A sync into a change branch may not commit by itself.** Git runs no pre-commit
+  hook for a merge commit, so a plain `git merge origin/main` in a lane created a
+  commit no gate saw; the audit tainted it, and the taint surfaced only at merge
+  step 1. The merge hook now denies a committing sync and names the route:
+  `git merge --no-commit <ref>`, then `gates run ci`, then `git commit`, an ordinary
+  commit both commit hooks gate. The taint refusal lists each tainted commit's
+  short sha and subject and marks a merge commit (D3–D5; #108).
+- **An unparseable manifest fails loud in one line.** A `.gates.yaml` with
+  conflict markers crashed every subcommand with a traceback, or, without PyYAML,
+  parsed silently. Both paths now exit 1 with the file, the position and the
+  reason. `hooks/gate-commit.sh` passes the shim's output through instead of
+  calling every `check-worktree` failure a shared branch (D6, D7; #109).
+- **The hooks judge the repository the command runs in, or deny.** `hook git-cwd`
+  expands `~`, `~/…`, `$HOME/…` and `${HOME}/…`, and a `cd` inside a leading `(`
+  governs only that subshell. A `cd` it still cannot evaluate (another variable,
+  `~user`, a command substitution) used to fall through to the session's checkout;
+  `git-cwd` now exits 3, and every hook that guards a command denies with "use an
+  absolute path or `git -C <dir>`". This supersedes worktree-native-loop D1's
+  fall-through for the `cd` rung only (D8; #110).
+- **A handoff never loses tests, and never blames the author for main.**
+  Placement accepts a test file's content at `git merge-base HEAD <target>`, so a
+  pre-existing test main changed after the handoff is placed over rather than
+  called a defect. A full `gates tests handoff` refuses when it would drop a task
+  that is already placed (D9, D10; #111).
+- **The READY report's gate fields come from the ledger.** `gates ledger
+  record-ready` prints `gatedloop: gates {"ci": …, "review": …, "live_check": …}`,
+  with `review` one of `clean`, `findings`, `partial` or `none`, and
+  `tdd-implementer` copies it unchanged (D11; #112).
+
+See the `loop-hardening` change's design, D1–D12.
