@@ -1,6 +1,6 @@
 ## 1. The push gate
 
-- [ ] 1.1 `_push_changes` leaves out a change branch whose tip is an ancestor of the merge target's remote-tracking ref, and the `check-push` refusal for a commit that carries no change says it belongs to no change in flight instead of naming one (design D2, D3) [oracle: unit]
+- [x] 1.1 `_push_changes` leaves out a change branch whose tip is an ancestor of the merge target's remote-tracking ref, and the `check-push` refusal for a commit that carries no change says it belongs to no change in flight instead of naming one (design D2, D3) [oracle: unit]
 
 ## 2. Release tooling
 
