@@ -5368,6 +5368,33 @@ def _append_taint_row(root: Path, change: str, sha: str, tree: str) -> None:
     })
 
 
+# taint-preclear D1/D2: a commit with no green `ci` row of its own is
+# `vouched` -- not tainted, not counted as individually gated -- when it is an
+# ancestor of the audited head and a green UNSCOPED `ci` row names the head's
+# tree, compared ledger-blind. Ancestry, never timestamps: a commit made after
+# that `ci` is a new head whose tree the old row does not name. A scoped `ci`
+# ran one surface's command, so it vouches for nothing outside that surface.
+VOUCHED_EVENT = "vouched"
+
+
+def _append_vouched_row(root: Path, change: str, sha: str, tree: str) -> None:
+    _append_ledger_row(root, {
+        "ts": _now_iso(), "gate": VOUCHED_EVENT, "exit": None, "duration_ms": 0,
+        "change": change, "task": None, "tree": tree, "attempt": None,
+        "approved_by": _read_approved_by(root, change), "sha": sha,
+    })
+
+
+def _vouched_by_head(root: Path, matcher: "_GreenCiMatcher", sha: str,
+                     head: str | None) -> bool:
+    if not head:
+        return False
+    head_tree = _commit_tree(root, head)
+    if head_tree is None or not matcher.has_unscoped(head_tree):
+        return False
+    return _is_ancestor(root, sha, head)
+
+
 def cmd_audit(m: dict, root: Path, args) -> int:
     """The Stop-hook audit pass (design D6). Detection only — it cannot un-create
     a commit; its teeth are the taint that blocks the merge (D7). Exits non-zero
@@ -5409,6 +5436,16 @@ def cmd_audit(m: dict, root: Path, args) -> int:
         if matches:
             _classify_gated_commit(root, change, sha, tree, matches)
             already.add(sha)
+            continue
+        if _vouched_by_head(root, matcher, sha, head):
+            _append_vouched_row(root, change, sha, tree)
+            already.add(sha)
+            print(
+                f"gatedloop: AUDIT — commit {sha} on change '{change}' has no green-ci "
+                f"record of its own; a green unscoped ci on the branch head ({head}) "
+                "vouches for it: recorded as vouched, not tainted.",
+                file=sys.stderr,
+            )
             continue
         _append_taint_row(root, change, sha, tree)
         already.add(sha)
@@ -5454,11 +5491,26 @@ class _GreenCiMatcher:
             return hit
         if not self._by_raw:
             return []
+        return self._norm_index().get(_normalize_tree(self._root, tree), [])
+
+    def _norm_index(self) -> dict[str, list[dict]]:
         if self._by_norm is None:
             self._by_norm = {}
             for raw, rs in self._by_raw.items():
                 self._by_norm.setdefault(_normalize_tree(self._root, raw), []).extend(rs)
-        return self._by_norm.get(_normalize_tree(self._root, tree), [])
+        return self._by_norm
+
+    def has_unscoped(self, tree: str) -> bool:
+        """Whether a green `ci` row of scope `full` (or none) names `tree`,
+        raw or ledger-blind (taint-preclear D1). Both sides are consulted: a
+        raw hit that is only scoped must not hide an unscoped normalized one."""
+        def unscoped(rs):
+            return any((r.get("scope") or "full") == "full" for r in rs)
+        if unscoped(self._by_raw.get(tree, [])):
+            return True
+        if not self._by_raw:
+            return False
+        return unscoped(self._norm_index().get(_normalize_tree(self._root, tree), []))
 
 
 # escalation-outcomes D5 (the implementer's choice it leaves open): a commit
@@ -5476,6 +5528,7 @@ def _existing_classified_shas(rows: list[dict]) -> set[str]:
         if r.get("sha") and (
             (r.get("gate") == INTERVENTION_EVENT and r.get("cause") == "human-commit")
             or r.get("gate") == UNCLASSIFIED_COMMIT_EVENT
+            or r.get("gate") == VOUCHED_EVENT
         )
     }
 
@@ -7953,6 +8006,8 @@ NON_GATE_EVENTS = frozenset({
     # escalation-outcomes D2/D5: escalation events and the audit's
     # unclassifiable-commit disclosure, never gate outcomes.
     "halt", "intervention", UNCLASSIFIED_COMMIT_EVENT,
+    # taint-preclear D2: a commit the head's green unscoped ci vouched for.
+    VOUCHED_EVENT,
     # acceptance-gate D2: a human's verdict on the increment, never a gate run.
     ACCEPTANCE_EVENT,
     # split-test-author D4: the authored-test lifecycle, never a gate run.

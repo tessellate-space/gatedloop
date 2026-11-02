@@ -120,9 +120,12 @@ class TestMergeGateAuditsBeforeTheTaintCheck(unittest.TestCase):
     """escalation-outcomes D5 part 3: a commit created after the last
     session stop has never been audited. The merge gate runs `gates audit`
     itself, immediately before `gates taint check`, so such a commit is
-    tainted (no green record) before the merge is decided."""
+    classified before the merge is decided. taint-preclear D1: the gated head
+    here has a green unscoped ci, so the merge gate's own audit records the
+    ungated ancestor as `vouched` rather than tainting it -- the row exists
+    only because the hook audited before deciding."""
 
-    def test_unaudited_ungated_commit_is_tainted_and_the_merge_denied(self):
+    def test_unaudited_ungated_commit_is_audited_and_vouched_by_the_head(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _init_repo(root)
@@ -144,22 +147,26 @@ class TestMergeGateAuditsBeforeTheTaintCheck(unittest.TestCase):
             lc = _run_gates(root, "run", "live-check", "--all", "--change", "my-change")
             self.assertEqual(lc.returncode, 0, lc.stderr)
 
+            bypass = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=root,
+                                    capture_output=True, text=True).stdout.strip()
+
             # No audit has run yet (no Stop since the bypass).
             self.assertNotEqual(_run_gates(root, "taint", "check").returncode, 1)
+            self.assertFalse((root / ".gatedloop" / "runs" / "my-change.jsonl").read_text().count('"vouched"'))
 
             # One command that switches to the target and integrates: the
             # hook runs on the change branch, so the change resolves, and the
             # merge is gated because it lands on the target (hook-correctness
             # D2). A bare `git merge main` here is a sync, and not gated.
             r = _run_hook(MERGE_HOOK, root, "git checkout main && git merge --squash my-change")
-            self.assertEqual(r.returncode, 2, r.stderr)
-            self.assertIn("taint", r.stderr)
+            self.assertEqual(r.returncode, 0, r.stderr)
             rows = [
                 json.loads(x) for x in
                 (root / ".gatedloop" / "runs" / "my-change.jsonl").read_text().splitlines()
                 if x.strip()
             ]
-            self.assertEqual([x["gate"] for x in rows].count("taint"), 1)
+            self.assertEqual([x["gate"] for x in rows].count("taint"), 0)
+            self.assertEqual([x["sha"] for x in rows if x["gate"] == "vouched"], [bypass])
 
 
 class TestMergeGateAuditsTheIncomingChangeFromThePrimary(unittest.TestCase):
@@ -167,8 +174,9 @@ class TestMergeGateAuditsTheIncomingChangeFromThePrimary(unittest.TestCase):
     ref names. Run bare, it resolved the change from the current branch --
     the target during an integrating merge -- so from a primary on `main`
     it audited nothing and an unaudited ungated commit on the lane slipped
-    through. The audit now runs where the branch lives, so the taint lands in
-    the ledger `taint check --ref` reads."""
+    through. The audit now runs where the branch lives, so its rows land in
+    the ledger `taint check --ref` reads (taint-preclear D1: here a `vouched`
+    row, since the lane's gated head has a green unscoped ci)."""
 
     def _env(self, root: Path) -> dict:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -177,7 +185,7 @@ class TestMergeGateAuditsTheIncomingChangeFromThePrimary(unittest.TestCase):
         env["CLAUDE_PROJECT_DIR"] = str(root)
         return env
 
-    def test_unaudited_ungated_lane_commit_is_tainted_from_the_primary(self):
+    def test_unaudited_ungated_lane_commit_is_audited_from_the_primary(self):
         with tempfile.TemporaryDirectory() as tmp:
             primary = Path(tmp) / "primary"
             primary.mkdir()
@@ -198,6 +206,8 @@ class TestMergeGateAuditsTheIncomingChangeFromThePrimary(unittest.TestCase):
             (lane / "bypass.txt").write_text("bypass\n")
             _git(lane, "add", "bypass.txt")
             _git(lane, "commit", "-m", "bypass")
+            bypass = subprocess.run(["git", "rev-parse", "HEAD"], cwd=lane,
+                                    capture_output=True, text=True).stdout.strip()
             # A gated head with fresh lane markers, so the merge reaches the
             # taint check (cross-worktree-evidence: the lane's store counts).
             (lane / "task.txt").write_text("done\n")
@@ -211,12 +221,12 @@ class TestMergeGateAuditsTheIncomingChangeFromThePrimary(unittest.TestCase):
             r = subprocess.run(["bash", str(MERGE_HOOK)], input=payload, cwd=str(primary),
                                env=env, capture_output=True, text=True)
 
-            self.assertEqual(r.returncode, 2, r.stderr)
-            self.assertIn("taint", r.stderr)
+            self.assertEqual(r.returncode, 0, r.stderr)
             lane_rows = [json.loads(x) for x in
                          (lane / ".gatedloop" / "runs" / "my-change.jsonl").read_text().splitlines()
                          if x.strip()]
-            self.assertEqual([x["gate"] for x in lane_rows].count("taint"), 1)
+            self.assertEqual([x["gate"] for x in lane_rows].count("taint"), 0)
+            self.assertEqual([x["sha"] for x in lane_rows if x["gate"] == "vouched"], [bypass])
             self.assertFalse((primary / ".gatedloop" / "runs" / "main.jsonl").exists())
 
 
