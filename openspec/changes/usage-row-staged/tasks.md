@@ -8,4 +8,4 @@
 
 ## 3. Docs
 
-- [ ] 3.1 In SETUP.md's git-hook section and AUTOMATION.md's token-ledger notes, say that a commit at either layer stages its own usage row, and that a copied hook needs `gates hook install` (reported by `gates doctor` as `stale-copy`). Note the Upgrading line the 0.11.1 CHANGELOG must carry (design D4) [oracle: none]
+- [x] 3.1 In SETUP.md's git-hook section and AUTOMATION.md's token-ledger notes, say that a commit at either layer stages its own usage row, and that a copied hook needs `gates hook install` (reported by `gates doctor` as `stale-copy`). Note the Upgrading line the 0.11.1 CHANGELOG must carry (design D4) [oracle: none]

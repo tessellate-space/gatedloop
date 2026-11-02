@@ -372,6 +372,7 @@ loop:
 The ledger records what the host session spent on each task (`token-ledger`). Two hooks write a `usage` row through `gates usage record`, and nothing else does:
 
 - **At a gated commit.** Once `hooks/gate-commit.sh` has allowed a commit, it passes the hook input's `transcript_path` to `gates usage record --stage`. The row covers the task's window, and the ledger is staged so the row lands in the commit it costs.
+- **At a git-layer commit.** The git `pre-commit` hook (`gates hook install`) has no hook input, so inside an agent session it records a `no-transcript` row with null counts. It passes `--stage` too, so a commit at either layer leaves the ledger clean. A commit made through the Bash tool fires both hooks and records both rows; the null-count one changes no total.
 - **At every session stop.** `hooks/continue-loop.sh` records the task in flight before it decides whether to continue, so a task that halts or is abandoned is costed up to the stop. With no task in flight (the authoring phase), the row is `task: null`, the unattributed bucket.
 
 A row holds `task`, `window` (`from`, `to`), `messages` (assistant messages counted, subagents' included), `source`, and `tokens`, which maps each model name to its `input`, `output`, `cache_read` and `cache_write` counts. It holds counts only, never a line of transcript text. A window starts at the later of the task's latest `gates task start` and the end of its latest counted usage row, so two flushes never count a message twice: the second writes zero. `source` says where the counts came from:
@@ -1313,7 +1314,10 @@ worktree. A linked worktree's private `.git/worktrees/<name>/` is never used.
 A direct install writes a **copy** of the shipped template, and a copy does not change
 when the plugin does: a hook installed before 0.5.0 still runs the older marker-only
 check (it denies a ledger-only or planning-only commit made outside the tool layer).
-Run `gates hook install` again to refresh it. It recognizes its own copy by the
+Run `gates hook install` again to refresh it. A copy installed before 0.11.1 records its
+usage row without staging it, so every commit leaves the ledger dirty and `gates merge`
+can't detach onto the target (#140); `gates doctor` reports it as `stale-copy`, and a
+refresh fixes it. It recognizes its own copy by the
 template's header line, and when the copy's bytes differ from the shipped template
 (an older template, or a local edit) it saves the old body to
 `pre-commit.gatedloop-prev` (or `pre-push.gatedloop-prev`) beside the hook, writes the shipped template, keeps it
