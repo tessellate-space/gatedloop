@@ -92,7 +92,7 @@ echo "${commit_out}"
 # change a test, so the lock has nothing to judge in it (as in the tool hook).
 # Its usage is still recorded below (token-ledger D7).
 if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
-  "${GATES}" usage record >/dev/null 2>&1 || true
+  "${GATES}" usage record --stage >/dev/null 2>&1 || true
   exit 0
 fi
 
@@ -108,6 +108,6 @@ fi
 # transcript: record it as a `no-transcript` usage row (null counts). Such a
 # row never moves the task's window, so the next readable flush still covers
 # the span. Recording can never deny the commit.
-"${GATES}" usage record >/dev/null 2>&1 || true
+"${GATES}" usage record --stage >/dev/null 2>&1 || true
 
 exit 0

@@ -1,6 +1,6 @@
 ## 1. The git layer stages its usage row
 
-- [ ] 1.1 In `templates/git-hooks/pre-commit`, pass `--stage` to both `gates usage record` calls (ledger-grade and normal path). Tests install the hook in a real repo on a change branch with a ledger and, for `git commit`, `git commit -a` and `git commit <paths>`, assert that the commit holds the `no-transcript` row and `git status --porcelain` is empty for the ledger (design D1, D2) [oracle: unit]
+- [x] 1.1 In `templates/git-hooks/pre-commit`, pass `--stage` to both `gates usage record` calls (ledger-grade and normal path). Tests install the hook in a real repo on a change branch with a ledger and, for `git commit`, `git commit -a` and `git commit <paths>`, assert that the commit holds the `no-transcript` row and `git status --porcelain` is empty for the ledger (design D1, D2) [oracle: unit]
 
 ## 2. Merge step 1 leaves the ledger clean
 
