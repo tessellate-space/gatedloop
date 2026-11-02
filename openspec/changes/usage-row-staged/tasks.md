@@ -4,7 +4,7 @@
 
 ## 2. Merge step 1 leaves the ledger clean
 
-- [ ] 2.1 In `_commit_ledger_rows`, after the commit, reset the ledger's index entry to HEAD and re-check its status, halting at the same step with an explicit message if it's still dirty. A test runs `gates merge` with the shipped git hook installed in the lane and trailing rows pending, and asserts that step 1's commit holds the hook's row and the merge gets past step 2's detach (design D3) [oracle: unit]
+- [x] 2.1 In `_commit_ledger_rows`, after the commit, reset the ledger's index entry to HEAD and re-check its status, halting at the same step with an explicit message if it's still dirty. A test runs `gates merge` with the shipped git hook installed in the lane and trailing rows pending, and asserts that step 1's commit holds the hook's row and the merge gets past step 2's detach (design D3) [oracle: unit]
 
 ## 3. Docs
 

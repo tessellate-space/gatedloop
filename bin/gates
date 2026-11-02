@@ -12511,6 +12511,22 @@ def _commit_ledger_rows(wt: Path, change: str, message: str, step: int = 1) -> s
                 step, f"could not commit the ledger rows in {wt} (`git {cmd[0]}`): "
                 f"{(out.stderr or out.stdout).strip()}",
             )
+    # usage-row-staged D3: a pathspec commit updates the real index with the
+    # path BEFORE the pre-commit hook runs, so a row the hook appends and
+    # stages reaches the commit but not `.git/index`. Align the index entry
+    # with the new HEAD (which already holds the working tree's content), then
+    # re-check: a ledger still dirty halts here, not as a checkout error at
+    # step 2. No loop, no second commit.
+    _git(wt, "reset", "-q", "--", rel)
+    after = _git(wt, "status", "--porcelain", "--", rel)
+    if after.returncode != 0 or after.stdout.strip():
+        detail = after.stderr.strip() if after.returncode != 0 else after.stdout.strip()
+        raise _MergeHalt(
+            step, f"the ledger {rel} in {wt} still has uncommitted changes after its "
+            f"commit ({detail}): a pre-commit hook appended rows it did not stage. "
+            "If `gates doctor` reports the commit hook as a stale copy, run "
+            "`gates hook install`.",
+        )
     return _rev(wt, "HEAD")
 
 
