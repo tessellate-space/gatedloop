@@ -10884,9 +10884,13 @@ def _push_merge_row(root: Path, m: dict, sha: str, rows: list[dict]) -> str | No
     return None
 
 
-def _push_changes(root: Path, sha: str, target_branch: str) -> list[str]:
+def _push_changes(root: Path, sha: str, target_branch: str,
+                  tracking: str | None = None) -> list[str]:
     """The changes a pushed commit carries in: local change branches whose tip
-    it contains and whose change is still active in its tree."""
+    it contains and whose change is still active in its tree. With the
+    target's remote-tracking ref, a branch whose tip that ref already holds
+    brings nothing to the push -- a change branch freshly cut from it, or one
+    already merged -- and is left out (release-push D2)."""
     out = _git(root, "for-each-ref", "--merged", sha, "--format=%(refname:short)", "refs/heads/")
     names = []
     for name in out.stdout.splitlines() if out.returncode == 0 else []:
@@ -10894,8 +10898,12 @@ def _push_changes(root: Path, sha: str, target_branch: str) -> list[str]:
         if not name or name == target_branch or "/" in name:
             continue
         has = _git(root, "cat-file", "-e", f"{sha}:openspec/changes/{name}")
-        if has.returncode == 0:
-            names.append(name)
+        if has.returncode != 0:
+            continue
+        if tracking and _git(root, "merge-base", "--is-ancestor",
+                             f"refs/heads/{name}", tracking).returncode == 0:
+            continue
+        names.append(name)
     return sorted(names)
 
 
@@ -10976,20 +10984,30 @@ def _check_push(m: dict, root: Path, sha: str, remote_ref: str | None) -> int:
         how = "it" if vouched == full else f"{vouched[:12]}, and only ledger and planning paths follow it"
         print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — a merge row records {how}")
         return 0
-    changes = _push_changes(root, full, branch)
+    remote = _split_target(target)[0] or "origin"
+    tracking = f"refs/remotes/{remote}/{branch}"
+    changes = _push_changes(root, full, branch, tracking if _rev(root, tracking) else None)
     problems = _push_tree_problems(m, root, full, changes)
     if not problems:
         print(f"gatedloop: push of {full[:12]} to '{branch}' allowed — the merge gate's "
               "incoming-tree checks hold for its tree")
         return 0
-    name = changes[0] if len(changes) == 1 else "<change>"
+    if not changes:
+        # release-push D3: no change to name, so no `gates merge` remedy.
+        remedy = (f"\ngatedloop: commit {full[:12]} belongs to no change in flight — nothing "
+                  "`gates merge` can prove. A commit like this reaches the target through a "
+                  "pull request, where the forge's checks apply, or a push outside an agent "
+                  "session.")
+    else:
+        name = changes[0] if len(changes) == 1 else "<change>"
+        among = "" if len(changes) == 1 else f" (it carries {', '.join(changes)})"
+        remedy = (f"\ngatedloop: integrate through `gates merge {name}`{among}: it proves the "
+                  "head, records the merge row and pushes once. A raw merge pushed by hand "
+                  "reaches the shared history unchecked, which is what this hook refuses.")
     print(
         f"gatedloop: push to '{branch}' denied at the git layer — commit {full[:12]} is not "
         f"proven: no merge row records it, and the incoming-tree checks fail:\n"
-        + "\n".join(problems)
-        + f"\ngatedloop: integrate through `gates merge {name}`: it proves the head, records "
-        "the merge row and pushes once. A raw merge pushed by hand reaches the shared "
-        "history unchecked, which is what this hook refuses.",
+        + "\n".join(problems) + remedy,
         file=sys.stderr,
     )
     return 1

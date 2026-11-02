@@ -1269,7 +1269,8 @@ updates the merge target is denied unless `gates discipline check-push <sha>
 checks hold for its tree (`live-check` and full `ci` markers, `verify` where declared,
 and for each change it carries in, no unresolved taint, the authored-test lock and
 acceptance where declared). A denial names each unmet check and `gates merge <change>`
-as the remedy; other branches and deletions pass silently, and neither hook runs a
+as the remedy, naming only a change whose own commits the push carries in; a commit no
+change owns is refused as belonging to no change in flight. Other branches and deletions pass silently, and neither hook runs a
 gate. Under `integration.mode: pull-request` the forge pushes the target, so the hook
 never sees that push; branch protection covers it.
 

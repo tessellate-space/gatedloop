@@ -39,9 +39,16 @@ _GIT_LEAKS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTOR
               "GIT_COMMON_DIR", "GIT_PREFIX")
 
 
+# The agent-session variable (`discipline.agent-env`'s default): `publish`
+# refuses inside an agent session (release-push D1), so a test sets it
+# explicitly rather than inheriting it from whatever ran the suite.
+_AGENT_ENV = "CLAUDECODE"
+
+
 def clean_env(**extra):
-    """A copy of the environment for a child process; os.environ is never mutated."""
-    env = {k: v for k, v in os.environ.items() if k not in _GIT_LEAKS}
+    """A copy of the environment for a child process, outside any agent
+    session unless `extra` sets one; os.environ is never mutated."""
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LEAKS and k != _AGENT_ENV}
     env.update(extra)
     return env
 
@@ -553,6 +560,34 @@ class TestPublish(CutFixture):
         self.assertIn("git push origin main", out)
         self.assertNotIn("release", [c["args"][0] for c in self.gh_calls()])
 
+
+    # release-push D1: `publish` refuses inside an agent session, before any
+    # write, and hands the maintainer the notes file and the exact commands.
+    NOTES = ".gatedloop/out/release-notes-v0.5.0.md"
+
+    def test_publish_from_an_agent_session_writes_nothing_but_the_notes(self):
+        # Scenario "Publish from an agent session".
+        notes = self.expected_notes()
+        result = self.repo.run("publish", env=dict(self.env, CLAUDECODE="1"))
+        self.assert_nothing_written(result)
+        self.assertEqual(self.origin_git("log", "--format=%s", f"{self.head}..main").stdout, "")
+        self.assertIn("agent session", result.stderr)
+        self.assertEqual(self.repo.read(self.NOTES), notes)
+        lines = [ln.strip() for ln in result.stderr.splitlines() if ln.strip()]
+        sequence = next(ln for ln in lines if ln.startswith("git add"))
+        self.assertIn("git commit -q -m 'Release 0.5.0'", sequence)
+        self.assertLess(sequence.index("git push origin main"),
+                        sequence.index("git tag -a v0.5.0"))
+        self.assertTrue(sequence.endswith(f"--notes-file {self.NOTES}"), sequence)
+        self.assertNotIn("env -u", result.stderr)
+
+    def test_publish_outside_an_agent_session_still_publishes(self):
+        # Scenario "Publish outside an agent session": the fixture's env
+        # carries no agent-env variable.
+        self.assertNotIn("CLAUDECODE", self.env)
+        result = self.repo.run("publish", env=self.env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.origin_git("cat-file", "-t", "v0.5.0").stdout.strip(), "tag")
 
 class TestReminderHook(RepoTestCase):
     """`status --hook`: one line of SessionStart context, or nothing, never a block."""
