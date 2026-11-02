@@ -5,4 +5,4 @@
 
 ## 2. Docs
 
-- [ ] 2.1 Describe vouching by the head in AUTOMATION.md's enforcement layer 3 and SETUP.md's taint section (design D1–D3) [oracle: none]
+- [x] 2.1 Describe vouching by the head in AUTOMATION.md's enforcement layer 3 and SETUP.md's taint section (design D1–D3) [oracle: none]
