@@ -334,3 +334,63 @@ turn (undoing a task) into the loop's own vocabulary.
 **Why not now.** No halt cause or acceptance verdict asks for it yet; a rejected
 acceptance today restarts the change. Promote when a `reject` with a named task
 becomes a recorded pattern in `gates stats --outcomes`.
+
+---
+
+## Pair with an upstream design reviewer (elephant-goldfish-model)
+
+**What.** Document, and make cheap, running Google's
+[elephant-goldfish-model](https://github.com/google/elephant-goldfish-model) (EGM)
+upstream of gatedloop. EGM drafts a design with a deep-context agent and stress-tests
+it with fresh-context reviewers before code. gatedloop starts where EGM stops: at the
+approved plan. Three pieces, cheapest first:
+
+1. **A pairing section in SETUP.md:** run `/egm:egm-review` on the change's `design.md`
+   before `/gatedloop:propose` opens the plan PR, and link its findings in the PR body.
+2. **Plan-review evidence beside the approval:** `gates approval` records that a
+   plan review ran, and on which content, the way `review-provenance` records a
+   convention review. It records and never blocks, for the same reason review never
+   blocks a commit: the verdict is an LLM judgement.
+3. **The loop's outcomes as review input:** `weak-spec` and `oracle-conflict` halts are
+   evidence that a plan left a decision to the implementer, which is what EGM's
+   implementation-readiness reviewer (its "Zero-Decision Rule") exists to catch.
+   `gates stats --outcomes` per change, handed to the next design review, closes that
+   loop from the other side.
+
+**Against the rejection test.** Piece 1 gets a team running faster: ours, as a doc.
+Piece 2 makes a stated practice checkable: ours, if it stays record-only. Authoring or
+judging the design is EGM's, and OpenSpec's: not ours, and nothing here does it. No
+shipped prompt may name EGM (`stack-agnostic-prompts` spirit). The pairing lives in
+docs, and piece 2 must accept any plan reviewer.
+
+**Why not now.** EGM writes `design_draft.md` and `docs/designs/`, while OpenSpec
+writes `openspec/changes/<name>/design.md`. Nobody has yet run the two together on one
+change, so the hand-off is guesswork. One maintainer has run gatedloop's loop so far.
+
+**Promote when.** An adopter, or this repo, has run EGM's review on an OpenSpec design
+for a few changes and the hand-off has settled. Piece 3 waits for enough `weak-spec`
+halts in `gates stats --outcomes` to show a pattern.
+
+---
+
+## Ship an allowlisted runtime, not the whole repository
+
+**What.** Build the installed plugin from an allowlist (commands, skills, agents,
+hooks, `bin/`, schema, templates, adoption catalogue), and keep `tests/`, `evals/`,
+`openspec/`, `scripts/` and the docs site out of adopters' plugin caches. Add a `ci`
+check that the published runtime matches a fresh build byte for byte. EGM does this
+with `scripts/pack_plugin.py` and a checked-in `distributions/claude/`, plus a test
+that refuses drift.
+
+**Against the rejection test.** Makes `self-contained-plugin` and
+`plugin-relative-paths` enforceable at the boundary that matters: what is copied on
+install. Ours.
+
+**Why not now.** Nothing breaks today: the extra files are inert. `prompt-evals` adds
+`evals/` at the root, which makes the gap bigger, not urgent. The marketplace install
+copies the repository as-is, so an allowlist means a second published ref or
+directory. That is a release-process change, and should be weighed with
+`plugin-release`.
+
+**Promote when.** The plugin cache size or an adopter's review of what gets installed
+makes it matter, or the next release-process change opens that area anyway.
