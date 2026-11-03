@@ -7,4 +7,4 @@
 
 ## 2. The ci matrix (D2)
 
-- [ ] 2.1 Add `include: [{os: ubuntu-24.04, python: '3.13', openspec: '1.16.0'}]` to the `ci` matrix in `.github/workflows/gatedloop.yml`, leaving `PRIMARY` on 1.14.3 and the `record` job untouched. Verify on the implementation PR that five legs run, the 1.16.0 leg runs `gates run ci`, and only the 1.14.3 ubuntu/3.13 leg posts `gatedloop/ci` and `gatedloop/tests` [oracle: none]
+- [x] 2.1 Add `include: [{os: ubuntu-24.04, python: '3.13', openspec: '1.16.0'}]` to the `ci` matrix in `.github/workflows/gatedloop.yml`, leaving `PRIMARY` on 1.14.3 and the `record` job untouched. Verify on the implementation PR that five legs run, the 1.16.0 leg runs `gates run ci`, and only the 1.14.3 ubuntu/3.13 leg posts `gatedloop/ci` and `gatedloop/tests` [oracle: none]
