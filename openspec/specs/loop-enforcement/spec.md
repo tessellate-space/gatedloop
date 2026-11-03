@@ -541,8 +541,16 @@ detection after the effect, not prevention, and SHALL NOT be presented as preven
 The audit SHALL scope itself to the change branch's own commits: a commit already
 reachable from the resolved merge target SHALL be exempt from tainting, because it
 was gated by its own change before landing there. Merge-target ancestry SHALL be the
-only exemption — authorship, committer identity, or timestamps SHALL NOT exempt a
-commit. When no merge target can be resolved, the audit SHALL keep its current
+only exemption from auditing — authorship, committer identity, or timestamps SHALL NOT
+exempt a commit.
+
+A commit whose tree has no green-`ci` row of its own SHALL be recorded as `vouched`,
+not tainted, when it is an ancestor of the branch head being audited and a green,
+unscoped `ci` row names that head's tree, compared ledger-blind as the tree join is.
+A `vouched` row SHALL name the commit and SHALL NOT count as an incident or as an
+individually gated commit. A scoped `ci` on the head SHALL NOT vouch, and with no
+green unscoped `ci` on the head the commit SHALL be tainted as before. Commit
+timestamps SHALL NOT be read for vouching. When no merge target can be resolved, the audit SHALL keep its current
 behaviour and consider every commit in the walk (erring toward auditing more, never
 toward silently skipping any).
 
@@ -598,6 +606,31 @@ session stop is tainted or classified before the merge decision is made.
   last session stop
 - **THEN** the merge gate runs the audit first, so that commit is tainted (no green
   record) or classified (human-gated) before the taint check that follows
+
+#### Scenario: A rebased branch whose head passed a full ci
+
+- **WHEN** a change branch is rebased, so its commits have trees no `ci` saw, then
+  `gates run ci` passes unscoped on the new head, and the audit runs (as at `gates
+  merge` step 1)
+- **THEN** each rebased commit is recorded as `vouched`, no taint is recorded, and the
+  merge is not blocked on that basis
+
+#### Scenario: A scoped ci on the head vouches for nothing
+
+- **WHEN** the same rebased branch's head passed only a scoped `ci`, and the audit runs
+- **THEN** the rebased commits are tainted as before
+
+#### Scenario: A commit after the head ci is not vouched
+
+- **WHEN** a commit is created on the branch after the green unscoped `ci` on the
+  previous head, without a green-`ci` row of its own, and the audit runs
+- **THEN** that commit is the new head, no green unscoped `ci` row names its tree, and
+  it is tainted
+
+#### Scenario: A vouched commit is not re-reported
+
+- **WHEN** the audit runs again after a commit was recorded as `vouched`
+- **THEN** the commit is neither re-vouched nor tainted
 
 ### Requirement: A tainted change cannot be merged until it is re-verified
 
