@@ -11886,7 +11886,15 @@ def cmd_run(m: dict, root: Path, args) -> int:
         # proof (`full`) is never a task's attempt.
         rows = _read_ledger_rows(root, change)
         if task is None:
+            # budget-ticked-task D1/D3: unless that task is checked in HEAD's
+            # tasks.md -- done and committed through the commit gate, so a
+            # red after it is nobody's attempt, and its row records no task.
+            # A tick only in the working tree or index buys nothing, and no
+            # tasks.md at HEAD stays budgeted. `--task` is always budgeted.
             task = _current_task_after_handoff(rows)
+            if task is not None and task in _checked_task_ids(
+                    _blob_at(root, "HEAD", f"openspec/changes/{change}/tasks.md")):
+                task = None
         if task is not None:
             refusal = (_budget_refusal(m, rows, task, _task_oracle_gate(root, change, task))
                        or _token_budget_refusal(m, rows, change, task))
