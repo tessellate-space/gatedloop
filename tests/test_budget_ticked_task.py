@@ -156,5 +156,45 @@ class TestTickedAtHead(unittest.TestCase):
                              "2.2 is unchecked at HEAD: its budget applies")
 
 
+class TestNotTickedAtHead(unittest.TestCase):
+    """Design D3: the gaming route and the fail-closed paths."""
+
+    def _assert_refused(self, root):
+        before = len(_rows(root))
+        r = _run(root, "run", "ci")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertFalse((root / "ran").exists(), "the gate ran despite the budget")
+        self.assertEqual(len(_rows(root)), before, "a refusal writes no ledger row")
+        self.assertIn("2.2", r.stdout + r.stderr)
+
+    def test_a_tick_only_in_the_working_tree_stays_budgeted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp, UNTICKED)
+            (root / TASKS).write_text(TICKED)
+            _seed(root, EXHAUSTED)
+            self._assert_refused(root)
+
+    def test_a_staged_tick_not_committed_stays_budgeted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp, UNTICKED)
+            (root / TASKS).write_text(TICKED)
+            _git(root, "add", TASKS)
+            _seed(root, EXHAUSTED)
+            self._assert_refused(root)
+
+    def test_no_tasks_md_at_head_stays_budgeted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp, None)
+            _seed(root, EXHAUSTED)
+            self._assert_refused(root)
+
+    def test_no_tasks_md_at_head_but_a_ticked_one_in_the_tree_stays_budgeted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp, None)
+            (root / TASKS).write_text(TICKED)
+            _seed(root, EXHAUSTED)
+            self._assert_refused(root)
+
+
 if __name__ == "__main__":
     unittest.main()
