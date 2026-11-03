@@ -110,6 +110,17 @@ wall with one clearly-marked door that is then reported."
   gate refuses a tainted change until a green `gates run ci` on the branch head appends a
   `taint-clear` row (append-only — the incident stays in history). The join is exact: a
   gated commit's tree equals the tree `gates run ci` recorded, so there is no heuristic.
+  One exemption (taint-preclear): a commit with no green-`ci` row of its own is recorded
+  **`vouched`** (`gate: "vouched"`), not tainted, when it is an ancestor of the branch head
+  being audited and a green **unscoped** `ci` row names that head's tree, compared
+  ledger-blind. That is the same evidence a `taint-clear` already accepts, applied before
+  the taint instead of after it, so a rebased branch whose head passed one full `ci` gets
+  through `gates merge` step 1 without a second one (#132). A scoped head `ci` vouches for
+  nothing, and timestamps are never read: a commit made after the head `ci` is a new head
+  the old row does not name, so it taints. The `vouched` row keeps the commit visible by
+  sha but counts neither as an incident nor as individually gated; the cost is that a
+  hook-slipping mid-branch commit a later full head `ci` covers is no longer counted as a
+  taint.
 - **Layer 4 is a documented adopter requirement**, not gatedloop code — for
   `integration.mode: pull-request`, the forge's own branch protection is the only thing
   covering `gh pr merge`; see `SETUP.md`'s "Branch protection is required for

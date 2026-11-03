@@ -1330,6 +1330,11 @@ its own and is never stale.
 Layer 3 needs nothing configured: the `Stop` hook already audits and records a **taint**
 on the change's ledger for any commit with no green-`ci` record, and the merge gate
 refuses a tainted change until a green `gates run ci` on the branch head re-verifies it.
+A commit with no green-`ci` record of its own is recorded `vouched` instead of tainted
+when it is an ancestor of the audited head and a green **unscoped** `ci` row names the
+head's tree (ledger-blind): after a rebase, one full `gates run ci` on the new head is
+enough for `gates merge`. A scoped head `ci` vouches for nothing, and a commit made after
+the head `ci` is a new head with no green row of its own, so it still taints.
 
 ### Branch protection is required for `pull-request` integration modes
 
