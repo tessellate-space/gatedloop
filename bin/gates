@@ -66,7 +66,7 @@ PRECONDITION_EXIT_CODE = 75
 # these two values plus the ci matrix leg that proves the new end, and
 # `docs/stability.md` states the same pair (tests/test_stability_doc.py).
 OPENSPEC_MIN = "1.14.3"
-OPENSPEC_MAX_TESTED = "1.14.3"
+OPENSPEC_MAX_TESTED = "1.16.0"
 # The `gatesVersion` this shim writes and validates. `gates doctor` reports a
 # manifest whose version differs so an adopter knows to migrate.
 EXPECTED_GATES_VERSION = 1

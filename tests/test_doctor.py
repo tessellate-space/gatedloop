@@ -274,7 +274,9 @@ class TestTestedVersionIsPinned(unittest.TestCase):
         workflow = (REPO / ".github" / "workflows" / "gatedloop.yml").read_text()
         pins = re.findall(r"@fission-ai/openspec@([0-9][0-9A-Za-z.+-]*)", workflow)
         self.assertTrue(pins, "the workflow must pin the OpenSpec CLI version")
-        self.assertEqual(set(pins), {gates.OPENSPEC_MAX_TESTED}, pins)
+        # openspec-1-16 D2: the record job stays on the minimum, so a literal
+        # pin is one end of the declared range, never a version outside it.
+        self.assertLessEqual(set(pins), {gates.OPENSPEC_MIN, gates.OPENSPEC_MAX_TESTED}, pins)
 
 
 if __name__ == "__main__":
