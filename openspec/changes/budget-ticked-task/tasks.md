@@ -5,4 +5,4 @@
 
 ## 2. Docs
 
-- [ ] 2.1 In SETUP.md's "`loop.attempts` and `loop.fresh-restarts`" section, say a run with no `--task` belongs to the latest started task only while it is unchecked at `HEAD`, and that a run with `--task` is always budgeted (design D4) [oracle: none]
+- [x] 2.1 In SETUP.md's "`loop.attempts` and `loop.fresh-restarts`" section, say a run with no `--task` belongs to the latest started task only while it is unchecked at `HEAD`, and that a run with `--task` is always budgeted (design D4) [oracle: none]
