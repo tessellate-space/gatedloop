@@ -544,7 +544,13 @@ path, so the gap was a reader:
   same record at every `Stop`, re-invocations included, before the continue decision,
   so a halted or abandoned task is costed too. The git-layer `pre-commit` hook has no
   hook input; inside an agent session it records a `no-transcript` row with null
-  counts. Nothing the record does can deny a commit or fail a stop.
+  counts, staged into the commit as the tool hook's row is (`usage-row-staged`), so
+  a commit at either layer leaves the ledger clean. A copy of the hook installed
+  before 0.11.1 leaves its row unstaged; `gates doctor` reports it as `stale-copy`,
+  and `gates hook install` refreshes it. Merge step 1 commits its trailing rows as a
+  pathspec commit, which leaves the hook's staged row out of `.git/index`, so it
+  resets the ledger's index entry afterwards and halts there if the ledger is still
+  dirty. Nothing the record does can deny a commit or fail a stop.
 - **Counts only.** A row stores, per model, input, output, cache-read and cache-write
   token counts, the number of assistant messages and the window. No transcript text
   is ever copied into the ledger.
