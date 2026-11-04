@@ -2089,11 +2089,26 @@ def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
                 continue
             where = f"change '{d.name}' task {tid}: {tag}"
             if oracle is None:
-                errs.append(f"{where} is malformed — the tag is {ORACLE_TAG_SYNTAX}")
+                why = _oracle_body_parse(_ORACLE_TAG_RE.search(tag).group(2))[1]
+                errs.append(f"{where} is malformed{f' ({why})' if why else ''} — the tag "
+                            f"is {ORACLE_TAG_SYNTAX}")
                 continue
             gate = oracle["gate"]
             if gate is None:
                 continue
+            # test-rewrites D1: warnings only -- whether a path exists is
+            # refused at handoff, against HEAD, when it matters.
+            for path in _oracle_rewrites(oracle):
+                if not (root / path).is_file():
+                    warns.append(
+                        f"{where} declares rewrites: {path}, which does not exist in "
+                        "the working tree — the handoff refuses it unless it exists at HEAD"
+                    )
+                elif not _is_test_path(path):
+                    warns.append(
+                        f"{where} declares rewrites: {path}, which does not look like a "
+                        "test path — the test author will read its content"
+                    )
             if gate in NON_ORACLE_GATES:
                 errs.append(
                     f"{where} — `{gate}` cannot judge one task ({_NON_ORACLE_REASONS[gate]}); "
@@ -7362,6 +7377,12 @@ def _oracle_body_parse(body: str) -> tuple[dict | None, str | None]:
             if any(c.isspace() for c in p):
                 return None, (f"its rewrites: path '{p}' contains whitespace — "
                               "separate paths with commas")
+        for i, p in enumerate(items):
+            why = _rewrite_path_problem(p)
+            if why:
+                return None, f"its rewrites: path '{p}' {why}"
+            if p in items[:i]:
+                return None, f"its rewrites: clause names '{p}' twice"
         rewrites = tuple(items)
     words = body.split()
     if words == ["none"]:
@@ -7379,6 +7400,19 @@ def _oracle_body_parse(body: str) -> tuple[dict | None, str | None]:
     if rewrites:
         oracle["rewrites"] = rewrites
     return oracle, None
+
+
+def _rewrite_path_problem(rel: str) -> str | None:
+    """Why `rel` cannot be a declared rewrite (test-rewrites D1): it must be
+    repository-relative, stay inside the repository, and lie outside
+    gatedloop's state directory. `None` when it can."""
+    if rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel):
+        return "is absolute — name it relative to the repository root"
+    if ".." in rel.replace("\\", "/").split("/"):
+        return "has a `..` segment — a declared rewrite stays inside the repository"
+    if rel == STATE_DIR_NAME or rel.startswith(STATE_PREFIXES):
+        return f"lies under gatedloop's state directory ({STATE_DIR_NAME}/), which holds no test"
+    return None
 
 
 def _parse_oracle_body(body: str) -> dict | None:

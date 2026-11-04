@@ -3,7 +3,7 @@
 ## 1. The clause and its validation (D1)
 
 - [x] 1.1 Parse a trailing `rewrites: <path>[, <path>]...` clause in the oracle tag into a `rewrites` tuple (empty when absent). Refuse the clause on `none` as malformed, and append it to `_oracle_label` only when non-empty, so the approval digest and the drift check cover it. Verify with tests for one path, several paths, stray whitespace, the clause after `characterization`, an empty clause and `none rewrites:` (both malformed), a tag without the clause hashing to the same approval sha as before, a clause added on the target voiding `check-implement`, and a clause added on the change branch refused at handoff and under `--ref` [oracle: unit]
-- [ ] 1.2 Make `gates validate` fail, naming the change, the task and the path, on an absolute path, a `..` segment, a path under the state directory and a duplicate path. Make it warn on a path absent from the working tree or not matching `_is_test_path`. Verify with a test per failure, one per warning, and a valid plan that passes [oracle: unit]
+- [x] 1.2 Make `gates validate` fail, naming the change, the task and the path, on an absolute path, a `..` segment, a path under the state directory and a duplicate path. Make it warn on a path absent from the working tree or not matching `_is_test_path`. Verify with a test per failure, one per warning, and a valid plan that passes [oracle: unit]
 
 ## 2. The author's sight and the handoff (D2, D3)
 
