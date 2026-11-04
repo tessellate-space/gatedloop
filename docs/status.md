@@ -1,6 +1,6 @@
 # gatedloop status
 
-**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3, on macOS and Linux with Python 3.9 and 3.13.** Nobody
+**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3 to 1.16.0, on macOS and Linux with Python 3.9 and 3.13.** Nobody
 else has reported running the loop end to end. This page says what has been
 exercised, where the plugin is fragile, and what depends on OpenSpec staying the way
 it is. It is kept current with each release; [`README.md`](../README.md) has the
@@ -174,7 +174,7 @@ has the steps.
 ## Upstream coupling
 
 gatedloop does not author anything; OpenSpec does, and the shim reads what OpenSpec
-prints. Supported: **OpenSpec 1.14.3 to 1.14.3**, the range [`stability.md`](./stability.md)
+prints. Supported: **OpenSpec 1.14.3 to 1.16.0**, the range [`stability.md`](./stability.md)
 declares; ci tests both ends, and a weekly job runs OpenSpec's latest release. `gates doctor`
 warns, without failing, outside the range.
 
@@ -192,7 +192,8 @@ Workflow packs also read `openspec schemas --json` and `openspec schema which`.
 
 What has broken before is the last row: OpenSpec 1.14.0 started reporting unknown
 change metadata, and `--strict` failed on every attested change until the keys moved
-under `x-`, which 1.14.2 reserves for tools. Expect the next break in the JSON shapes,
+under `x-`, which 1.14.2 reserves for tools. OpenSpec 1.16's `--strict` also fails a
+scenario with no WHEN/GIVEN or THEN step. Expect the next break in the JSON shapes,
 and check `gates doctor` first after any upgrade.
 
 ## What's next

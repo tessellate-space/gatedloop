@@ -12,7 +12,7 @@ gatedloop does not author artifacts — OpenSpec does, through its own `/opsx:` 
    openspec init --tools claude     # creates openspec/ AND .claude/commands/opsx/*
    ```
 
-   Supported: OpenSpec `1.14.3` to `1.14.3`, on macOS or Linux (Windows is not supported; the hooks are bash). [`docs/stability.md`](./docs/stability.md) declares the range, and `gates doctor` warns outside it.
+   Supported: OpenSpec `1.14.3` to `1.16.0`, on macOS or Linux (Windows is not supported; the hooks are bash). [`docs/stability.md`](./docs/stability.md) declares the range, and `gates doctor` warns outside it. OpenSpec 1.16's npm install needs Node.js 22.12+; the standalone binary doesn't.
 
    Non-negotiable — the workflow is built around it. `openspec list --json` working proves the first half; `.claude/commands/opsx/` existing proves the second. Without the `--tools claude` half you get the CLI but no way to author a change, and the loop has nothing to consume. `/gatedloop:gates-init` checks both and offers to fix the second.
 2. **A task runner** — any of `just` / `npm` / `make` / `cargo` / … You write the recipe bodies; gatedloop only calls their names.

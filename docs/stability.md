@@ -6,7 +6,7 @@ retired. When gatedloop reaches 1.0 is not decided here; [`status.md`](./status.
 
 ## Supported environment
 
-- **OpenSpec CLI:** `1.14.3` (minimum) to `1.14.3` (highest tested)
+- **OpenSpec CLI:** `1.14.3` (minimum) to `1.16.0` (highest tested)
 - **Python:** 3.9 or later
 - **Operating systems:** macOS and Linux
 

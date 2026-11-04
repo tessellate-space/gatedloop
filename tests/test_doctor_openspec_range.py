@@ -85,5 +85,35 @@ class DoctorRangeTest(unittest.TestCase):
             self.assertIn(level, ("ok", "warn"), installed)
 
 
+def _declared_row(installed):
+    """The doctor's row against the shim's own constants, unpatched."""
+    checks = gates.doctor_checks(installed, 1, "/p")
+    rows = [(level, detail) for level, title, detail in checks if title == "openspec-version"]
+    if len(rows) != 1:
+        raise AssertionError(f"expected one openspec-version row, got {rows}")
+    return rows[0]
+
+
+class DeclaredRangeTest(unittest.TestCase):
+    """openspec-1-16 D1: the declared range is 1.14.3 to 1.16.0. The regression:
+    an adopter on a ci-proven OpenSpec (1.15, 1.16) is warned, or one outside
+    what ci runs is not."""
+
+    def test_the_declared_constants(self):
+        self.assertEqual(gates.OPENSPEC_MIN, "1.14.3")
+        self.assertEqual(gates.OPENSPEC_MAX_TESTED, "1.16.0")
+
+    def test_versions_ci_proves_are_ok(self):
+        for installed in ("1.14.3", "1.15.0", "1.16.0"):
+            level, _detail = _declared_row(installed)
+            self.assertEqual(level, "ok", installed)
+
+    def test_versions_outside_the_declared_range_warn(self):
+        for installed in ("1.14.2", "1.16.1", "1.17.0"):
+            level, detail = _declared_row(installed)
+            self.assertEqual(level, "warn", installed)
+            self.assertIn("1.16.0", detail, installed)
+
+
 if __name__ == "__main__":
     unittest.main()
