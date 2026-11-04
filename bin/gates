@@ -6280,6 +6280,31 @@ def _tests_refuse(message: str) -> int:
     return 1
 
 
+def _exists_at(root: Path, commit: str, path: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{commit}:{path}"], cwd=root,
+                          capture_output=True).returncode == 0
+
+
+def _undeclared_overwrites(root: Path, change: str, tests: dict[str, dict[str, str]],
+                           base: dict[str, str | None],
+                           known_base: dict[str, str | None]) -> list[tuple[str, str]]:
+    """test-rewrites D3: `(task, path)` for each handed-off path that existed
+    before the change and that neither the task nor an earlier one declares
+    under `rewrites:` -- its author could not see the file it overwrites."""
+    oracles = _change_task_oracles(root, change)
+    out = []
+    for task in sorted(tests, key=_task_sort_key):
+        for path in sorted(tests[task]):
+            before = known_base[path] if path in known_base else base.get(path)
+            if before is None:
+                continue
+            declared = any(path in _oracle_rewrites(o) for t, o in oracles.items()
+                           if _task_sort_key(t) <= _task_sort_key(task))
+            if not declared:
+                out.append((task, path))
+    return out
+
+
 def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                              reasons: dict, characterization: dict,
                              only: str | None) -> list[str]:
@@ -6322,6 +6347,20 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                 f"task {task} is tagged {tag}: the plan requires a red `{gate}` run "
                 f"first, so it cannot be declared {CHARACTERIZATION_FILE}"
             )
+        # test-rewrites D3: a declared rewrite is handed off as a full file at
+        # its path, and is of a file HEAD has.
+        for path in _oracle_rewrites(oracle):
+            if not _exists_at(root, "HEAD", path):
+                problems.append(
+                    f"task {task} declares rewrites: {path}, which does not exist at "
+                    "HEAD — amend the plan (on its merge target) and re-attest"
+                )
+            elif path not in held_tests.get(task, {}):
+                problems.append(
+                    f"task {task} declares rewrites: {path}, but the handoff holds no "
+                    f"full file for it — write its whole content after {task} as "
+                    f"{task}/{path}{AUTHORED_SUFFIX}"
+                )
     if untagged and _task_oracle_mode(m) == "required":
         problems.append(
             "loop.task-oracle is required, and these tasks declare no oracle: "
@@ -6402,6 +6441,10 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
                 continue
             base[path] = _file_blob(root, path)
 
+    for task, path in _undeclared_overwrites(root, change, tests, base, known_base):
+        print(f"gatedloop: advisory: task {task} overwrites existing {path} without "
+              "declaring it (rewrites: on its oracle tag); its author could not see "
+              "that file")
     author = "inline" if getattr(args, "inline", False) else "separate"
     _append_ledger_row(root, {
         "ts": _now_iso(), "gate": TESTS_HANDOFF_EVENT, "exit": 0, "duration_ms": 0,

@@ -8,7 +8,7 @@
 ## 2. The author's sight and the handoff (D2, D3)
 
 - [x] 2.1 Add a `## Declared rewrites` section to `gates tests brief`: under each declaring task, each path with its full content at `HEAD`, fenced, or `absent at HEAD`. Verify with tests on a real repository that the brief prints the declared file's `HEAD` content even when the working tree differs, says `absent at HEAD` for a missing path, and still prints only paths for the undeclared tests in "Where tests live" [oracle: unit]
-- [ ] 2.2 Refuse in `gates tests handoff` a declared path absent at `HEAD` and a declared path with no `<N.M>/<path>.authored`, naming the task and the path, for the whole set and under `--task`. Print one advisory line for each existing path a task overwrites with no declaration, unless an earlier task declared it, with the exit status unchanged. Verify with tests on real repositories for each refusal (nothing recorded), the advisory line (handoff recorded, base as before), and a later task carrying an earlier task's declared path (no advisory) [oracle: unit]
+- [x] 2.2 Refuse in `gates tests handoff` a declared path absent at `HEAD` and a declared path with no `<N.M>/<path>.authored`, naming the task and the path, for the whole set and under `--task`. Print one advisory line for each existing path a task overwrites with no declaration, unless an earlier task declared it, with the exit status unchanged. Verify with tests on real repositories for each refusal (nothing recorded), the advisory line (handoff recorded, base as before), and a later task carrying an earlier task's declared path (no advisory) [oracle: unit]
 
 ## 3. The lock and review (D4, D5)
 
