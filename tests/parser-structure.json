@@ -4098,6 +4098,21 @@
     ],
     "required": false,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "diff",
+    "help": "print each declared rewrite's unified diff against its base (test-rewrites)",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--diff"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,

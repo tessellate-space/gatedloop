@@ -332,6 +332,19 @@ The brief prints each tag to the author, and `gates tests handoff` refuses a hol
 
 The handoff does not check that the tests exercise the declared gate (the shim cannot know which files a gate runs); the red run on that gate does, since a test the gate never runs cannot go red under it. An author who holds a tag is wrong stops and reports it as `weak-spec`: the plan is amended and re-approved, never worked around.
 
+**A task that rewrites an existing test** (`test-rewrites`, from 0.11.1). The author never reads an existing test, which is right for new behaviour but leaves no route for a task whose job is to change a test that already exists: one whose subject legitimately changed (a moved key, a new toolbar), or one that pins an assertion the change removes. A tag that names a gate may end with a `rewrites:` clause naming those files, repository-relative and comma-separated:
+```markdown
+- [ ] 2.1 Move the shortcut from E to K [oracle: unit rewrites: tests/toolbar.test.ts]
+- [ ] 2.2 Drop the wall-clock assertions [oracle: unit characterization rewrites: tests/a.test.ts, tests/b.test.ts]
+```
+For the named files only:
+- **the brief prints each one's full content at `HEAD`** under its task (`## Declared rewrites`), or says it is absent at `HEAD`. The author reads that copy, and no other existing test, and hands off the file's full content after the task, carrying forward every case the task does not change;
+- **the handoff must carry each one** as a full `<N.M>/<path>.authored` under that task. It refuses a declared path that does not exist at `HEAD` ("amend the plan") and a declared path with no full file, naming the task and the path, and records nothing;
+- **once placed, a rewritten file is the task's authored test**: the same lock, the same red-first run (green first under `characterization`), the same defects. A defect returns the file to its content before the change. The implementer never edits it;
+- **review sees what a rewrite dropped**: `gates tests show` lists each rewrite as `rewrites <path> (+added -removed vs base)` (a `rewrites` map of `{base, added, removed}` per task in `--json`), and `gates tests show <change> --diff` prints each rewrite's unified diff against its base, which the authored-set review reads.
+
+The clause is part of the tag, so the approval sha and the tag-drift check cover it; a plan without it hashes exactly as before. `none` cannot carry it, because a task that rewrites a test has a test. `gates validate` fails, naming the change, the task and the path, on an empty clause, an absolute path, a `..` segment, a path under `.gatedloop/`, a path named twice, and the clause on `none`. It **warns**, without failing, on a declared path absent from the working tree (the handoff checks existence against `HEAD`, when it matters) and on one that does not look like a test path (the author will read it). A handoff that overwrites an existing path no task declares is recorded as before, with one advisory line naming the task and the path, since its author could not see that file; a later task carrying a path an earlier task declared draws none. An approved design that gives a test file's complete post-task text needs no clause: the author hands that text off verbatim. Older shims read a tag with the clause as malformed and fail `gates validate`. For `/opsx:propose` to write the clause, the `test-rewrites` adoption item offers the amended `rules.tasks` line.
+
 ```yaml
 loop:
   task-oracle: optional   # default; or `required`
@@ -519,7 +532,7 @@ gates tests place <N.M>                          # move one task's held tests on
 gates tests check [--task N.M]                   # the authored-test lock the commit hooks run
 gates tests check --ref <commit> [--change <name>]   # the same lock at a commit's tree and ledger, every task; no handoff passes
 gates tests defect <N.M> --kind setup|assertion|green --detail "..."   # an authored test is wrong, or green before implementation: back to its author (3 setup, 2 assertion, 1 green per task)
-gates tests show [<change>] [--json]             # author, each task's tests or reason, characterization, placement, defects by kind
+gates tests show [<change>] [--json] [--diff]    # author, each task's tests or reason, characterization, placement, defects by kind, rewrites vs base (--diff: their unified diffs)
 gates adoption status [--json]                   # the settings this plugin version asks the project to decide, still undecided
 gates adoption record <id> adopted|declined|later   # record the project's decision on an adoption item in .gatedloop/adoption.json
 ```

@@ -183,7 +183,7 @@ rule misses.
 
 ### task-oracle-tags
 Applies to: tasks
-Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm. When a task changes behaviour an existing test pins, end its gate tag with `rewrites: <path>` for each such existing test file, comma-separated, as in `[oracle: unit rewrites: <path>]`.
 
 The plan fixes each task's oracle before any test exists, so the test author
 does not infer it from prose and the lock reads the gate it names

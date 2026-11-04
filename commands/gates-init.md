@@ -285,7 +285,9 @@ confirming every entry. It runs on **every** onboarding pass, not only when aske
 
   > End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate),
   > `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where
-  > <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+  > <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm. When a task
+  > changes behaviour an existing test pins, end its gate tag with `rewrites: <path>` for each
+  > such existing test file, comma-separated, as in `[oracle: unit rewrites: <path>]`.
 
   Where this project generates `openspec/config.yaml`'s `rules:` block from the rules-doc,
   write it as a `### task-oracle-tags` entry with `Applies to: tasks` and that line as its
@@ -293,7 +295,8 @@ confirming every entry. It runs on **every** onboarding pass, not only when aske
   `rules.tasks` in their own `openspec/config.yaml` — never edit that file for them. Then
   offer `loop.task-oracle: required` (an untagged plan is refused at handoff) or
   `optional`, write the one they confirm, and record `gates adoption record task-oracle
-  adopted`; on "not yet", record `declined`, write nothing, and drop the template's
+  adopted` and, because the line already carries the `rewrites:` clause, `gates adoption
+  record test-rewrites adopted`; on "not yet", record `declined`, write nothing, and drop the template's
   `task-oracle-tags` entry from a rules-doc created from it.
 - **No harvestable material?** Say so plainly and complete the step **without writing
   placeholder content** — an honest empty rules-doc (or none) beats invented rules.

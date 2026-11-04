@@ -2089,11 +2089,26 @@ def _task_oracle_problems(m: dict, root: Path) -> tuple[list[str], list[str]]:
                 continue
             where = f"change '{d.name}' task {tid}: {tag}"
             if oracle is None:
-                errs.append(f"{where} is malformed — the tag is {ORACLE_TAG_SYNTAX}")
+                why = _oracle_body_parse(_ORACLE_TAG_RE.search(tag).group(2))[1]
+                errs.append(f"{where} is malformed{f' ({why})' if why else ''} — the tag "
+                            f"is {ORACLE_TAG_SYNTAX}")
                 continue
             gate = oracle["gate"]
             if gate is None:
                 continue
+            # test-rewrites D1: warnings only -- whether a path exists is
+            # refused at handoff, against HEAD, when it matters.
+            for path in _oracle_rewrites(oracle):
+                if not (root / path).is_file():
+                    warns.append(
+                        f"{where} declares rewrites: {path}, which does not exist in "
+                        "the working tree — the handoff refuses it unless it exists at HEAD"
+                    )
+                elif not _is_test_path(path):
+                    warns.append(
+                        f"{where} declares rewrites: {path}, which does not look like a "
+                        "test path — the test author will read its content"
+                    )
             if gate in NON_ORACLE_GATES:
                 errs.append(
                     f"{where} — `{gate}` cannot judge one task ({_NON_ORACLE_REASONS[gate]}); "
@@ -6265,6 +6280,31 @@ def _tests_refuse(message: str) -> int:
     return 1
 
 
+def _exists_at(root: Path, commit: str, path: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{commit}:{path}"], cwd=root,
+                          capture_output=True).returncode == 0
+
+
+def _undeclared_overwrites(root: Path, change: str, tests: dict[str, dict[str, str]],
+                           base: dict[str, str | None],
+                           known_base: dict[str, str | None]) -> list[tuple[str, str]]:
+    """test-rewrites D3: `(task, path)` for each handed-off path that existed
+    before the change and that neither the task nor an earlier one declares
+    under `rewrites:` -- its author could not see the file it overwrites."""
+    oracles = _change_task_oracles(root, change)
+    out = []
+    for task in sorted(tests, key=_task_sort_key):
+        for path in sorted(tests[task]):
+            before = known_base[path] if path in known_base else base.get(path)
+            if before is None:
+                continue
+            declared = any(path in _oracle_rewrites(o) for t, o in oracles.items()
+                           if _task_sort_key(t) <= _task_sort_key(task))
+            if not declared:
+                out.append((task, path))
+    return out
+
+
 def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                              reasons: dict, characterization: dict,
                              only: str | None) -> list[str]:
@@ -6307,6 +6347,20 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                 f"task {task} is tagged {tag}: the plan requires a red `{gate}` run "
                 f"first, so it cannot be declared {CHARACTERIZATION_FILE}"
             )
+        # test-rewrites D3: a declared rewrite is handed off as a full file at
+        # its path, and is of a file HEAD has.
+        for path in _oracle_rewrites(oracle):
+            if not _exists_at(root, "HEAD", path):
+                problems.append(
+                    f"task {task} declares rewrites: {path}, which does not exist at "
+                    "HEAD — amend the plan (on its merge target) and re-attest"
+                )
+            elif path not in held_tests.get(task, {}):
+                problems.append(
+                    f"task {task} declares rewrites: {path}, but the handoff holds no "
+                    f"full file for it — write its whole content after {task} as "
+                    f"{task}/{path}{AUTHORED_SUFFIX}"
+                )
     if untagged and _task_oracle_mode(m) == "required":
         problems.append(
             "loop.task-oracle is required, and these tasks declare no oracle: "
@@ -6387,6 +6441,10 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
                 continue
             base[path] = _file_blob(root, path)
 
+    for task, path in _undeclared_overwrites(root, change, tests, base, known_base):
+        print(f"gatedloop: advisory: task {task} overwrites existing {path} without "
+              "declaring it (rewrites: on its oracle tag); its author could not see "
+              "that file")
     author = "inline" if getattr(args, "inline", False) else "separate"
     _append_ledger_row(root, {
         "ts": _now_iso(), "gate": TESTS_HANDOFF_EVENT, "exit": 0, "duration_ms": 0,
@@ -7245,6 +7303,31 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     return 0
 
 
+def _rewrite_pairs(state: dict, task: str, oracle: dict | None) -> list[tuple[str, str | None, str]]:
+    """`(path, base blob, handed-off blob)` for each path `task` declares
+    under `rewrites:` and hands off (test-rewrites D5)."""
+    held = state["tests"].get(task, {})
+    return [(p, state["base"].get(p), held[p]) for p in _oracle_rewrites(oracle) if p in held]
+
+
+def _rewrite_stats(root: Path, state: dict, task: str, oracle: dict | None) -> dict:
+    """`{path: {"base", "added", "removed"}}`: the lines each declared
+    rewrite's handed-off content adds and removes against its base."""
+    out = {}
+    for path, base, blob in _rewrite_pairs(state, task, oracle):
+        added = removed = None
+        if base:
+            r = subprocess.run(["git", "diff", "--numstat", base, blob], cwd=root,
+                               capture_output=True, text=True)
+            nums = r.stdout.split()
+            if r.returncode == 0 and len(nums) >= 2 and nums[0].isdigit():
+                added, removed = int(nums[0]), int(nums[1])
+            elif r.returncode == 0 and not nums:
+                added = removed = 0
+        out[path] = {"base": base, "added": added, "removed": removed}
+    return out
+
+
 def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     rows = _read_ledger_rows(root, change)
     state = _authoring_state(rows)
@@ -7274,6 +7357,7 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
                 "defects_by_kind": {k: sum(1 for d in log if d["kind"] == k)
                                     for k in TEST_DEFECT_KINDS},
                 "defect_log": log,
+                "rewrites": _rewrite_stats(root, state, task, oracles.get(task)),
             }
     return {
         "change": change,
@@ -7284,11 +7368,45 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     }
 
 
+def _tests_show_diff(root: Path, change: str) -> int:
+    """test-rewrites D5: each declared rewrite's unified diff from its base
+    to its handed-off content, so review reads what an existing test lost."""
+    state = _authoring_state(_read_ledger_rows(root, change))
+    if state is None:
+        print(f"change: {change}\nno handoff recorded — no rewrite to diff")
+        return 0
+    oracles = _change_task_oracles(root, change)
+    shown = 0
+    for task in sorted(state["tests"], key=_task_sort_key):
+        for path, base, blob in _rewrite_pairs(state, task, oracles.get(task)):
+            shown += 1
+            print(f"## task {task}: rewrites {path}")
+            if not base:
+                print("(no base recorded — the path did not exist at handoff)")
+                continue
+            r = subprocess.run(["git", "diff", "--no-color", base, blob], cwd=root,
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"gatedloop: git could not diff {base} and {blob} for {path}: "
+                      f"{r.stderr.strip()}", file=sys.stderr)
+                return 1
+            body = r.stdout.splitlines()
+            # The blob ids stand in for paths; name the path instead.
+            body = [f"--- a/{path}" if ln.startswith("--- ") else
+                    f"+++ b/{path}" if ln.startswith("+++ ") else ln for ln in body]
+            print("\n".join(body) if body else "(identical to base)")
+    if not shown:
+        print(f"change: {change}\nno task declares a handed-off rewrite")
+    return 0
+
+
 def _tests_show(m: dict, root: Path, args) -> int:
     change = args.change or _tests_change_or_refuse(root, args, "show")
     if change is None:
         return 1
     doc = _tests_show_doc(m, root, change)
+    if getattr(args, "diff", False):
+        return _tests_show_diff(root, change)
     if getattr(args, "json", False):
         print(json.dumps(doc, sort_keys=True))
         return 0
@@ -7309,6 +7427,10 @@ def _tests_show(m: dict, root: Path, args) -> int:
             print(f"  {task}  {oracle}  {state}{extra}")
             for path in t["tests"]:
                 print(f"        {path}")
+            for path, rw in t["rewrites"].items():
+                counts = (f"+{rw['added']} -{rw['removed']} vs base" if rw["added"] is not None
+                          else "no base to compare")
+                print(f"        rewrites {path} ({counts})")
         for d in t["defect_log"]:
             print(f"        defect ({d['kind']}): {d['detail']}")
     return 0
@@ -7335,23 +7457,80 @@ _BRIEF_MAX_SIBLINGS = 5
 # every commit, `live-check` probes a surface, `eval` is an advisory score,
 # and `confirm` runs only on the merged tree.
 NON_ORACLE_GATES = ("ci", "live-check", "eval", "confirm")
-ORACLE_TAG_SYNTAX = "[oracle: <gate>], [oracle: <gate> characterization] or [oracle: none]"
+ORACLE_TAG_SYNTAX = ("[oracle: <gate>], [oracle: <gate> characterization] or [oracle: none], "
+                     "a gate optionally ending `rewrites: <path>[, <path>]...`")
 _ORACLE_TAG_RE = re.compile(r"\s*(\[\s*oracle\s*:([^\[\]]*)\])\s*$")
 _ORACLE_GATE_NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]*$")
+# test-rewrites D1: the clause that names the existing tests a task rewrites
+# comes last in the tag.
+_REWRITES_CLAUSE_RE = re.compile(r"(?:^|\s)rewrites\s*:")
+
+
+def _oracle_body_parse(body: str) -> tuple[dict | None, str | None]:
+    """`(oracle, None)` for a well-formed tag body, or `(None, why)` when it
+    is malformed. A `rewrites:` clause adds a `rewrites` tuple to the oracle
+    (test-rewrites D1); a body without one parses exactly as before."""
+    rewrites: tuple[str, ...] = ()
+    mr = _REWRITES_CLAUSE_RE.search(body)
+    if mr:
+        clause = body[mr.end():]
+        body = body[: mr.start()]
+        items = [p.strip() for p in clause.split(",")]
+        if not clause.strip():
+            return None, "its rewrites: clause names no path"
+        for p in items:
+            if not p:
+                return None, "its rewrites: clause has an empty entry between commas"
+            if any(c.isspace() for c in p):
+                return None, (f"its rewrites: path '{p}' contains whitespace — "
+                              "separate paths with commas")
+        for i, p in enumerate(items):
+            why = _rewrite_path_problem(p)
+            if why:
+                return None, f"its rewrites: path '{p}' {why}"
+            if p in items[:i]:
+                return None, f"its rewrites: clause names '{p}' twice"
+        rewrites = tuple(items)
+    words = body.split()
+    if words == ["none"]:
+        if rewrites:
+            return None, ("`none` cannot carry rewrites: — a task that rewrites a "
+                          "test has a test")
+        return {"gate": None, "characterization": False}, None
+    if not words or len(words) > 2 or words[0] in ("none", "characterization", "rewrites:"):
+        return None, None
+    if len(words) == 2 and words[1] != "characterization":
+        return None, None
+    if not _ORACLE_GATE_NAME_RE.match(words[0]):
+        return None, None
+    oracle = {"gate": words[0], "characterization": len(words) == 2}
+    if rewrites:
+        oracle["rewrites"] = rewrites
+    return oracle, None
+
+
+def _rewrite_path_problem(rel: str) -> str | None:
+    """Why `rel` cannot be a declared rewrite (test-rewrites D1): it must be
+    repository-relative, stay inside the repository, and lie outside
+    gatedloop's state directory. `None` when it can."""
+    if rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel):
+        return "is absolute — name it relative to the repository root"
+    if ".." in rel.replace("\\", "/").split("/"):
+        return "has a `..` segment — a declared rewrite stays inside the repository"
+    if rel == STATE_DIR_NAME or rel.startswith(STATE_PREFIXES):
+        return f"lies under gatedloop's state directory ({STATE_DIR_NAME}/), which holds no test"
+    return None
 
 
 def _parse_oracle_body(body: str) -> dict | None:
     """The oracle a tag's body declares, or `None` when it is malformed."""
-    words = body.split()
-    if words == ["none"]:
-        return {"gate": None, "characterization": False}
-    if not words or len(words) > 2 or words[0] in ("none", "characterization"):
-        return None
-    if len(words) == 2 and words[1] != "characterization":
-        return None
-    if not _ORACLE_GATE_NAME_RE.match(words[0]):
-        return None
-    return {"gate": words[0], "characterization": len(words) == 2}
+    return _oracle_body_parse(body)[0]
+
+
+def _oracle_rewrites(oracle: dict | None) -> tuple[str, ...]:
+    """The existing test paths a task's tag declares it rewrites, in declared
+    order; empty for an untagged task or a tag without the clause."""
+    return tuple((oracle or {}).get("rewrites", ()))
 
 
 def _split_oracle_tag(text: str) -> tuple[str, dict | None, str | None]:
@@ -7389,12 +7568,17 @@ def _task_lines(tasks_md: Path) -> list[tuple[str, str, dict | None]]:
 
 def _oracle_label(oracle: dict | None) -> str | None:
     """A declared oracle as one word or two: `<gate>`, `<gate>
-    characterization` or `none`; `None` for an untagged task."""
+    characterization` or `none`, then ` rewrites: <p1>, <p2>` when the tag
+    declares rewrites (test-rewrites D1); `None` for an untagged task."""
     if oracle is None:
         return None
     if oracle["gate"] is None:
         return "none"
-    return oracle["gate"] + (" characterization" if oracle["characterization"] else "")
+    label = oracle["gate"] + (" characterization" if oracle["characterization"] else "")
+    rewrites = _oracle_rewrites(oracle)
+    if rewrites:
+        label += " rewrites: " + ", ".join(rewrites)
+    return label
 
 
 def _change_task_oracles(root: Path, change: str) -> dict[str, dict | None]:
@@ -7526,6 +7710,34 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
         lines.append(f"{tid}: {_oracle_brief_line(oracle)}")
     if not tasks:
         lines.append("none — no tasks")
+    lines.append("")
+
+    # test-rewrites D2: the one exception to "read no existing test" -- the
+    # files the approved plan declares, as HEAD holds them.
+    lines.append("## Declared rewrites")
+    declaring = [(tid, _oracle_rewrites(oracle)) for tid, _text, oracle in tasks
+                 if _oracle_rewrites(oracle)]
+    for tid, paths in declaring:
+        lines.append(f"{tid}:")
+        for p in paths:
+            content = _blob_at(root, "HEAD", p)
+            if content is None:
+                lines.append(f"- {p}: absent at HEAD — the handoff refuses {tid} until "
+                             "the plan is amended")
+                continue
+            fence = "```"
+            while fence in content:
+                fence += "`"
+            lines.append(f"- {p} (content at HEAD):")
+            lines.append(fence)
+            lines.append(content.rstrip("\n"))
+            lines.append(fence)
+    if declaring:
+        lines.append("Read these copies only — never open the paths. Hand off each as "
+                     "its full content after the task, carrying forward every case the "
+                     "task does not change. Read no other existing test.")
+    else:
+        lines.append("none — no task declares rewrites:, so no existing test is yours to read")
     lines.append("")
 
     conv = m.get("conventions") or {}
@@ -13830,6 +14042,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tw = tests_sub.add_parser("show", help="print the authoring state: author, each task's tests or reason, placement, defects")
     sp_tw.add_argument("change", nargs="?", help="change name (default: current branch)")
     sp_tw.add_argument("--json", action="store_true", help="one machine-readable JSON document")
+    sp_tw.add_argument("--diff", action="store_true", help="print each declared rewrite's unified diff against its base (test-rewrites)")
     sp_tw.set_defaults(fn=cmd_tests)
     sp_tb = tests_sub.add_parser("brief", help="print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures")
     sp_tb.add_argument("change")

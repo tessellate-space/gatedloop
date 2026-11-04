@@ -199,6 +199,19 @@
       "detector": {"kind": "manifest-key", "key": "loop.task-oracle"},
       "applies_when": null,
       "action": {"kind": "manifest-key", "key": "loop.task-oracle"}
+    },
+    {
+      "id": "test-rewrites",
+      "since": "0.11.1",
+      "what": "A plan can now declare the existing tests a task rewrites, so a change whose behaviour an existing test pins (a moved key, a new toolbar) can update that test inside the loop: a gate tag may end with `rewrites: <path>[, <path>]...`, as in `[oracle: unit rewrites: tests/toolbar.test.ts]`. The test author then reads exactly those files, from its brief, and no other existing test; the handoff must carry each in full; and the lock holds each, once placed, as the task's authored test. For `/opsx:propose` to write the clause, amend the oracle-tag line in your own `openspec/config.yaml` under `rules.tasks` (or, where `gates conventions sync` generates that block, the `Applies to: tasks` rule in your rules-doc). gatedloop never edits that file.",
+      "question": "Have the planner declare the existing tests a task rewrites?",
+      "options": [
+        {"answer": "adopted", "label": "Yes: replace the oracle-tag line in `rules.tasks` (or its rules-doc rule) with the amended line (Recommended)"},
+        {"answer": "declined", "label": "Not yet: plans keep the old line, and an existing test a task must change stays a blocking question for the test author"}
+      ],
+      "detector": {"kind": "decision-only"},
+      "applies_when": {"kind": "manifest-key", "key": "loop.task-oracle"},
+      "action": {"kind": "confirm", "detail": "In your own `openspec/config.yaml` `rules.tasks` (or the `Applies to: tasks` rule in your rules-doc, then `gates conventions sync`), replace the oracle-tag line with: \"End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm. When a task changes behaviour an existing test pins, end its gate tag with `rewrites: <path>` for each such existing test file, comma-separated, as in `[oracle: unit rewrites: <path>]`.\" This is the adopter's own edit; gatedloop never makes it. A plan without the clause hashes and behaves exactly as before."}
     }
   ]
 }

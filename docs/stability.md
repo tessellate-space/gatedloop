@@ -34,7 +34,8 @@ fails when the code and that file disagree, so no change to it lands unreviewed:
 - the ledger row fields, and the row version `v`.
 
 Three things outside that file are covered too: the `tasks.md` oracle tag syntax
-(`[oracle: <gate>]`, `[oracle: <gate> characterization]`, `[oracle: none]`), the
+(`[oracle: <gate>]`, `[oracle: <gate> characterization]`, `[oracle: none]`, and from
+0.11.1 a gate tag's trailing `rewrites: <path>[, <path>]...` clause), the
 `NO-TESTS` and `CHARACTERIZATION` markers, and the `x-gatedloop-*` keys in
 `.openspec.yaml`.
 

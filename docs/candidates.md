@@ -394,3 +394,43 @@ directory. That is a release-process change, and should be weighed with
 
 **Promote when.** The plugin cache size or an adopter's review of what gets installed
 makes it matter, or the next release-process change opens that area anyway.
+
+---
+
+## Refuse an undeclared overwrite of an existing test (`loop.test-rewrites: required`)
+
+**What.** An opt-in manifest key under which `gates tests handoff` refuses a task that
+hands off a full file at an existing test path without declaring it under `rewrites:`,
+turning today's advisory line into a refusal.
+
+**Why it is a good fit.** Since `test-rewrites` an author that overwrites an existing
+test unseen is visible (one advisory line per path) but not stopped. A project that
+wants every rewrite of an existing test approved in the plan has no way to say so.
+
+**Against the rejection test.** Authors nothing, names no stack command, makes a stated
+guarantee ("the author never reads an existing test it was not shown") enforceable.
+
+**Why not now.** A new adopter-facing refusal must be opt-in, and the advisory line has
+not yet been seen ignored in the field. An approved design that gives a file's full text
+is a legitimate undeclared overwrite, so the refusal would need that route too. Promote
+when a field report shows an undeclared overwrite reaching review unnoticed.
+
+---
+
+## A `removes:` clause for deleting a test whose subject is gone
+
+**What.** A second clause of the oracle tag, `removes: <path>`, declaring an existing
+test file a task deletes, held to the plan like `rewrites:`.
+
+**Why it is a good fit.** It would put a test deletion under the approval sha, beside
+the rewrites, rather than leaving it to the per-task review alone.
+
+**Against the rejection test.** Authors nothing, names no stack command, makes a
+deletion part of the approved plan.
+
+**Why not now.** Deletion is not blocked today: the shim locks no pre-existing,
+unhanded-off file, so a deletion reaches the per-task review and is judged against the
+task. `rewrites:` answers a different problem, content the author cannot see, and a
+deletion has none to author. Promote if adopters report that review alone lets
+unjustified deletions through; the clause can be added without changing the grammar
+(`test-rewrites` design D1).
