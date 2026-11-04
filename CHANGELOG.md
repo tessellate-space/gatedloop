@@ -9,6 +9,48 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.11.1 — 2026-11-04
+
+A plan can now name the existing tests a task rewrites, the commit hook stops leaving the ledger dirty, two loop false-positives are gone, and OpenSpec 1.16 is supported.
+
+**A task may rewrite an existing test**
+
+- **test-rewrites** (#163). Fixes #157.
+  - **A task's oracle tag may end with `rewrites: <path>[, <path>]...`**, as in `[oracle: unit rewrites: tests/toolbar.test.ts]`. The test author reads exactly those files, from its brief, and no other existing test. The handoff must carry each one in full, and once placed it is the task's authored test: the same lock, red-first run and defects. `[oracle: none]` cannot carry the clause.
+  - **`gates validate`** fails on a malformed clause (an absolute path, `..`, a path under `.gatedloop/`, a duplicate) and warns when a declared path doesn't exist.
+  - **`gates tests show`** lists each rewrite against its base, and the new `--diff` flag prints the unified diff, so the review can see what a rewrite dropped.
+  - **Opt-in:** `/gatedloop:upgrade` offers the amended `rules.tasks` oracle-tag line to projects that declare `loop.task-oracle`. A plan without the clause behaves exactly as before.
+
+**The commit hook stages its own usage row**
+
+- **usage-row-staged** (#146). Fixes #140.
+  - **The git-layer pre-commit hook passes `--stage` to its usage record**, as the Claude-layer hook already did, so the row lands in the commit it describes. A copy installed before 0.11.1 left the row unstaged after every commit, and `gates merge` then couldn't detach onto the target.
+  - **Merge step 1 leaves the ledger clean** after its trailing-rows commit, and halts with a message if it can't.
+
+**Fewer false refusals in the loop**
+
+- **taint-preclear** (#139). Fixes #132.
+  - **A commit with no `ci` row of its own is vouched for by the head**, when it is an ancestor of the audited head and a green, unscoped `ci` names the head's tree. The audit records a `vouched` row instead of a taint, so a rebase no longer taints a gated change. A scoped `ci` doesn't vouch.
+- **budget-ticked-task** (#156). Fixes #147.
+  - **A `gates run` with no `--task` after the latest started task is ticked at `HEAD` is unbudgeted**, instead of being charged to that finished task. A run that passes `--task` is budgeted as before.
+
+**OpenSpec 1.16**
+
+- **openspec-1-16** (#155). Fixes #137.
+  - **The supported range is now 1.14.3 to 1.16.0**, so `gates doctor` no longer warns on 1.16. ci runs 1.14.3 on every OS and Python leg and 1.16.0 on one (Ubuntu, Python 3.13).
+
+**Release tooling** (this repository only)
+
+- **release-push** (#133). Fixes #125.
+  - **`scripts/release publish` refuses inside an agent session** and prints the commands to run outside one.
+  - **The push gate counts a change branch only when the push carries its commits in**, and a refused push of a commit no change owns says so.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Re-run `gates hook install`** if `gates doctor` reports the commit hook as a stale copy. A copy installed before 0.11.1 leaves its usage row unstaged after every commit, and `gates merge` then can't detach onto the target (#140). A composed install (a hook manager) picks the fix up with the plugin version.
+3. **Run `/gatedloop:upgrade`** to decide on `test-rewrites` if you declare `loop.task-oracle`.
+
 ## 0.11.0 — 2026-11-01
 
 Task commits get their scoped `ci` back, the merge checks the plan is still the approved one, a lane can no longer sync main past the hooks, and gatedloop now states which of its surfaces you may build on and checks them in ci.
