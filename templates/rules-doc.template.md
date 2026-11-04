@@ -53,7 +53,7 @@ this before writing a change's tests; convention review holds every test to it.
 
 ### task-oracle-tags
 Applies to: tasks
-Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm.
+Rule: End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm. When a task changes behaviour an existing test pins, end its gate tag with `rewrites: <path>` for each such existing test file, comma-separated, as in `[oracle: unit rewrites: <path>]`.
 
 Keep this rule if your plans declare each task's oracle (the `task-oracle` adoption
 item); delete it otherwise. `gates conventions sync` projects it into
