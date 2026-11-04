@@ -21,7 +21,7 @@
 
 ## 5. Integration
 
-- [ ] 5.1 Run, on a fixture change in a real repository whose tasks are a red-first rewrite of an existing test, a `characterization` rewrite and an untagged task that overwrites an existing path without declaring it: the brief, the handoff, placement, each red or green step, the commits and a `gates merge` step-1 head proof. Then run `./bin/gates run ci` on the finished branch, and verify that both exit 0 [oracle: unit characterization]
+- [x] 5.1 Run, on a fixture change in a real repository whose tasks are a red-first rewrite of an existing test, a `characterization` rewrite and an untagged task that overwrites an existing path without declaring it: the brief, the handoff, placement, each red or green step, the commits and a `gates merge` step-1 head proof. Then run `./bin/gates run ci` on the finished branch, and verify that both exit 0 [oracle: unit characterization]
 
 ## Workflow follow-up
 
