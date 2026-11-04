@@ -7335,23 +7335,61 @@ _BRIEF_MAX_SIBLINGS = 5
 # every commit, `live-check` probes a surface, `eval` is an advisory score,
 # and `confirm` runs only on the merged tree.
 NON_ORACLE_GATES = ("ci", "live-check", "eval", "confirm")
-ORACLE_TAG_SYNTAX = "[oracle: <gate>], [oracle: <gate> characterization] or [oracle: none]"
+ORACLE_TAG_SYNTAX = ("[oracle: <gate>], [oracle: <gate> characterization] or [oracle: none], "
+                     "a gate optionally ending `rewrites: <path>[, <path>]...`")
 _ORACLE_TAG_RE = re.compile(r"\s*(\[\s*oracle\s*:([^\[\]]*)\])\s*$")
 _ORACLE_GATE_NAME_RE = re.compile(r"^[A-Za-z0-9][\w.-]*$")
+# test-rewrites D1: the clause that names the existing tests a task rewrites
+# comes last in the tag.
+_REWRITES_CLAUSE_RE = re.compile(r"(?:^|\s)rewrites\s*:")
+
+
+def _oracle_body_parse(body: str) -> tuple[dict | None, str | None]:
+    """`(oracle, None)` for a well-formed tag body, or `(None, why)` when it
+    is malformed. A `rewrites:` clause adds a `rewrites` tuple to the oracle
+    (test-rewrites D1); a body without one parses exactly as before."""
+    rewrites: tuple[str, ...] = ()
+    mr = _REWRITES_CLAUSE_RE.search(body)
+    if mr:
+        clause = body[mr.end():]
+        body = body[: mr.start()]
+        items = [p.strip() for p in clause.split(",")]
+        if not clause.strip():
+            return None, "its rewrites: clause names no path"
+        for p in items:
+            if not p:
+                return None, "its rewrites: clause has an empty entry between commas"
+            if any(c.isspace() for c in p):
+                return None, (f"its rewrites: path '{p}' contains whitespace — "
+                              "separate paths with commas")
+        rewrites = tuple(items)
+    words = body.split()
+    if words == ["none"]:
+        if rewrites:
+            return None, ("`none` cannot carry rewrites: — a task that rewrites a "
+                          "test has a test")
+        return {"gate": None, "characterization": False}, None
+    if not words or len(words) > 2 or words[0] in ("none", "characterization", "rewrites:"):
+        return None, None
+    if len(words) == 2 and words[1] != "characterization":
+        return None, None
+    if not _ORACLE_GATE_NAME_RE.match(words[0]):
+        return None, None
+    oracle = {"gate": words[0], "characterization": len(words) == 2}
+    if rewrites:
+        oracle["rewrites"] = rewrites
+    return oracle, None
 
 
 def _parse_oracle_body(body: str) -> dict | None:
     """The oracle a tag's body declares, or `None` when it is malformed."""
-    words = body.split()
-    if words == ["none"]:
-        return {"gate": None, "characterization": False}
-    if not words or len(words) > 2 or words[0] in ("none", "characterization"):
-        return None
-    if len(words) == 2 and words[1] != "characterization":
-        return None
-    if not _ORACLE_GATE_NAME_RE.match(words[0]):
-        return None
-    return {"gate": words[0], "characterization": len(words) == 2}
+    return _oracle_body_parse(body)[0]
+
+
+def _oracle_rewrites(oracle: dict | None) -> tuple[str, ...]:
+    """The existing test paths a task's tag declares it rewrites, in declared
+    order; empty for an untagged task or a tag without the clause."""
+    return tuple((oracle or {}).get("rewrites", ()))
 
 
 def _split_oracle_tag(text: str) -> tuple[str, dict | None, str | None]:
@@ -7389,12 +7427,17 @@ def _task_lines(tasks_md: Path) -> list[tuple[str, str, dict | None]]:
 
 def _oracle_label(oracle: dict | None) -> str | None:
     """A declared oracle as one word or two: `<gate>`, `<gate>
-    characterization` or `none`; `None` for an untagged task."""
+    characterization` or `none`, then ` rewrites: <p1>, <p2>` when the tag
+    declares rewrites (test-rewrites D1); `None` for an untagged task."""
     if oracle is None:
         return None
     if oracle["gate"] is None:
         return "none"
-    return oracle["gate"] + (" characterization" if oracle["characterization"] else "")
+    label = oracle["gate"] + (" characterization" if oracle["characterization"] else "")
+    rewrites = _oracle_rewrites(oracle)
+    if rewrites:
+        label += " rewrites: " + ", ".join(rewrites)
+    return label
 
 
 def _change_task_oracles(root: Path, change: str) -> dict[str, dict | None]:
