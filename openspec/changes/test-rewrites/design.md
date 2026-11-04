@@ -60,6 +60,8 @@ Alternative considered: a `rewrites:` list under the task, or a section of `task
 
 `agents/test-author.md` §2 changes in one place. The author may read a declared file's content, **from the brief only**: it never opens the path, and it never reads any other existing test. An existing test that must change but is not declared stays a §6 question, now with a stated answer: the plan declares it as `rewrites:` on the task. The author copies forward every case the task does not change, because the handed-off file is the full content after the task (§4, unchanged). Cases it removes are the ones the task's specs and design say are gone.
 
+One further case needs no clause. The approved design may give a test file's complete post-task text. The author may then hand that text off verbatim at the existing path, under the task, without reading the current file. The design is in the author's brief already, and the approval covers it. This is the 0.11 route that adopters used before this change (#157). Stating it stops an author from halting `weak-spec` on §2 when the plan already holds the whole file. A design that gives only deltas (keep these cases, drop those) still needs `rewrites:`, because carrying cases forward requires seeing them.
+
 Alternative considered: let the author open the declared paths directly. Rejected. The rule then needs the author to check each read against a list, where "read the brief" is one rule the author already follows. Content read from `HEAD` also matches the base the handoff records for a clean tree.
 
 ### D3. A declared rewrite must be handed off; an undeclared overwrite is unchanged
