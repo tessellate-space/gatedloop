@@ -26,7 +26,8 @@ mostly one host: Claude Code, locally and on the web.
 | Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
 | Token usage rows, `gates stats --cost` and `loop.token-budget` | lightly | usage recorded on this repository's own changes since `token-ledger` merged; the budget has not halted a real change |
 | `/gatedloop:planner` and `/gatedloop:orchestrator` | not yet | new in 0.10.0; the planner/orchestrator split they encode has run by hand, as in [`topology.md`](./topology.md) |
-| The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
+| The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13 on OpenSpec 1.14.3, plus one Ubuntu, Python 3.13 leg on OpenSpec 1.16.0; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
+| A task's `rewrites:` clause (`gates tests show --diff`) | not yet | new in 0.11.1; covered by the `unittest` suite only, no real change has declared one |
 | The READY report's gate block (`gates ledger record-ready`) | lightly | this repository's own changes since `loop-hardening` |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
@@ -81,7 +82,12 @@ commits and pushes pass untouched, and an agent on another host is gated only on
 its variable is declared. The `pre-push` gate on the merge target is opt-in, and
 `--commit-only` declines it until `--push`. A hook installed before 0.8.0 is an old
 copy: re-run `gates hook install`, and `gates doctor` reports it as `stale-copy`
-until you do.
+until you do. So is a `pre-commit` copy installed before 0.11.1: it records its usage
+row without staging it, which leaves the ledger dirty after every commit and stops
+`gates merge` (#140). Since 0.11.1 the `pre-push` gate names only a change whose own
+commits the push carries in, and refuses a commit no change owns, a release commit
+say, as belonging to no change in flight; such a commit goes through a pull request
+or a push outside an agent session.
 
 ### The plan declares each task's oracle — *shipped, opt-in*
 
@@ -95,7 +101,12 @@ refuses a contradiction, and the lock reads the red run on the declared gate, so
 e2e task tagged `[oracle: integration]` goes red under `integration` instead of being
 declared `CHARACTERIZATION`. An untagged task is still the author's to decide from the
 prose, and a wrong guess there shows only as a `green` defect. `loop.task-oracle:
-required` refuses untagged tasks at handoff; it is off by default.
+required` refuses untagged tasks at handoff; it is off by default. Since 0.11.1
+(`test-rewrites`) a gate tag may end with `rewrites: <path>` to name the existing tests
+a task rewrites: the author reads exactly those files from its brief and no other
+existing test, and the rewrite is locked as the task's authored test. An existing test
+a task must change but the plan doesn't name is still unreadable to the author, and
+stays a blocking question.
 
 ### A scoped `ci` or `unit` errs full on an unmatched path — *shipped*
 
@@ -175,7 +186,8 @@ has the steps.
 
 gatedloop does not author anything; OpenSpec does, and the shim reads what OpenSpec
 prints. Supported: **OpenSpec 1.14.3 to 1.16.0**, the range [`stability.md`](./stability.md)
-declares; ci tests both ends, and a weekly job runs OpenSpec's latest release. `gates doctor`
+declares. Pull-request ci runs the minimum on every leg and the highest tested on one
+(Ubuntu, Python 3.13), and a weekly job runs OpenSpec's latest release. `gates doctor`
 warns, without failing, outside the range.
 
 | gatedloop relies on | Used by | When upstream changes it |

@@ -12,8 +12,10 @@ retired. When gatedloop reaches 1.0 is not decided here; [`status.md`](./status.
 
 Windows is not supported: the hooks are bash.
 
-Pull-request ci runs `gates run ci` on each of these: both operating systems, the
-minimum and the latest Python, and both ends of the OpenSpec range. A weekly job runs
+Pull-request ci runs `gates run ci` on four legs, both operating systems with the
+minimum and the latest Python, all against the minimum OpenSpec (`1.14.3`). One fifth
+leg runs the highest tested OpenSpec (`1.16.0`) on Ubuntu with Python 3.13 only, so
+that end of the range is not crossed with the other operating system or Python. A weekly job runs
 the same `ci` against OpenSpec's latest release, outside the range, as an early
 warning. It is not a required check. `gates doctor` warns, without failing, when the
 installed OpenSpec is outside the range. The range widens when ci proves a new end;

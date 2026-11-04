@@ -57,7 +57,8 @@ openspec instructions <artifact> --change <name> --json
   nothing removed), and `cut` refuses while it reports a gap. `cut
   <patch|minor|major>` bumps all three version fields and drafts a `CHANGELOG.md`
   section; review and edit it, then `publish` commits, tags and creates the
-  GitHub release. `check` (run by `ci`) keeps the three
+  GitHub release; it refuses inside an agent session and prints the commands to run
+  from a terminal outside one. `check` (run by `ci`) keeps the three
   fields in agreement. Releases are batched and the maintainer decides when;
   adopters get a change only on a version bump. A project-level SessionStart
   hook in `.claude/settings.json` (this repo only, never `hooks/hooks.json`)
@@ -132,7 +133,9 @@ LLM; the *selection* does not.
 - `agents/test-author.md` (Sonnet) writes every task's failing tests for the whole change
   before implementation starts; the tests are held, placed per task and locked, and a
   red run is enforced after placement (`gates tests …`), on the task's oracle gate: the
-  `[oracle: …]` tag ending its `tasks.md` line, `unit` when untagged. `agents/merge-runner.md`
+  `[oracle: …]` tag ending its `tasks.md` line, `unit` when untagged. The author reads no
+  existing test except those a tag's `rewrites: <path>` clause names, which its brief prints
+  from `HEAD` and the lock then holds as authored. `agents/merge-runner.md`
   (Sonnet) runs `gates merge` for an orchestrator.
 - `agents/tdd-implementer.md` (Sonnet) runs that same skill autonomously. It differs
   in four load-bearing ways: it cannot ask the user (HALTs instead of guessing), it
@@ -224,11 +227,17 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.11.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.11.1. Read a change's
 `design.md` before touching the area it covers:
 
+- `review-provenance`: a `SubagentStop` hook records how each convention review ran, review rows
+  carry `via: subagent|inline`, the reviewer's limits move into agent config and a Bash
+  allowlist hook, and an opt-in `loop.review: isolated` makes `gates merge` refuse inline reviews.
 - `prompt-evals`: an on-demand `claude plugin eval` suite under `evals/` for the implementer, the
   test author and the convention review, run by `scripts/eval-prompts`; no `eval` gate.
+- `checkable-disputes`: a `setup`/`assertion` defect and the author's new `--defend` reply must
+  `--cite` a path or spec scenario the shim resolves, a `green` defect needs a passing oracle run
+  in the ledger, and `gates tests show` gives the human both sides.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 
