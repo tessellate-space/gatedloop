@@ -7303,6 +7303,31 @@ def _tests_defect(m: dict, root: Path, args) -> int:
     return 0
 
 
+def _rewrite_pairs(state: dict, task: str, oracle: dict | None) -> list[tuple[str, str | None, str]]:
+    """`(path, base blob, handed-off blob)` for each path `task` declares
+    under `rewrites:` and hands off (test-rewrites D5)."""
+    held = state["tests"].get(task, {})
+    return [(p, state["base"].get(p), held[p]) for p in _oracle_rewrites(oracle) if p in held]
+
+
+def _rewrite_stats(root: Path, state: dict, task: str, oracle: dict | None) -> dict:
+    """`{path: {"base", "added", "removed"}}`: the lines each declared
+    rewrite's handed-off content adds and removes against its base."""
+    out = {}
+    for path, base, blob in _rewrite_pairs(state, task, oracle):
+        added = removed = None
+        if base:
+            r = subprocess.run(["git", "diff", "--numstat", base, blob], cwd=root,
+                               capture_output=True, text=True)
+            nums = r.stdout.split()
+            if r.returncode == 0 and len(nums) >= 2 and nums[0].isdigit():
+                added, removed = int(nums[0]), int(nums[1])
+            elif r.returncode == 0 and not nums:
+                added = removed = 0
+        out[path] = {"base": base, "added": added, "removed": removed}
+    return out
+
+
 def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     rows = _read_ledger_rows(root, change)
     state = _authoring_state(rows)
@@ -7332,6 +7357,7 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
                 "defects_by_kind": {k: sum(1 for d in log if d["kind"] == k)
                                     for k in TEST_DEFECT_KINDS},
                 "defect_log": log,
+                "rewrites": _rewrite_stats(root, state, task, oracles.get(task)),
             }
     return {
         "change": change,
@@ -7342,11 +7368,45 @@ def _tests_show_doc(m: dict, root: Path, change: str) -> dict:
     }
 
 
+def _tests_show_diff(root: Path, change: str) -> int:
+    """test-rewrites D5: each declared rewrite's unified diff from its base
+    to its handed-off content, so review reads what an existing test lost."""
+    state = _authoring_state(_read_ledger_rows(root, change))
+    if state is None:
+        print(f"change: {change}\nno handoff recorded — no rewrite to diff")
+        return 0
+    oracles = _change_task_oracles(root, change)
+    shown = 0
+    for task in sorted(state["tests"], key=_task_sort_key):
+        for path, base, blob in _rewrite_pairs(state, task, oracles.get(task)):
+            shown += 1
+            print(f"## task {task}: rewrites {path}")
+            if not base:
+                print("(no base recorded — the path did not exist at handoff)")
+                continue
+            r = subprocess.run(["git", "diff", "--no-color", base, blob], cwd=root,
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"gatedloop: git could not diff {base} and {blob} for {path}: "
+                      f"{r.stderr.strip()}", file=sys.stderr)
+                return 1
+            body = r.stdout.splitlines()
+            # The blob ids stand in for paths; name the path instead.
+            body = [f"--- a/{path}" if ln.startswith("--- ") else
+                    f"+++ b/{path}" if ln.startswith("+++ ") else ln for ln in body]
+            print("\n".join(body) if body else "(identical to base)")
+    if not shown:
+        print(f"change: {change}\nno task declares a handed-off rewrite")
+    return 0
+
+
 def _tests_show(m: dict, root: Path, args) -> int:
     change = args.change or _tests_change_or_refuse(root, args, "show")
     if change is None:
         return 1
     doc = _tests_show_doc(m, root, change)
+    if getattr(args, "diff", False):
+        return _tests_show_diff(root, change)
     if getattr(args, "json", False):
         print(json.dumps(doc, sort_keys=True))
         return 0
@@ -7367,6 +7427,10 @@ def _tests_show(m: dict, root: Path, args) -> int:
             print(f"  {task}  {oracle}  {state}{extra}")
             for path in t["tests"]:
                 print(f"        {path}")
+            for path, rw in t["rewrites"].items():
+                counts = (f"+{rw['added']} -{rw['removed']} vs base" if rw["added"] is not None
+                          else "no base to compare")
+                print(f"        rewrites {path} ({counts})")
         for d in t["defect_log"]:
             print(f"        defect ({d['kind']}): {d['detail']}")
     return 0
@@ -13978,6 +14042,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tw = tests_sub.add_parser("show", help="print the authoring state: author, each task's tests or reason, placement, defects")
     sp_tw.add_argument("change", nargs="?", help="change name (default: current branch)")
     sp_tw.add_argument("--json", action="store_true", help="one machine-readable JSON document")
+    sp_tw.add_argument("--diff", action="store_true", help="print each declared rewrite's unified diff against its base (test-rewrites)")
     sp_tw.set_defaults(fn=cmd_tests)
     sp_tb = tests_sub.add_parser("brief", help="print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures")
     sp_tb.add_argument("change")

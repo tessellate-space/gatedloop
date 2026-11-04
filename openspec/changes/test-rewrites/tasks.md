@@ -12,7 +12,7 @@
 
 ## 3. The lock and review (D4, D5)
 
-- [ ] 3.1 Add to `gates tests show` each task's `rewrites` (base blob, lines added and removed against base) in text and JSON, and a `--diff` flag that prints each rewrite's unified diff against its base. Run `python3 tests/test_contract.py --write` for the new flag. Verify with tests for the counts, the diff text and the JSON shape. Pin D4 with tests on a real repository and a worktree, for a declared rewrite that is handed off, placed over the existing file, and run red on `unit` (commit allowed); the same with no red run (refused); an edited placed rewrite (refused); a `characterization` rewrite green first (allowed); and a defect requiring the base content back [oracle: unit]
+- [x] 3.1 Add to `gates tests show` each task's `rewrites` (base blob, lines added and removed against base) in text and JSON, and a `--diff` flag that prints each rewrite's unified diff against its base. Run `python3 tests/test_contract.py --write` for the new flag. Verify with tests for the counts, the diff text and the JSON shape. Pin D4 with tests on a real repository and a worktree, for a declared rewrite that is handed off, placed over the existing file, and run red on `unit` (commit allowed); the same with no red run (refused); an edited placed rewrite (refused); a `characterization` rewrite green first (allowed); and a defect requiring the base content back [oracle: unit]
 
 ## 4. Prompts, adoption and docs (D6, D7)
 

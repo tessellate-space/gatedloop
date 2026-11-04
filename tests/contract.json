@@ -702,6 +702,7 @@
   },
   "tests show": {
    "options": [
+    "--diff",
     "--json"
    ],
    "positionals": [
