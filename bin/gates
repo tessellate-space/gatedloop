@@ -7605,6 +7605,34 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
         lines.append("none — no tasks")
     lines.append("")
 
+    # test-rewrites D2: the one exception to "read no existing test" -- the
+    # files the approved plan declares, as HEAD holds them.
+    lines.append("## Declared rewrites")
+    declaring = [(tid, _oracle_rewrites(oracle)) for tid, _text, oracle in tasks
+                 if _oracle_rewrites(oracle)]
+    for tid, paths in declaring:
+        lines.append(f"{tid}:")
+        for p in paths:
+            content = _blob_at(root, "HEAD", p)
+            if content is None:
+                lines.append(f"- {p}: absent at HEAD — the handoff refuses {tid} until "
+                             "the plan is amended")
+                continue
+            fence = "```"
+            while fence in content:
+                fence += "`"
+            lines.append(f"- {p} (content at HEAD):")
+            lines.append(fence)
+            lines.append(content.rstrip("\n"))
+            lines.append(fence)
+    if declaring:
+        lines.append("Read these copies only — never open the paths. Hand off each as "
+                     "its full content after the task, carrying forward every case the "
+                     "task does not change. Read no other existing test.")
+    else:
+        lines.append("none — no task declares rewrites:, so no existing test is yours to read")
+    lines.append("")
+
     conv = m.get("conventions") or {}
     rules_doc = conv.get("rules-doc")
     test_rule_ids = _project_test_rule_ids(m, root)
