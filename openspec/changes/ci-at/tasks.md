@@ -40,7 +40,7 @@
 
 ## 8. Integration
 
-- [ ] 8.1 On a fixture change in a real repository with `loop.ci-at: ready` and the git-layer hook installed, run two tasks through placement, red, a green `unit` on the staged tree and commit through both layers, a `Stop`-hook audit between them, `record-ready` refused, then an unscoped `ci`, `record-ready` allowed, and `gates merge` step 1's head proof. Verify every step exits as specified and the ledger holds no taint row. Then run `./bin/gates run ci` on the finished branch and verify it exits 0 [oracle: unit characterization]
+- [x] 8.1 On a fixture change in a real repository with `loop.ci-at: ready` and the git-layer hook installed, run two tasks through placement, red, a green `unit` on the staged tree and commit through both layers, a `Stop`-hook audit between them, `record-ready` refused, then an unscoped `ci`, `record-ready` allowed, and `gates merge` step 1's head proof. Verify every step exits as specified and the ledger holds no taint row. Then run `./bin/gates run ci` on the finished branch and verify it exits 0 [oracle: unit characterization]
 
 ## Workflow follow-up
 
