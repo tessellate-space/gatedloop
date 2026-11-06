@@ -3820,7 +3820,7 @@ def _now_iso() -> str:
 _STALE_LIST_LIMIT = 10
 
 
-def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str) -> str:
+def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str, gate: str = "ci") -> str:
     """What changed between the tree `ci` last passed on and `normalized`
     (hook-correctness D4) -- the most recently recorded marker, by its own
     `ts`, stands for "the gate run just before this commit". Both trees are
@@ -3852,11 +3852,11 @@ def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str) -> str:
     if all(e[0] == "A" for e in entries):
         paths = ", ".join(e[-1] for e in shown)
         return (
-            f"{len(entries)} file(s) were staged after `gates run ci` ran: "
+            f"{len(entries)} file(s) were staged after `gates run {gate}` ran: "
             f"{paths}{more_note} — re-run the gate"
         )
     listed = ", ".join(f"{e[0]} {e[-1]}" for e in shown)
-    return f"the staged tree differs from the one `ci` passed on: {listed}{more_note}"
+    return f"the staged tree differs from the one `{gate}` passed on: {listed}{more_note}"
 
 
 def _check_marker_and_report(root: Path, gate: str, tree: str, require_scope: str | None = None) -> int:
@@ -3894,8 +3894,8 @@ def _check_marker_and_report(root: Path, gate: str, tree: str, require_scope: st
             f"tree(s) are still retained. Run `gates run {gate}` again.",
             file=sys.stderr,
         )
-        if gate == "ci":
-            diagnosis = _stale_diagnosis(root, gate_dir, normalized)
+        if gate in ("ci", "unit"):
+            diagnosis = _stale_diagnosis(root, gate_dir, normalized, gate)
             if diagnosis:
                 print(f"gatedloop: {diagnosis}", file=sys.stderr)
         return 1
@@ -11441,8 +11441,57 @@ def _check_commit_verdict(m: dict, root: Path, tree: str) -> tuple[int, str | No
         return 0, "ledger"
     # Mixed, empty, or the staged diff couldn't be read: the full
     # requirement.
-    rc = _check_marker_and_report(root, "ci", tree)
-    return rc, ("marker" if rc == 0 else None)
+    if not _unit_commits_allowed(m, root):
+        rc = _check_marker_and_report(root, "ci", tree)
+        return rc, ("marker" if rc == 0 else None)
+    # ci-at D2: under `loop.ci-at: ready`, on a branch naming an active
+    # change, a `ci` marker still allows the commit, and a `unit` marker
+    # for the staged tree allows it too, with its own token.
+    rc, out, err = _captured(_check_marker_and_report, root, "ci", tree)
+    if rc == 0:
+        print(out, end="")
+        return 0, "marker"
+    urc, uout, uerr = _captured(_check_marker_and_report, root, "unit", tree)
+    if urc == 0:
+        print(uout.rstrip("\n") + " — loop.ci-at: ready; the full ci runs before READY "
+              "and at the merge")
+        return 0, "unit"
+    # The denial quotes whichever gate's store holds the newest marker, so
+    # its stale diagnosis compares against the run just before this commit.
+    newest = _newest_marker_gate(root, ("unit", "ci"))
+    print(err if newest == "ci" else uerr, end="", file=sys.stderr)
+    print(
+        "gatedloop: loop.ci-at: ready — this task commit needs `gates run unit` green on "
+        "the staged tree (a green `gates run ci` satisfies it too)",
+        file=sys.stderr,
+    )
+    return 1, None
+
+
+def _unit_commits_allowed(m: dict, root: Path) -> bool:
+    """ci-at D2: a `unit` marker can allow a commit only under `loop.ci-at:
+    ready` and on a branch naming an active change -- never on `main`, a
+    `plan/*` or docs branch, or the detached HEAD `gates merge` commits on."""
+    if _ci_at_mode(m) != "ready":
+        return False
+    branch = _current_branch(root)
+    return bool(branch) and _is_active_change(root, branch)
+
+
+def _newest_marker_gate(root: Path, gates_: tuple[str, ...]) -> str:
+    """The gate whose marker store holds the most recently written marker,
+    by the marker's own `ts`; the first gate when none holds any."""
+    best: tuple[str, str] | None = None
+    for gate in gates_:
+        d = _marker_gate_dir(root, gate)
+        for p in d.glob("*.json") if d.exists() else []:
+            try:
+                ts = json.loads(p.read_text()).get("ts") or ""
+            except Exception:
+                continue
+            if best is None or ts > best[0]:
+                best = (ts, gate)
+    return best[1] if best else gates_[0]
 
 
 def _cmd_discipline_other(m: dict, root: Path, args) -> int:
@@ -12344,6 +12393,9 @@ def cmd_run(m: dict, root: Path, args) -> int:
         except _LockBusy as busy:
             return lock_busy(busy, started)
         tree = _write_tree(root)
+        if rc == 0 and tree and _ci_at_mode(m) == "ready":
+            # ci-at D2: under `ready` a green `unit` is a commit gate.
+            _write_marker(root, "unit", tree, scope=scope)
         record(rc, tree, started, scope=scope)
         _maybe_print_fresh_worktree_hint(root, rc)
         return rc
@@ -12421,6 +12473,10 @@ def cmd_run(m: dict, root: Path, args) -> int:
     tree = _write_tree(root)
     if gate == "ci" and rc == 0 and tree:
         _write_marker(root, "ci", tree, scope=scope)
+    if gate == "unit" and rc == 0 and tree and _ci_at_mode(m) == "ready":
+        # ci-at D2: under `ready` a green `unit` is a commit gate, so it
+        # leaves the same tree-keyed marker `ci` does.
+        _write_marker(root, "unit", tree, scope=scope)
     record(rc, tree, started, scope=scope if gate in ("ci", "unit") else None)
     if gate == "ci" and rc == 0 and tree and change is not None:
         # A green ci on the branch head clears an outstanding audit taint (D7).
