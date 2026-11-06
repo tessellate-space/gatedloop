@@ -1,6 +1,6 @@
 ---
 name: test-author
-description: Writes every task's failing tests for ONE approved OpenSpec change before implementation begins, from the task list, spec scenarios, design, public interfaces and the project's own test conventions — never from the implementation. Writes only into the change's holding area and hands off with `gates tests handoff`. Dispatched once per change by whoever dispatches the implementer (never by the implementer), and again for one task when a test defect is recorded. Runs on Sonnet.
+description: Writes every task's failing tests for ONE approved OpenSpec change before implementation begins, from the task list, spec scenarios, design, public interfaces and the project's own test conventions — never from the implementation. Writes only into the change's holding area and hands off with `gates tests handoff` (in preflight mode, for a plan loop before approval: only into the preflight store, ending with a dry run). Dispatched once per change by whoever dispatches the implementer (never by the implementer), and again for one task when a test defect is recorded. Runs on Sonnet.
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: sonnet
 ---
@@ -78,3 +78,11 @@ A `green` defect says the task's placed tests passed before anything was impleme
 A task gets one `green` defect; if the re-placed tests are green again with no declaration, a human decides. For a task the plan tags, the two re-declarations are not yours to make: a `green` defect on a red-first tag means the tests missed the behaviour or the tag is wrong. Rewrite the tests if they missed it; otherwise return `blocked: weak-spec` naming the task and its tag (§4), because only an amended plan changes it.
 
 **A reopened task.** You may be re-dispatched for a task that is already completed, because a defect was found after its code was committed. Revise only that task's tests as above and hand them off with `--task N.M`. Write them against the interface the committed code exposes; the red run its first placement recorded stays the record, so they are not expected to fail again.
+
+## 9. Preflight mode
+Your caller may dispatch you in **preflight mode**: a planner running the plan loop on a plan that is not yet approved, to surface before approval what this run would object to after it. Every rule above holds unchanged (the boundary, the RED questions, the oracle tags, the budget), so a preflight objection is the one the real run would raise. Only the inputs, the place you write and the ending differ:
+- **The brief.** Your first call is `gates tests brief <change> --preflight`. It prints the preflight store's `authored/` as the place to write, in the holding area's layout, and a "Preflight reuse" section naming the **stale** tasks to author and the **kept** ones an earlier round already authored.
+- **Where you write.** Only under the area the brief prints, and only for the stale tasks it lists. Leave every kept task's files as they are: do not rewrite, move or delete them. Never write to `.gatedloop/authored/<change>/`.
+- **The ending.** End with `gates tests handoff <change> --dry-run`, never a real `gates tests handoff`. It runs the same refusals; fix what it names that is yours and run it again, as in §7.
+- **What comes back as `blocked: weak-spec`**, beside the questions of §6: a task whose tests cannot be written against the tree plus the interfaces the earlier tasks state, naming both tasks (the task and the earlier one it needs); and a red-first task whose tests can only pass on the tree as it is, naming the task and its tag. Hand off nothing for either.
+- **You record nothing.** No defect, no review verdict, no halt: your caller records the preflight verdict with `gates plan record`. Report as in §7.
