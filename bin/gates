@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import difflib
 import fnmatch
 import hashlib
 import importlib.util
@@ -7557,10 +7558,108 @@ def _tests_show_diff(root: Path, change: str) -> int:
     return 0
 
 
+def _preflight_rewrite_pairs(root: Path, store_tests: dict, task: str,
+                            oracle: dict | None) -> list[tuple[str, str | None, str]]:
+    """`(path, content at HEAD or None, held content)` for each rewrite the
+    task declares and the store holds (plan-preflight D7)."""
+    out = []
+    for path in _oracle_rewrites(oracle):
+        held = store_tests.get(task, {}).get(path)
+        if held is not None:
+            out.append((path, _blob_at(root, "HEAD", path), held.read_text()))
+    return out
+
+
+def _preflight_show_doc(m: dict, root: Path, change: str) -> dict:
+    """`gates tests show`'s document built from the preflight store, with
+    no ledger read: each rewrite counted against the path at `HEAD`."""
+    held, reasons, characterization, _problems = _read_holding_area(
+        _preflight_store(root, change) / "authored")
+    oracles = _change_task_oracles(root, change)
+    tasks: dict[str, dict] = {}
+    for task in sorted(set(held) | set(reasons) | set(characterization), key=_task_sort_key):
+        rewrites = {}
+        for path, before, after in _preflight_rewrite_pairs(root, held, task, oracles.get(task)):
+            added = removed = None
+            if before is not None:
+                diff = list(difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                                 lineterm="", n=0))
+                added = sum(1 for ln in diff if ln.startswith("+") and not ln.startswith("+++"))
+                removed = sum(1 for ln in diff if ln.startswith("-") and not ln.startswith("---"))
+            rewrites[path] = {"base": "HEAD" if before is not None else None,
+                              "added": added, "removed": removed}
+        tasks[task] = {
+            "oracle": _oracle_label(oracles.get(task)),
+            "tests": sorted(held.get(task, {})),
+            "no_behaviour": reasons.get(task),
+            "characterization": characterization.get(task),
+            "placed": False,
+            "rewrites": rewrites,
+        }
+    return {
+        "change": change,
+        "mode": _test_author_mode(m),
+        "handoff": False,
+        "preflight": True,
+        "store": (_preflight_store(root, change) / "authored").relative_to(root).as_posix(),
+        "authors": [],
+        "tasks": tasks,
+    }
+
+
+def _preflight_show(m: dict, root: Path, change: str, args) -> int:
+    doc = _preflight_show_doc(m, root, change)
+    if getattr(args, "diff", False):
+        held, _r, _c, _p = _read_holding_area(_preflight_store(root, change) / "authored")
+        oracles = _change_task_oracles(root, change)
+        shown = 0
+        for task in sorted(held, key=_task_sort_key):
+            for path, before, after in _preflight_rewrite_pairs(root, held, task,
+                                                                oracles.get(task)):
+                shown += 1
+                print(f"## task {task}: rewrites {path}")
+                if before is None:
+                    print("(absent at HEAD — nothing to diff against)")
+                    continue
+                body = list(difflib.unified_diff(
+                    before.splitlines(), after.splitlines(),
+                    fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""))
+                print("\n".join(body) if body else "(identical to HEAD)")
+        if not shown:
+            print(f"change: {change}\nno task in the preflight store holds a declared rewrite")
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(doc, sort_keys=True))
+        return 0
+    print(f"change: {change}   loop.test-author: {doc['mode']}   preflight store: {doc['store']}/")
+    if not doc["tasks"]:
+        print("nothing held in the preflight store — no preflight has authored tests yet")
+        return 0
+    print("no handoff is recorded for a preflight; these are the store's held tests")
+    for task, t in doc["tasks"].items():
+        oracle = f"oracle: {t['oracle'] or 'undeclared'}"
+        if t["no_behaviour"] is not None:
+            print(f"  {task}  {oracle}  no behaviour change — {t['no_behaviour']}")
+            continue
+        state = "held"
+        if t["characterization"] is not None:
+            state += f", characterization — {t['characterization']}"
+        print(f"  {task}  {oracle}  {state}")
+        for path in t["tests"]:
+            print(f"        {path}")
+        for path, rw in t["rewrites"].items():
+            counts = (f"+{rw['added']} -{rw['removed']} vs HEAD" if rw["added"] is not None
+                      else "absent at HEAD")
+            print(f"        rewrites {path} ({counts})")
+    return 0
+
+
 def _tests_show(m: dict, root: Path, args) -> int:
     change = args.change or _tests_change_or_refuse(root, args, "show")
     if change is None:
         return 1
+    if getattr(args, "preflight", False):
+        return _preflight_show(m, root, change, args)
     doc = _tests_show_doc(m, root, change)
     if getattr(args, "diff", False):
         return _tests_show_diff(root, change)
@@ -14415,6 +14514,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tw.add_argument("change", nargs="?", help="change name (default: current branch)")
     sp_tw.add_argument("--json", action="store_true", help="one machine-readable JSON document")
     sp_tw.add_argument("--diff", action="store_true", help="print each declared rewrite's unified diff against its base (test-rewrites)")
+    sp_tw.add_argument("--preflight", action="store_true",
+                       help="report the preflight store (.gatedloop/out/preflight/<change>/) instead of the ledger; rewrites against HEAD")
     sp_tw.set_defaults(fn=cmd_tests)
     sp_tb = tests_sub.add_parser("brief", help="print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures")
     sp_tb.add_argument("change")

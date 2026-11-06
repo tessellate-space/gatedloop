@@ -706,7 +706,8 @@
   "tests show": {
    "options": [
     "--diff",
-    "--json"
+    "--json",
+    "--preflight"
    ],
    "positionals": [
     "change"

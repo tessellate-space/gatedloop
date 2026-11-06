@@ -4143,6 +4143,21 @@
     ],
     "required": false,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "preflight",
+    "help": "report the preflight store (.gatedloop/out/preflight/<change>/) instead of the ledger; rewrites against HEAD",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--preflight"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,
