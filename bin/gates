@@ -925,6 +925,24 @@ def _errors(m: dict, root: Path) -> list[str]:
                     f"{' or '.join(repr(v) for v in TASK_ORACLE_MODES)} "
                     f"(got {loop.get('task-oracle')!r})"
                 )
+            # ci-at D1: when the full `ci` runs. `ready` moves it to READY and
+            # gates a task commit on `unit`, so a global `unit` must exist: a
+            # surface override alone leaves an unmatched path with no gate.
+            if "ci-at" in loop:
+                v = loop.get("ci-at")
+                if v not in CI_AT_MODES:
+                    errs.append(
+                        "loop.ci-at must be "
+                        f"{' or '.join(repr(x) for x in CI_AT_MODES)} (got {v!r})"
+                    )
+                elif v == "ready":
+                    g = m.get("gates")
+                    if not (isinstance(g, dict) and g.get("unit") not in (None, "")):
+                        errs.append(
+                            "loop.ci-at: ready gates each task commit on `unit`, but no "
+                            "global gates.unit is declared (a surface override alone does "
+                            "not count) — declare gates.unit, or use loop.ci-at: task"
+                        )
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -991,7 +1009,8 @@ def _economics_errors(econ) -> list[str]:
 
 TEST_AUTHOR_MODES = ("separate", "inline")
 TASK_ORACLE_MODES = ("optional", "required")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle")
+CI_AT_MODES = ("task", "ready")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -1030,6 +1049,22 @@ def _task_oracle_mode(m: dict) -> str:
     if isinstance(loop, dict) and loop.get("task-oracle") == "required":
         return "required"
     return "optional"
+
+
+def _ci_at_mode(m: dict) -> str:
+    """The effective `loop.ci-at` (ci-at D1): `ready` only when declared;
+    `task` otherwise, including absent or malformed (a malformed value is
+    `gates validate`'s business)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    if isinstance(loop, dict) and loop.get("ci-at") == "ready":
+        return "ready"
+    return "task"
+
+
+def _commit_gate(m: dict) -> str:
+    """The gate a task commit on a change branch needs (ci-at D2): `unit`
+    under `loop.ci-at: ready`, `ci` otherwise."""
+    return "unit" if _ci_at_mode(m) == "ready" else "ci"
 
 
 def _test_author_mode(m: dict) -> str:

@@ -207,6 +207,12 @@
           "type": "string",
           "enum": ["optional", "required"],
           "default": "optional"
+        },
+        "ci-at": {
+          "description": "When the full, unscoped `ci` runs (ci-at design D1). task (default): every task commit needs a green `ci` marker for its staged tree. ready: on a branch naming an active change, a task commit is also allowed on a green `unit` marker for the staged tree (plus the convention review), and `gates ledger record-ready` refuses until an unscoped `ci` passes on the head; the merge is unchanged. ready requires a global `gates.unit` (a surface override alone does not count). Change it between changes, not mid-change.",
+          "type": "string",
+          "enum": ["task", "ready"],
+          "default": "task"
         }
       }
     },

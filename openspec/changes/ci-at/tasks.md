@@ -2,7 +2,7 @@
 
 ## 1. The mode and its validation (D1)
 
-- [ ] 1.1 Add `ci-at` (`task` | `ready`) to `LOOP_KEYS` with an effective-mode helper that reads absent or malformed as `task`. Make `gates validate` fail on another value, naming the key and both values, and on `ready` with no global `gates.unit`, naming the missing gate. Add `loop.ci-at` to `schema/gates.schema.json`. Verify with tests for absent, `task`, `ready` with `unit`, `ready` without a global `unit` (a surface-only `unit` override included) and an unknown value [oracle: unit]
+- [x] 1.1 Add `ci-at` (`task` | `ready`) to `LOOP_KEYS` with an effective-mode helper that reads absent or malformed as `task`. Make `gates validate` fail on another value, naming the key and both values, and on `ready` with no global `gates.unit`, naming the missing gate. Add `loop.ci-at` to `schema/gates.schema.json`. Verify with tests for absent, `task`, `ready` with `unit`, `ready` without a global `unit` (a surface-only `unit` override included) and an unknown value [oracle: unit]
 - [ ] 1.2 Document `loop.ci-at` in SETUP.md as a new `### loop.ci-at` section beside the retry budget: the two values, the default, the `unit` requirement, where the full `ci` runs under each mode, and changing the key between changes rather than mid-change. Verify `scripts/release docs` reports no gap for the key [oracle: none]
 
 ## 2. The commit gate under ready (D2, D3, D7)
