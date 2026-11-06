@@ -9036,6 +9036,141 @@ def _plan_tier_parse(text: str) -> tuple[dict | None, list[str]]:
     return (obj if not errs else None), errs
 
 
+# The plan digest (D3): a bounded, deterministic summary of the plan that is
+# all an external classifier receives. Priority order, top first; a trim
+# removes from the bottom.
+_SPEC_SECTION_RE = re.compile(r"^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\b")
+_REQUIREMENT_RE = re.compile(r"^###\s+Requirement:\s*(.+?)\s*$")
+_DECISION_RE = re.compile(r"^###\s+(D\d+\..*?)\s*$")
+PLAN_DIGEST_TRIM_ORDER = ("decisions", "what_changes", "tasks")
+
+
+def _plan_spec_deltas(root: Path, change: str) -> list[dict]:
+    """Each spec delta's `## <OP> Requirements` sections with their
+    requirement titles: `{file, section, requirements}`."""
+    change_dir = root / "openspec" / "changes" / change
+    out: list[dict] = []
+    if not (change_dir / "specs").is_dir():
+        return out
+    for f in sorted((change_dir / "specs").rglob("*.md")):
+        current = None
+        for line in f.read_text().splitlines():
+            ms = _SPEC_SECTION_RE.match(line)
+            if ms:
+                current = {"file": f.relative_to(change_dir).as_posix(),
+                           "section": ms.group(1), "requirements": []}
+                out.append(current)
+                continue
+            if line.startswith("## "):
+                current = None
+                continue
+            mr = _REQUIREMENT_RE.match(line)
+            if mr and current is not None:
+                current["requirements"].append(mr.group(1))
+    return out
+
+
+def _plan_what_changes(root: Path, change: str) -> list[str]:
+    """The proposal's "What Changes" bullets, first lines only."""
+    p = root / "openspec" / "changes" / change / "proposal.md"
+    if not p.is_file():
+        return []
+    out, inside = [], False
+    for line in p.read_text().splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip().lower() == "what changes"
+            continue
+        if inside and re.match(r"^[-*]\s+", line):
+            out.append(re.sub(r"^[-*]\s+", "", line).strip())
+    return out
+
+
+def _plan_decisions(root: Path, change: str) -> list[str]:
+    p = root / "openspec" / "changes" / change / "design.md"
+    if not p.is_file():
+        return []
+    return [mt.group(1) for mt in map(_DECISION_RE.match, p.read_text().splitlines()) if mt]
+
+
+def _plan_digest_full(m: dict, root: Path, change: str) -> dict:
+    signals = _plan_signals(m, root, change)
+    floor = "full" if any(x["high"] for x in signals) else "light"
+    paths = []
+    for p in _plan_named_paths(root, change):
+        hot = hot_surfaces(m, [p])
+        paths.append({"path": p, "surfaces": [x["name"] for x in hot],
+                      "blast_radius": "high" if any(_blast_radius(x) == "high" for x in hot)
+                      else "normal"})
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    return {
+        "change": change,
+        "floor": floor,
+        "signals": signals,
+        "paths": paths,
+        "spec_deltas": _plan_spec_deltas(root, change),
+        "tasks": [f"{tid} {text.strip()}" for tid, text, _o in _task_lines(tasks_md)],
+        "what_changes": _plan_what_changes(root, change),
+        "decisions": _plan_decisions(root, change),
+        "trimmed": [],
+    }
+
+
+def _compact_json(obj) -> str:
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+
+
+def _plan_digest(m: dict, root: Path, change: str, limit: int | None = None) -> tuple[dict, bool]:
+    """`(digest, fits)`: the digest at `limit` bytes of compact UTF-8 JSON
+    (none when `limit` is None)."""
+    d = _plan_digest_full(m, root, change)
+    if limit is None:
+        return d, True
+    return d, len(_compact_json(d).encode()) <= limit
+
+
+def _plan_digest_cmd(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    if args.limit is not None and args.limit <= 0:
+        print("gatedloop: --limit must be a positive number of bytes.", file=sys.stderr)
+        return 1
+    d, fits = _plan_digest(m, root, change, args.limit)
+    if args.json:
+        sys.stdout.write(_compact_json(d) + "\n")
+        return 0
+    print(f"plan digest: {change}   floor: {d['floor']}")
+    print("signals: " + ", ".join(f"{x['id']}={'HIGH' if x['high'] else 'low'}"
+                                  for x in d["signals"]))
+    sections = (
+        ("paths", [f"{x['path']} [{', '.join(x['surfaces']) or 'no surface'}; "
+                   f"blast-radius {x['blast_radius']}]" for x in d["paths"]]),
+        ("spec deltas", [f"{x['file']} {x['section']}: {'; '.join(x['requirements']) or '—'}"
+                         for x in d["spec_deltas"]]),
+        ("tasks", d["tasks"]),
+        ("what changes", d["what_changes"]),
+        ("decisions", d["decisions"]),
+    )
+    for title, items in sections:
+        print(f"{title}:" + ("" if items else " none"))
+        for it in items:
+            print(f"  {it}")
+    if d["trimmed"]:
+        print("trimmed: " + ", ".join(f"{t['section']} -{t['lost']}" for t in d["trimmed"]))
+    if not fits:
+        print("over the limit: the classifier is skipped and the tier is full")
+    print(f"size: {len(_compact_json(d).encode())} bytes of compact JSON"
+          + (f" (limit {args.limit})" if args.limit else ""))
+    return 0
+
+
+def _plan_classifier_input(digest: dict, dimensions: list[dict]) -> bytes:
+    """The bytes an external classifier gets on stdin: `{digest,
+    dimensions}`, with the digest exactly as `gates plan digest --json
+    --limit <limit>` prints it (its trailing newline aside)."""
+    return ('{"digest":' + _compact_json(digest) + ',"dimensions":'
+            + _compact_json(dimensions) + "}").encode()
+
+
 def _plan_preflight_mode(m: dict) -> str:
     """The effective `loop.plan-preflight` mode, `run` or `skip` (D12)."""
     return _plan_preflight_settings(m)["mode"]
@@ -9092,6 +9227,7 @@ def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
         "check": _plan_check,
         "tier": _plan_tier,
+        "digest": _plan_digest_cmd,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -15352,7 +15488,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
-    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier, save and restore the preflight store")
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier and digest, save and restore the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
@@ -15363,6 +15499,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_pt.add_argument("change")
     sp_pt.add_argument("--json", action="store_true", help="one JSON document: {floor, signals, classifier, override, tier}")
     sp_pt.set_defaults(fn=cmd_plan)
+    sp_pd = plan_sub.add_parser("digest", help="the plan digest: exactly what an external classifier is given (signals, paths, spec delta headers, task lines, What Changes, decisions)")
+    sp_pd.add_argument("change")
+    sp_pd.add_argument("--json", action="store_true", help="the compact JSON a classifier receives as `digest`")
+    sp_pd.add_argument("--limit", type=int, metavar="BYTES", help="build it at this many bytes of compact JSON (default: no limit)")
+    sp_pd.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)

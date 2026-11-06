@@ -533,6 +533,16 @@
    ],
    "visibility": "public"
   },
+  "plan digest": {
+   "options": [
+    "--json",
+    "--limit"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan restore": {
    "options": [
     "--force",

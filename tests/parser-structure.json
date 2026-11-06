@@ -2746,7 +2746,7 @@
   "description": null,
   "epilog": null,
   "formatter_class": "HelpFormatter",
-  "help_in_parent": "the plan preflight: check a plan, compute its tier, save and restore the preflight store",
+  "help_in_parent": "the plan preflight: check a plan, compute its tier and digest, save and restore the preflight store",
   "prog": "gates plan"
  },
  "plan check": {
@@ -2816,6 +2816,74 @@
   "formatter_class": "HelpFormatter",
   "help_in_parent": "the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing",
   "prog": "gates plan check"
+ },
+ "plan digest": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "the compact JSON a classifier receives as `digest`",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "limit",
+    "help": "build it at this many bytes of compact JSON (default: no limit)",
+    "metavar": "BYTES",
+    "nargs": null,
+    "option_strings": [
+     "--limit"
+    ],
+    "required": false,
+    "type": "int"
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan digest: exactly what an external classifier is given (signals, paths, spec delta headers, task lines, What Changes, decisions)",
+  "prog": "gates plan digest"
  },
  "plan restore": {
   "args": [
