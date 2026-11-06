@@ -550,6 +550,15 @@
    ],
    "visibility": "public"
   },
+  "plan tier": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "record-merged": {
    "options": [],
    "positionals": [

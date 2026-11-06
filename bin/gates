@@ -8728,6 +8728,12 @@ def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> 
                     "untagged", tid, None,
                     f"task {tid} declares no oracle, and loop.task-oracle is required — "
                     f"end its line with {ORACLE_TAG_SYNTAX}"))
+    for line in _plan_tier_lines(root, change):
+        if line["tier"] == "light" and not line["reason"]:
+            findings.append(_plan_finding(
+                "tier-lower-unreasoned", None, f"openspec/changes/{change}/{line['file']}",
+                f"{line['file']} has a `Plan tier: light` line with no reason — lowering the "
+                "tier needs one: `Plan tier: light — <reason>`, which the approver reads"))
     for i, (tid, _raw, _text, oracle, _tag) in enumerate(lines):
         for path in _oracle_rewrites(oracle):
             if _blob_at(root, at, path) is not None:
@@ -8834,6 +8840,125 @@ def _blast_radius(surface: dict) -> str:
     return surface.get("blast-radius") or "normal"
 
 
+# `gates plan tier` (D3): the floor from six deterministic signals, the
+# classifier layer (which may only raise it), then the plan's own override.
+_PLAN_TIER_LINE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\**Plan tier:\**\s*(full|light)\b\s*(?:[—–:-]+\s*(.*?))?\s*$",
+    re.IGNORECASE)
+_SPEC_EXISTING_RE = re.compile(r"^##\s+(MODIFIED|REMOVED|RENAMED)\s+Requirements\b", re.MULTILINE)
+PLAN_TIERS = ("light", "full")
+
+
+def _plan_tier_lines(root: Path, change: str) -> list[dict]:
+    """Every `Plan tier: full` / `Plan tier: light — <reason>` line in the
+    proposal and the design, in file order: `{file, tier, reason}`."""
+    change_dir = root / "openspec" / "changes" / change
+    out = []
+    for name in ("proposal.md", "design.md"):
+        p = change_dir / name
+        if not p.is_file():
+            continue
+        for line in p.read_text().splitlines():
+            mt = _PLAN_TIER_LINE_RE.match(line)
+            if mt:
+                reason = (mt.group(2) or "").strip() or None
+                out.append({"file": name, "tier": mt.group(1).lower(), "reason": reason})
+    return out
+
+
+def _plan_signals(m: dict, root: Path, change: str) -> list[dict]:
+    """The six floor signals (D3), each `{id, value, threshold, high}`."""
+    s = _plan_preflight_settings(m)
+    fa = s["full-at"]
+    change_dir = root / "openspec" / "changes" / change
+    tasks = _task_lines(change_dir / "tasks.md")
+    paths = _plan_named_paths(root, change)
+    hot = _plan_hot_surfaces(m, root, change)
+    existing = []
+    if (change_dir / "specs").is_dir():
+        for f in sorted((change_dir / "specs").rglob("*.md")):
+            for mt in _SPEC_EXISTING_RE.finditer(f.read_text()):
+                existing.append(f"{f.relative_to(change_dir).as_posix()}: {mt.group(1)}")
+    costly = fa["oracles"]
+    fired = []
+    for tid, _text, oracle in tasks:
+        if oracle is None or oracle.get("gate") is None:
+            continue
+        if oracle["gate"] in costly or (costly and _oracle_rewrites(oracle)):
+            fired.append(tid)
+    high_surfaces = [x["name"] for x in hot if _blast_radius(x) == "high"]
+    return [
+        {"id": "tasks", "value": len(tasks), "threshold": fa["tasks"],
+         "high": len(tasks) >= fa["tasks"]},
+        {"id": "files", "value": len(paths), "threshold": fa["files"],
+         "high": len(paths) >= fa["files"]},
+        {"id": "surfaces", "value": len(hot), "threshold": fa["surfaces"],
+         "high": len(hot) >= fa["surfaces"]},
+        {"id": "existing-requirements", "value": existing, "threshold": None,
+         "high": bool(existing)},
+        {"id": "costly-oracle", "value": fired, "threshold": list(costly),
+         "high": bool(fired)},
+        {"id": "blast-radius", "value": high_surfaces, "threshold": "high",
+         "high": bool(high_surfaces)},
+    ]
+
+
+def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str) -> dict:
+    """The classifier layer (D3). Group 5 runs it; until then it is reported
+    as not yet run and raises nothing."""
+    return {"provider": "none", "cause": "not yet run", "tier": None}
+
+
+def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False) -> dict:
+    """`{floor, signals, classifier, override: {source, reason}, tier}`: the
+    floor, max'd with the classifier's verdict, then the plan's line (a
+    reasoned `light` lowers, `full` raises), then `--tier full`."""
+    signals = _plan_signals(m, root, change)
+    floor = "full" if any(x["high"] for x in signals) else "light"
+    classifier = _plan_classifier_layer(m, root, change, floor)
+    tier = "full" if "full" in (floor, classifier.get("tier")) else "light"
+    override = {"source": None, "reason": None}
+    lines = _plan_tier_lines(root, change)
+    if any(x["tier"] == "full" for x in lines):
+        override = {"source": "raised-plan", "reason": None}
+        tier = "full"
+    else:
+        lowered = next((x for x in lines if x["tier"] == "light" and x["reason"]), None)
+        if lowered:
+            override = {"source": "lowered-plan", "reason": lowered["reason"]}
+            tier = "light"
+    if raise_flag:
+        override = {"source": "raised-flag", "reason": None}
+        tier = "full"
+    return {"floor": floor, "signals": signals, "classifier": classifier,
+            "override": override, "tier": tier}
+
+
+def _plan_tier(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    doc = _plan_tier_doc(m, root, change)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+        return 0
+    print(f"plan tier: {change}")
+    for x in doc["signals"]:
+        v = x["value"]
+        shown = (", ".join(v) if v else "none") if isinstance(v, list) else v
+        at = ("" if x["threshold"] in (None, "high") else
+              f" (full at {x['threshold']})" if not isinstance(x["threshold"], list) else
+              f" (costly gates: {', '.join(x['threshold']) or 'none declared'})")
+        print(f"  {x['id']}: {shown}{at} — {'HIGH' if x['high'] else 'low'}")
+    print(f"floor: {doc['floor']}")
+    c = doc["classifier"]
+    print(f"classifier: {c['provider']}" + (f", cause: {c['cause']}" if c.get("cause") else "")
+          + (f", verdict: {c['tier']}" if c.get("tier") else ""))
+    o = doc["override"]
+    print(f"override: {o['source'] or 'none'}" + (f" — {o['reason']}" if o["reason"] else ""))
+    print(f"tier: {doc['tier']}")
+    return 0
+
+
 def _plan_preflight_mode(m: dict) -> str:
     """The effective `loop.plan-preflight` mode, `run` or `skip` (D12)."""
     return _plan_preflight_settings(m)["mode"]
@@ -8847,7 +8972,7 @@ def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None
     return {
         "change": change,
         "preflight": _plan_preflight_mode(m),
-        "tier": None,
+        "tier": _plan_tier_doc(m, root, change),
         "against": against,
         "findings": findings,
     }
@@ -8889,6 +9014,7 @@ def _plan_check(m: dict, root: Path, args) -> int:
 def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
         "check": _plan_check,
+        "tier": _plan_tier,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -15149,13 +15275,17 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
-    sp = sub.add_parser("plan", help="the plan preflight: check a plan, save and restore the preflight store")
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier, save and restore the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
     sp_pc.add_argument("--json", action="store_true", help="one JSON document: {change, preflight, tier, against, findings}")
     sp_pc.add_argument("--against", metavar="REF", help="check existence at REF and report each path the plan names that moved between the plan's base and REF")
     sp_pc.set_defaults(fn=cmd_plan)
+    sp_pt = plan_sub.add_parser("tier", help="the plan's tier: the six floor signals, the classifier layer (raise-only) and the plan's override")
+    sp_pt.add_argument("change")
+    sp_pt.add_argument("--json", action="store_true", help="one JSON document: {floor, signals, classifier, override, tier}")
+    sp_pt.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)

@@ -61,7 +61,7 @@ class PlanCheckTest(unittest.TestCase):
         self.assertEqual(set(doc), {"change", "preflight", "tier", "against", "findings"})
         self.assertEqual(doc["change"], CHANGE)
         self.assertEqual(doc["preflight"], "skip")
-        self.assertIsNone(doc["tier"])
+        self.assertEqual(doc["tier"]["tier"], "light")  # group 4 fills it (task 4.4)
         self.assertIsNone(doc["against"])
 
     def test_an_unknown_change_exits_1(self):
