@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gatedloop plan-tier verdict",
+  "description": "What a plan-tier classifier prints on stdout, and what `gates plan classify --verdict` accepts from the built-in gatedloop.blast-radius lens (plan-preflight design D3). Typed answers, one per dimension of rules/plan-tier-dimensions.json, each with its confidence; `reason` is optional because a typed-answer classifier cannot produce one. The shim combines the answers, and a verdict may only raise the plan's tier. `bin/gates` validates it with a stdlib validator (`_plan_tier_errors`), and a contract test keeps the two in step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tier", "confidence", "evidence"],
+  "properties": {
+    "tier": { "type": "string", "enum": ["light", "full"] },
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dimension", "value"],
+        "properties": {
+          "dimension": { "type": "string", "minLength": 1 },
+          "value": { "type": ["number", "boolean", "string"] },
+          "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "reason": { "type": ["string", "null"] }
+  }
+}

@@ -8959,6 +8959,83 @@ def _plan_tier(m: dict, root: Path, args) -> int:
     return 0
 
 
+# The plan-tier verdict's contract (D3): `schema/plan-tier.schema.json`,
+# checked here with the stdlib. A contract test runs one fixture set through
+# both, so the schema and this validator cannot drift apart.
+PLAN_TIER_SCHEMA_FILE = Path(__file__).resolve().parent.parent / "schema" / "plan-tier.schema.json"
+_PLAN_TIER_KEYS = ("tier", "confidence", "evidence", "reason")
+_PLAN_EVIDENCE_KEYS = ("dimension", "value", "confidence")
+
+
+def _is_number(v) -> bool:
+    return not isinstance(v, bool) and isinstance(v, (int, float))
+
+
+def _confidence_error(where: str, v) -> str | None:
+    if v is None or (_is_number(v) and 0 <= v <= 1):
+        return None
+    return f"{where} must be a number from 0 to 1, or null (got {v!r})"
+
+
+def _plan_tier_errors(obj) -> list[str]:
+    """Every way `obj` (parsed JSON) breaks the verdict contract; empty when
+    it holds."""
+    if not isinstance(obj, dict):
+        return [f"the verdict must be a JSON object (got {type(obj).__name__})"]
+    errs: list[str] = []
+    for key in obj:
+        if key not in _PLAN_TIER_KEYS:
+            errs.append(f"unknown key '{key}' (known: {', '.join(_PLAN_TIER_KEYS)})")
+    for key in ("tier", "confidence", "evidence"):
+        if key not in obj:
+            errs.append(f"'{key}' is required")
+    if "tier" in obj and obj["tier"] not in PLAN_TIERS:
+        errs.append(f"tier must be 'light' or 'full' (got {obj['tier']!r})")
+    if "confidence" in obj:
+        e = _confidence_error("confidence", obj["confidence"])
+        if e:
+            errs.append(e)
+    if "evidence" in obj:
+        ev = obj["evidence"]
+        if not isinstance(ev, list):
+            errs.append(f"evidence must be a list (got {ev!r})")
+            ev = []
+        for i, item in enumerate(ev):
+            where = f"evidence[{i}]"
+            if not isinstance(item, dict):
+                errs.append(f"{where} must be an object (got {item!r})")
+                continue
+            for key in item:
+                if key not in _PLAN_EVIDENCE_KEYS:
+                    errs.append(f"{where} has an unknown key '{key}'")
+            d = item.get("dimension")
+            if not (isinstance(d, str) and d):
+                errs.append(f"{where}.dimension is required, a non-empty string")
+            if "value" not in item:
+                errs.append(f"{where}.value is required")
+            elif not (_is_number(item["value"]) or isinstance(item["value"], (bool, str))):
+                errs.append(f"{where}.value must be a number, boolean or string "
+                            f"(got {item['value']!r})")
+            if "confidence" in item:
+                e = _confidence_error(f"{where}.confidence", item["confidence"])
+                if e:
+                    errs.append(e)
+    if "reason" in obj and obj["reason"] is not None and not isinstance(obj["reason"], str):
+        errs.append(f"reason must be a string or null (got {obj['reason']!r})")
+    return errs
+
+
+def _plan_tier_parse(text: str) -> tuple[dict | None, list[str]]:
+    """`(verdict, errors)` from a classifier's raw output: `not JSON`, or the
+    validator's errors."""
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None, ["not JSON"]
+    errs = _plan_tier_errors(obj)
+    return (obj if not errs else None), errs
+
+
 def _plan_preflight_mode(m: dict) -> str:
     """The effective `loop.plan-preflight` mode, `run` or `skip` (D12)."""
     return _plan_preflight_settings(m)["mode"]
