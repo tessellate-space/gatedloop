@@ -707,6 +707,12 @@ def _errors(m: dict, root: Path) -> list[str]:
                     errs.append(f"surface '{nm}': {e}")
         if "live-check" in surf:
             _validate_gate_spec(errs, f"surface '{nm}' live-check", surf["live-check"])
+        # plan-preflight D12: the adopter's word for "this surface matters";
+        # a hot `high` surface makes a plan's floor full (D3 signal 6).
+        if "blast-radius" in surf and surf["blast-radius"] not in BLAST_RADII:
+            errs.append(f"surface '{nm}': blast-radius must be "
+                        f"{' or '.join(repr(x) for x in BLAST_RADII)} "
+                        f"(got {surf['blast-radius']!r})")
         # scale-gate-cost D1: a surface MAY override `ci`/`unit` with a
         # scoped command. Restricted to those two scopable gates, and the
         # overridden gate must itself be globally declared -- otherwise the
@@ -1017,6 +1023,7 @@ def _economics_errors(econ) -> list[str]:
     return errs
 
 
+BLAST_RADII = ("high", "normal")
 TEST_AUTHOR_MODES = ("separate", "inline")
 TASK_ORACLE_MODES = ("optional", "required")
 CI_AT_MODES = ("task", "ready")
@@ -3729,7 +3736,8 @@ def cmd_surfaces(m: dict, root: Path, args) -> int:
     for s in hot:
         raw_lc = s.get("live-check")
         lc = (_gate_spec(raw_lc)[0] or "—") if raw_lc else "—"
-        print(f"{s['name']}: rules={s.get('rules', [])} live-check={lc}")
+        radius = f" blast-radius={s['blast-radius']}" if "blast-radius" in s else ""
+        print(f"{s['name']}: rules={s.get('rules', [])} live-check={lc}{radius}")
     return 0
 
 
@@ -8795,6 +8803,35 @@ def _plan_drift_findings(root: Path, change: str, ref: str, base: str) -> list[d
                     f"{path} was {how}{f' to {new}' if new else ''} between the plan's base "
                     f"{base[:12]} and {ref} — re-read it against the plan before the handoff"))
     return findings
+
+
+def _plan_named_paths(root: Path, change: str) -> list[str]:
+    """The repository paths a plan names (D3 signal 2): `_named_paths` over
+    the proposal, the design and the task lines, excluding the change's own
+    directory."""
+    change_dir = root / "openspec" / "changes" / change
+    own = f"openspec/changes/{change}/"
+    texts = [(change_dir / n).read_text() for n in ("proposal.md", "design.md")
+             if (change_dir / n).is_file()]
+    tasks_md = change_dir / "tasks.md"
+    if tasks_md.is_file():
+        texts += [ln for ln in tasks_md.read_text().splitlines() if _TASK_LINE_RE.match(ln)]
+    out: list[str] = []
+    for text in texts:
+        for p in _named_paths(text):
+            if p not in out and not p.startswith(own) and p != own.rstrip("/"):
+                out.append(p)
+    return out
+
+
+def _plan_hot_surfaces(m: dict, root: Path, change: str) -> list[dict]:
+    """The surfaces hot for the paths the plan names (D3 signal 3, D12): the
+    one selection the tier and, later, surface-bound lenses read."""
+    return hot_surfaces(m, _plan_named_paths(root, change))
+
+
+def _blast_radius(surface: dict) -> str:
+    return surface.get("blast-radius") or "normal"
 
 
 def _plan_preflight_mode(m: dict) -> str:

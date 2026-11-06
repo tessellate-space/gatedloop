@@ -233,6 +233,13 @@ surfaces:
 
 No distinct areas? One catch-all surface: `match: "**"`.
 
+**A surface may declare its blast radius: `blast-radius: high | normal`** (default `normal`). It is your word for "this surface matters", and it says what it measures, not what it triggers: a plan that names a path on a `high` surface gets a full plan-tier floor (see the plan tier below). It is also how your public contract reaches the floor: mark the surface that covers it. `gates validate` refuses any other value, naming the surface, and `gates surfaces` shows `blast-radius=<value>` on a hot surface that declares one.
+```yaml
+  - name: contract
+    match: ["api/schema/**", "docs/public-api.md"]
+    blast-radius: high
+```
+
 **Identically-spelled `live-check` commands run once per invocation.** If two
 hot surfaces bind the exact same command string, that is one recipe, not two —
 string equality *is* recipe identity, since the manifest binds plain commands
