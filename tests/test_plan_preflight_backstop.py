@@ -16,7 +16,6 @@ python3 -m unittest discover -s tests
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,32 +25,11 @@ TESTS = Path(__file__).resolve().parent
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
-from _preflight_fixture import CHANGE, REPO, PreflightRepo, env, git, write  # noqa: E402
+from _preflight_fixture import (CHANGE, PreflightRepo, git, git_hook,  # noqa: E402
+                                tool_denied, tool_hook, write)
 
-TOOL_HOOK = REPO / "hooks" / "gate-commit.sh"
-GIT_HOOK = REPO / "templates" / "git-hooks" / "pre-commit"
 HELD = f".gatedloop/authored/{CHANGE}/1.1/tests/test_widget.py.authored"
 LEDGER = f".gatedloop/runs/{CHANGE}.jsonl"
-
-
-def _hook_env() -> dict:
-    return env(CLAUDE_PLUGIN_ROOT=str(REPO))
-
-
-def tool_hook(root: Path):
-    return subprocess.run(
-        ["bash", str(TOOL_HOOK)], cwd=root, env=_hook_env(), capture_output=True, text=True,
-        input=json.dumps({"tool_input": {"command": "git commit -m x"}, "cwd": str(root)}),
-    )
-
-
-def git_hook(root: Path):
-    return subprocess.run(["bash", str(GIT_HOOK)], cwd=root, env=_hook_env(),
-                          capture_output=True, text=True)
-
-
-def tool_denied(r) -> bool:
-    return r.returncode != 0 or '"deny"' in r.stdout
 
 
 class HeldOffChangeBranchTest(unittest.TestCase):

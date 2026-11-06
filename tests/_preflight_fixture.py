@@ -93,6 +93,29 @@ def env(**extra) -> dict:
     return e
 
 
+def _hook_env() -> dict:
+    return env(CLAUDE_PLUGIN_ROOT=str(REPO))
+
+
+def tool_hook(root):
+    """The PreToolUse commit hook, as the host runs it for `git commit`."""
+    return subprocess.run(
+        ["bash", str(REPO / "hooks" / "gate-commit.sh")], cwd=root, env=_hook_env(),
+        capture_output=True, text=True,
+        input=json.dumps({"tool_input": {"command": "git commit -m x"}, "cwd": str(root)}),
+    )
+
+
+def git_hook(root):
+    """The git `pre-commit` hook template, run in place."""
+    return subprocess.run(["bash", str(REPO / "templates" / "git-hooks" / "pre-commit")],
+                          cwd=root, env=_hook_env(), capture_output=True, text=True)
+
+
+def tool_denied(r) -> bool:
+    return r.returncode != 0 or '"deny"' in r.stdout
+
+
 def git(cwd, *args, check=True):
     return subprocess.run(["git", *args], cwd=cwd, check=check, capture_output=True,
                           text=True, env=env())
