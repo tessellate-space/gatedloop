@@ -8904,9 +8904,14 @@ def _plan_signals(m: dict, root: Path, change: str) -> list[dict]:
 
 
 def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str) -> dict:
-    """The classifier layer (D3). Group 5 runs it; until then it is reported
-    as not yet run and raises nothing."""
-    return {"provider": "none", "cause": "not yet run", "tier": None}
+    """The classifier layer (D3), on the digest at `classifier-input-limit`.
+    Until a classifier runs it is reported as not yet run and raises
+    nothing; the digest's trim and hash are reported either way."""
+    limit = _plan_preflight_settings(m)["classifier-input-limit"]
+    digest, _fits = _plan_digest(m, root, change, limit)
+    return {"provider": "none", "cause": "not yet run", "tier": None,
+            "trimmed": digest["trimmed"],
+            "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
 
 
 def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False) -> dict:
@@ -8953,6 +8958,9 @@ def _plan_tier(m: dict, root: Path, args) -> int:
     c = doc["classifier"]
     print(f"classifier: {c['provider']}" + (f", cause: {c['cause']}" if c.get("cause") else "")
           + (f", verdict: {c['tier']}" if c.get("tier") else ""))
+    if c.get("trimmed"):
+        print("  digest trimmed to fit classifier-input-limit: "
+              + ", ".join(f"{t['section']} -{t['lost']}" for t in c["trimmed"]))
     o = doc["override"]
     print(f"override: {o['source'] or 'none'}" + (f" — {o['reason']}" if o["reason"] else ""))
     print(f"tier: {doc['tier']}")
@@ -9121,11 +9129,25 @@ def _compact_json(obj) -> str:
 
 def _plan_digest(m: dict, root: Path, change: str, limit: int | None = None) -> tuple[dict, bool]:
     """`(digest, fits)`: the digest at `limit` bytes of compact UTF-8 JSON
-    (none when `limit` is None)."""
+    (none when `limit` is None). Over the limit, entries go from the bottom
+    of the priority list -- decisions, then "What Changes", then tasks, each
+    from its last entry up -- and `trimmed` records each section and how
+    many entries it lost. `fits` is False only when nothing trimmable is
+    left and it is still over (D3: the tier is then full, with no call)."""
     d = _plan_digest_full(m, root, change)
     if limit is None:
         return d, True
-    return d, len(_compact_json(d).encode()) <= limit
+    lost: dict[str, int] = {}
+
+    def over() -> bool:
+        return len(_compact_json(d).encode()) > limit
+
+    for section in PLAN_DIGEST_TRIM_ORDER:
+        while over() and d[section]:
+            d[section].pop()
+            lost[section] = lost.get(section, 0) + 1
+            d["trimmed"] = [{"section": s, "lost": n} for s, n in lost.items()]
+    return d, not over()
 
 
 def _plan_digest_cmd(m: dict, root: Path, args) -> int:
