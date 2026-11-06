@@ -10087,6 +10087,8 @@ NON_GATE_EVENTS = frozenset({
     "attempt-note", "restart",
     # token-ledger D1: what the session spent on a task, never a gate run.
     USAGE_EVENT,
+    # plan-preflight D5: the plan loop's record-only rows, never a gate run.
+    "plan-round", "plan-review",
 })
 
 DEFAULT_IDLE_GAP_MINUTES = 30
@@ -10135,6 +10137,9 @@ def stats_from_rows(rows: list[dict], idle_gap_ms: int) -> dict:
     # time -- never inside it, so the time figures are byte-identical with or
     # without them (a stop flush would otherwise lengthen an interval).
     rows = [r for r in rows if r.get("gate") != USAGE_EVENT]
+    # plan-preflight D5: plan-loop rows are planning before approval and
+    # record-only, so the stats are byte-identical with or without them.
+    rows = [r for r in rows if r.get("gate") not in ("plan-round", "plan-review")]
     usable: list[tuple] = []
     rows_without_ts = 0
     for r in rows:
