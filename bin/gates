@@ -1067,6 +1067,17 @@ def _commit_gate(m: dict) -> str:
     return "unit" if _ci_at_mode(m) == "ready" else "ci"
 
 
+def _print_commit_gate_line(m: dict) -> None:
+    """ci-at D7: name the commit gate in effect, on stderr, so the loop runs
+    it without reading the manifest and no stdout a caller parses changes."""
+    if _commit_gate(m) == "unit":
+        line = ("gatedloop: commit gate: gates run unit (loop.ci-at: ready — "
+                "the full ci runs before gates ledger record-ready)")
+    else:
+        line = "gatedloop: commit gate: gates run ci"
+    print(line, file=sys.stderr)
+
+
 def _test_author_mode(m: dict) -> str:
     """The effective `loop.test-author` (design D6): `inline` only when
     explicitly declared; `separate` otherwise, including when the block is
@@ -6116,6 +6127,7 @@ def cmd_task(m: dict, root: Path, args) -> int:
             f"in {_ledger_path(root, change)}. `gates task changed` now answers "
             "\"did I change this?\" against it."
         )
+        _print_commit_gate_line(m)
         return 0
 
     if args.task_cmd == "changed":
@@ -6496,6 +6508,7 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         f"{len(characterization)} characterization task(s) — in "
         f"{_ledger_path(root, change)}"
     )
+    _print_commit_gate_line(m)
     return 0
 
 
