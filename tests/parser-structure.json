@@ -4007,6 +4007,21 @@
     ],
     "required": false,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "dry_run",
+    "help": "run every refusal against the preflight store (all but the tag-drift comparison); record no row and write no git object",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--dry-run"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,

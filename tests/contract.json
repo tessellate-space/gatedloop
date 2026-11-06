@@ -685,6 +685,7 @@
   },
   "tests handoff": {
    "options": [
+    "--dry-run",
     "--inline",
     "--task"
    ],

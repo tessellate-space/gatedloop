@@ -6416,13 +6416,14 @@ def _undeclared_overwrites(root: Path, change: str, tests: dict[str, dict[str, s
 
 def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                              reasons: dict, characterization: dict,
-                             only: str | None) -> list[str]:
+                             only: str | None, drift: bool = True) -> list[str]:
     """task-oracle D3: each way the holding area contradicts a task's tag,
     and, under `loop.task-oracle: required`, the untagged tasks. Only
     contradictions: whether the tests exercise the declared gate is for the
-    red run on that gate to show."""
+    red run on that gate to show. `drift=False` (a dry run, plan-preflight
+    D9) skips only the tag comparison with the merge target."""
     oracles = _change_task_oracles(root, change)
-    problems: list[str] = _oracle_drift_problems(root, change, oracles, only)
+    problems: list[str] = _oracle_drift_problems(root, change, oracles, only) if drift else []
     untagged: list[str] = []
     for task, oracle in oracles.items():
         if only is not None and task != only:
@@ -6482,8 +6483,15 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
 def _tests_handoff(m: dict, root: Path, args) -> int:
     change = args.change
     only = getattr(args, "task", None)
-    held_tests, reasons, characterization, problems = _read_holding_area(_authored_dir(root, change))
-    where = _authored_dir(root, change).relative_to(root).as_posix()
+    # plan-preflight D9: a dry run reads the preflight store, runs every
+    # refusal but the tag-drift comparison, and writes no row and no object.
+    dry = getattr(args, "dry_run", False)
+    area = (_preflight_store(root, change) / "authored") if dry else _authored_dir(root, change)
+    if dry:
+        print("gatedloop: dry run — the oracle tags are not compared with the merge "
+              "target's tasks.md here; a real handoff still compares them")
+    held_tests, reasons, characterization, problems = _read_holding_area(area)
+    where = area.relative_to(root).as_posix()
     if problems:
         return _tests_refuse(
             f"refusing the handoff for '{change}' — the holding area at {where}/ "
@@ -6508,7 +6516,7 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         )
 
     contradictions = _oracle_handoff_problems(m, root, change, held_tests, reasons,
-                                              characterization, only)
+                                              characterization, only, drift=not dry)
     if contradictions:
         return _tests_refuse(
             f"refusing the handoff for '{change}' — it contradicts the plan's oracle "
@@ -6537,6 +6545,9 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
                 + "."
             )
     known_base = (_authoring_state(rows) or {}).get("base", {})
+    if dry:
+        return _tests_handoff_dry(m, root, change, only, held_tests, reasons,
+                                  characterization, known_base, args)
     tests: dict[str, dict[str, str]] = {}
     base: dict[str, str | None] = {}
     for task, files in held_tests.items():
@@ -6571,6 +6582,42 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         f"{_ledger_path(root, change)}"
     )
     _print_commit_gate_line(m)
+    return 0
+
+
+def _tests_handoff_dry(m: dict, root: Path, change: str, only: str | None,
+                       held_tests: dict, reasons: dict, characterization: dict,
+                       known_base: dict, args) -> int:
+    """The tail of a clean dry run (D9): the advisories computed from
+    existence rather than hashing, the per-task digests written to the
+    store, and what a real handoff would record. No ledger row, no object."""
+    tests = {task: {path: "held" for path in files} for task, files in held_tests.items()}
+    base = {path: ("exists" if (root / path).is_file() else None)
+            for files in held_tests.values() for path in files
+            if not (only is not None and path in known_base)}
+    for task, path in _undeclared_overwrites(root, change, tests, base, known_base):
+        print(f"gatedloop: advisory: task {task} overwrites existing {path} without "
+              "declaring it (rewrites: on its oracle tag); its author could not see "
+              "that file")
+    store = _preflight_store(root, change)
+    current = _preflight_task_digests(m, root, change)
+    if only is not None:
+        digests = _preflight_read_digests(store)
+        if only in current:
+            digests[only] = current[only]
+    else:
+        digests = current
+    _preflight_write_digests(store, digests)
+    author = "inline" if getattr(args, "inline", False) else "separate"
+    n_tests = sum(len(v) for v in tests.values())
+    scope = f"task {only}" if only else f"{len(tests) + len(reasons)} task(s)"
+    print(
+        f"gatedloop: dry run clean for '{change}' — a real handoff would record the "
+        f"{author} handoff ({scope}): {n_tests} test file(s), {len(reasons)} "
+        f"behaviour-free task(s), {len(characterization)} characterization task(s). "
+        f"Nothing was recorded. Digests written to "
+        f"{(store / PREFLIGHT_DIGESTS_FILE).relative_to(root).as_posix()}."
+    )
     return 0
 
 
@@ -14345,6 +14392,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_th.add_argument("change")
     sp_th.add_argument("--task", help="re-record one task only; supersedes that task's earlier entry")
     sp_th.add_argument("--inline", action="store_true", help="the implementer authored these itself (loop.test-author: inline)")
+    sp_th.add_argument("--dry-run", dest="dry_run", action="store_true",
+                       help="run every refusal against the preflight store (all but the tag-drift comparison); record no row and write no git object")
     sp_th.set_defaults(fn=cmd_tests)
     sp_tp = tests_sub.add_parser("place", help="move one task's held tests onto their real paths (a `tests-placed` row)")
     sp_tp.add_argument("task", help="task id (e.g. 1.2)")
