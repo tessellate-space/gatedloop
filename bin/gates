@@ -943,6 +943,14 @@ def _errors(m: dict, root: Path) -> list[str]:
                             "global gates.unit is declared (a surface override alone does "
                             "not count) — declare gates.unit, or use loop.ci-at: task"
                         )
+            # ci-at D8: whether a multi-surface staged diff runs the union of
+            # its surfaces' `ci` overrides instead of the global `ci`.
+            if "ci-scope" in loop and loop.get("ci-scope") not in CI_SCOPE_MODES:
+                errs.append(
+                    "loop.ci-scope must be "
+                    f"{' or '.join(repr(x) for x in CI_SCOPE_MODES)} "
+                    f"(got {loop.get('ci-scope')!r})"
+                )
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -1010,7 +1018,9 @@ def _economics_errors(econ) -> list[str]:
 TEST_AUTHOR_MODES = ("separate", "inline")
 TASK_ORACLE_MODES = ("optional", "required")
 CI_AT_MODES = ("task", "ready")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at")
+CI_SCOPE_MODES = ("single", "union")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at",
+             "ci-scope")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -1059,6 +1069,15 @@ def _ci_at_mode(m: dict) -> str:
     if isinstance(loop, dict) and loop.get("ci-at") == "ready":
         return "ready"
     return "task"
+
+
+def _ci_scope_mode(m: dict) -> str:
+    """The effective `loop.ci-scope` (ci-at D8): `union` only when declared;
+    `single` otherwise (a malformed value is `gates validate`'s business)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    if isinstance(loop, dict) and loop.get("ci-scope") == "union":
+        return "union"
+    return "single"
 
 
 def _commit_gate(m: dict) -> str:
@@ -3497,6 +3516,30 @@ def _unit_union(m: dict, changed: list[str] | None) -> list[tuple[str, str | dic
     if needs_global and global_unit:
         union.append(("full", global_unit))
     return union or None
+
+
+def _ci_union(m: dict, changed: list[str] | None) -> list[tuple[str, str | dict]] | None:
+    """The `(surface name, raw spec)` pairs a multi-surface `ci` run runs
+    under `loop.ci-scope: union` (ci-at D8), or `None` when the run is not
+    one. It is one when every changed path is matched, two or more
+    non-catch-all surfaces are hot, and EVERY one declares a `ci` override.
+    Unlike `unit`, a hot surface without one sends the run to the global
+    `ci` alone: the global `ci` is the aggregate oracle, and running it
+    beside the overrides would cost more than the run it undercuts."""
+    if _ci_scope_mode(m) != "union":
+        return None
+    if not changed or _first_unmatched_path(m, changed) is not None:
+        return None
+    hot = [s for s in hot_surfaces(m, changed) if not _is_catchall_surface(s)]
+    if len(hot) < 2:
+        return None
+    union: list[tuple[str, str | dict]] = []
+    for surf in hot:
+        override = (surf.get("gates") or {}).get("ci")
+        if not override:
+            return None
+        union.append((surf.get("name", "<unnamed>"), override))
+    return union
 
 
 def cmd_surfaces(m: dict, root: Path, args) -> int:
@@ -12377,8 +12420,9 @@ def cmd_run(m: dict, root: Path, args) -> int:
         _maybe_print_fresh_worktree_hint(root, rc)
         return rc
 
-    def _run_unit_union(union: list[tuple[str, str | dict]]) -> int:
-        # err-full-scoping D2: every hot surface's oracle, each command once
+    def _run_union(union: list[tuple[str, str | dict]]) -> int:
+        # err-full-scoping D2 (and ci-at D8 for `ci`, gate-generic): every
+        # hot surface's oracle, each command once
         # (the live-check dedupe rule), every precondition before any command,
         # all under one lock acquisition; the first non-zero exit is the run's,
         # and every command runs so each surface's verdict is reported.
@@ -12388,7 +12432,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
         for name, raw in union:
             cmd, requires = _gate_spec(raw)
             if not cmd:
-                sys.exit(f"gatedloop: surface '{name}' unit has no 'run' command")
+                sys.exit(f"gatedloop: surface '{name}' {gate} has no 'run' command")
             if requires and requires not in checked:
                 checked.add(requires)
                 prc = _exec(requires, root)
@@ -12401,7 +12445,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
             for name, requires, prc in failed:
                 print(
                     f"gatedloop: precondition '{requires}' failed (exit {prc}) — "
-                    f"unit [{name}] was not run; no unit command ran",
+                    f"{gate} [{name}] was not run; no {gate} command ran",
                     file=sys.stderr,
                 )
             record_precondition_failure(
@@ -12412,8 +12456,8 @@ def cmd_run(m: dict, root: Path, args) -> int:
         # global; readers treat scope as a free string (only `ci` markers
         # compare it to `full`), so none changes.
         scope = "+".join(name for name, _raw in union)
-        print(f"gatedloop: unit[{scope}] — the change spans several surfaces; "
-              "each one's unit oracle runs", file=sys.stderr)
+        print(f"gatedloop: {gate}[{scope}] — the change spans several surfaces; "
+              f"each one's {gate} oracle runs", file=sys.stderr)
         started = time.monotonic()
         rc = 0
         try:
@@ -12426,7 +12470,11 @@ def cmd_run(m: dict, root: Path, args) -> int:
         except _LockBusy as busy:
             return lock_busy(busy, started)
         tree = _write_tree(root)
-        if rc == 0 and tree and _ci_at_mode(m) == "ready":
+        if gate == "ci" and rc == 0 and tree:
+            # ci-at D8: a union marker is a scoped marker -- it allows a
+            # commit, never READY, the merge's full-scope check or vouching.
+            _write_marker(root, "ci", tree, scope=scope)
+        elif gate == "unit" and rc == 0 and tree and _ci_at_mode(m) == "ready":
             # ci-at D2: under `ready` a green `unit` is a commit gate.
             _write_marker(root, "unit", tree, scope=scope)
         record(rc, tree, started, scope=scope)
@@ -12452,9 +12500,10 @@ def cmd_run(m: dict, root: Path, args) -> int:
             changed_for_scope = []
         spec, scope = _select_scoped_gate(m, gate, changed_for_scope)
         unmatched = _first_unmatched_path(m, changed_for_scope) if changed_for_scope else None
-        union = _unit_union(m, changed_for_scope) if gate == "unit" else None
+        union = (_unit_union(m, changed_for_scope) if gate == "unit"
+                 else _ci_union(m, changed_for_scope))
         if union:
-            return _run_unit_union(union)
+            return _run_union(union)
     else:
         spec = gates.get(gate)
     if not spec:

@@ -213,6 +213,12 @@
           "type": "string",
           "enum": ["task", "ready"],
           "default": "task"
+        },
+        "ci-scope": {
+          "description": "How `ci` scopes a staged diff that hits two or more non-catch-all surfaces (ci-at design D8). single (default): the global `ci` runs. union: when every changed path is matched and every hot surface declares a `ci` override, each override runs once (preconditions first, identical commands once, one lock, first non-zero exit wins) and the marker records scope `a+b`; a hot surface without an override, or an unmatched path, still runs the global `ci` alone. A union marker allows a commit, never READY, the merge's full-scope check or vouching.",
+          "type": "string",
+          "enum": ["single", "union"],
+          "default": "single"
         }
       }
     },
