@@ -82,7 +82,7 @@ trap 'rm -f "${verdict_file}"' EXIT
 if ! commit_out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict_file}" 2>&1)"; then
   echo "${commit_out}" >&2
   echo "gatedloop: commit denied at the git layer — the staged tree does not satisfy \`gates discipline check-commit\`." >&2
-  echo "gatedloop: run \`gates run ci\` and stage exactly what it tested, then commit again." >&2
+  echo "gatedloop: run the gate named above, then stage exactly what it tested and commit again." >&2
   echo "gatedloop: rephrasing the commit (a subprocess, a script, a library) will not get past this hook — it fires on the commit object itself, not the command string (issue #2)." >&2
   exit 1
 fi
@@ -91,6 +91,8 @@ echo "${commit_out}"
 # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row cannot
 # change a test, so the lock has nothing to judge in it (as in the tool hook).
 # Its usage is still recorded below (token-ledger D7).
+# A `unit` verdict (loop.ci-at: ready, ci-at D3) takes the lock below exactly
+# as `marker` does; its allow line was echoed above.
 if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
   "${GATES}" usage record --stage >/dev/null 2>&1 || true
   exit 0

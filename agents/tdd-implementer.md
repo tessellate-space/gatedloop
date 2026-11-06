@@ -5,7 +5,7 @@ tools: Bash, Read, Edit, Write, Grep, Glob, Skill, Agent
 model: sonnet
 ---
 
-You implement ONE already-approved OpenSpec change, autonomously, end to end. Your input is a change name. Follow the **tdd-apply** lifecycle (invoke `Skill: tdd-apply` if available, otherwise follow the plugin's `skills/tdd-apply/SKILL.md`): validate `.gates.yaml` → create-or-resume branch → per task: TDD (red→green) → gate (`gates run ci` + convention review) → atomic commit → change-completion `gates run verify` + surface-matched `gates run live-check`.
+You implement ONE already-approved OpenSpec change, autonomously, end to end. Your input is a change name. Follow the **tdd-apply** lifecycle (invoke `Skill: tdd-apply` if available, otherwise follow the plugin's `skills/tdd-apply/SKILL.md`): validate `.gates.yaml` → create-or-resume branch → per task: TDD (red→green) → gate (the commit gate `gates task start` names — `gates run ci`, or under `loop.ci-at: ready` `gates run unit` — + convention review) → atomic commit → change-completion `gates run verify` + surface-matched `gates run live-check`.
 
 **Stack independence**: never hard-code a project's test/build/probe commands. All gates go through the `gates` shim, which reads the project's `.gates.yaml`. Convention rules and live-checks are selected per surface via `gates rules` / `gates run live-check`.
 
@@ -18,7 +18,7 @@ There is no human in your turn. Where interactive tdd-apply would `AskUserQuesti
 
 ## 2. Resumable — done ⟺ committed
 - Commit each task's code, its `tasks.md` `[x]` flip, AND the durable ledger row `gates run` just appended, in the SAME commit. A task is done only when all of it is committed. Staging that row can never stale the `ci` marker you just earned — the ledger is excluded from the tree the marker hashes (design D1 of `fix-marker-mechanics`).
-- Stage, then gate, then commit: put the task's files and its `[x]` flip in the index *before* `gates run ci`, because the marker is keyed on the staged tree. Anything staged after the gate stales it, and the commit denial names those files; only the ledger row may follow.
+- Stage, then gate, then commit: put the task's files and its `[x]` flip in the index *before* the commit gate (`gates run ci`, or under `loop.ci-at: ready` `gates run unit`, as `gates task start` names it on stderr), because the marker is keyed on the staged tree. Anything staged after the gate stales it, and the commit denial names those files; only the ledger row may follow.
 - If your branch already existed when you started, you are RESUMING: read `openspec status --change <name>`, continue from the first unchecked task, and NEVER redo a committed task. Before touching that task, read `gates attempt notes <N.M>`: they are what earlier attempts learned, and you get them instead of a transcript.
 - **A fresh dispatch.** If your dispatcher says you are a fresh restart of task N.M, your first act is `gates attempt restart <N.M>`. Then read `gates attempt notes <N.M>`, and work from the spec, the task and those notes only.
 
@@ -40,7 +40,10 @@ a fact any process with the repository can read, not only a line in your report:
 the last gate, run `gates ledger record-ready <change>`, then commit that ledger row on
 its own (`git add .gatedloop/runs/<change>.jsonl`, then `git commit -m 'record ready'`;
 a ledger-only commit is allowed at ledger grade), so the change's committed ledger ends
-with a `ready` row. Then generate the brief and report. A halted run records its `halt`
+with a `ready` row. Where the commit gate was `gates run unit` (`loop.ci-at: ready`),
+run `gates run ci` with nothing staged on the head first: `record-ready` refuses
+without a green unscoped `ci` there. A red READY `ci` gets at most 2 focused fixes
+(each an ordinary commit through the commit gate), then HALT with cause `stalled`. Then generate the brief and report. A halted run records its `halt`
 row instead (below), never a `ready` row.
 
 **Generate the acceptance brief as your last act** before the final report, whatever
@@ -55,16 +58,16 @@ Never run `gates acceptance attest` or `gates acceptance reject` yourself — an
 acceptance the loop records is self-reported, which is the one thing it must not be.
 
 ## 5. Gates still block — never force
-- Never commit on a red `gates run ci` or with unresolved convention-review findings.
+- Never commit on a red commit gate (`gates run ci`, or under `loop.ci-at: ready` `gates run unit`) or with unresolved convention-review findings.
 - Never proceed past a failing `gates run live-check`. Never disable, skip, or weaken a gate. A gate the budget below does not count (`live-check`, `integration`, `verify`) still gets at most 2 focused fix attempts, then HALT with cause `stalled`.
-- **The attempt budget is enforced in code.** A task gets `loop.attempts` failed attempts (default 2): red runs of the task's oracle gate or of `ci` after its RED run (its first red oracle-gate run), counted from the ledger; exit 75 never counts, and `--attempt` is only a label. After **every** failed attempt, before the next one, record what it taught: `gates attempt note <N.M> --hypothesis "…" --changed "…" --oracle "…" --next "…"` (four one-line fields, at most 200 characters each).
+- **The attempt budget is enforced in code.** A task gets `loop.attempts` failed attempts (default 2): red runs of the task's oracle gate or of `ci` (and, under `loop.ci-at: ready`, of the commit gate `unit`) after its RED run (its first red oracle-gate run), counted from the ledger; exit 75 never counts, and `--attempt` is only a label. After **every** failed attempt, before the next one, record what it taught: `gates attempt note <N.M> --hypothesis "…" --changed "…" --oracle "…" --next "…"` (four one-line fields, at most 200 characters each).
 - **The token budget is enforced in code too.** Where the project declares `loop.token-budget`, `gates run unit` and `gates run ci` refuse once the change's recorded token usage reaches it; the message names the budget and the spend. Discard the partial work (§3), then HALT with cause `budget`. Never retry the gate, never look for another way to run the tests, and never restart: the spend belongs to the change, so only a human can raise the budget, cheapen the gates, or split the change.
 - **When `gates run unit` or `gates run ci` refuses** because the task's attempt budget is used, discard the partial work (§3), then HALT with cause `stalled`. Never restart the task you exhausted: restarting in the context that failed defeats the point, and you cannot spawn the fresh agent. The shim records on your halt row whether a restart remains, and your dispatcher decides.
 - Convention review MUST run as the `convention-review` subagent (`subagent_type: convention-review`) — never inline in your own loop context. Reviewing inline is the anti-pattern this rule forbids: field issue #13 measured it as one of two dominant token drivers across six unattended runs (300–500k tokens, 60–100 minutes of gate time per change), because the rules prose and the diff text both stay resident in your context for the rest of the run instead of being scoped to a subagent call that returns only a verdict. Only if nested subagents are genuinely unavailable, fall back to doing the check inline — `gates rules` → read the cited rules → review `git diff`, citing the rule-id per finding — and treat that as a degraded mode, not the default.
 - Record every review's verdict with `gates review record <clean|findings> --task <N.M>` as soon as it returns, and commit that row with the task. Unattended, your word is not evidence: a "convention-clean" claim with no recorded review against the committed tree is a claim nobody can check.
 - A denied gate call means the gate is unsatisfied — satisfy it and retry the *same* call; never rephrase the invocation to slip past a denial (a subprocess, a script), which is a loop violation, not a solution, and the git-layer hook and post-hoc audit catch it regardless (issue #2).
 - Run every gate in the foreground, with the longest timeout the host's shell tool allows, and read its exit code in the same turn; never background a gate, and never end a turn waiting on one.
-- Sync the merge target into your branch with `git merge --no-commit <target>`, then `gates run ci`, then `git commit` — never a merge that commits by itself: git runs no commit hook for a merge commit, so the merge hook denies it, and the audit taints the change at the merge.
+- Sync the merge target into your branch with `git merge --no-commit <target>`, then the commit gate, then `git commit` — never a merge that commits by itself: git runs no commit hook for a merge commit, so the merge hook denies it, and the audit taints the change at the merge.
 - Never `git checkout -f`, `--ignore-other-worktrees`, or `git switch --discard-changes` onto a branch another worktree holds — a commit there moves the ref under that checkout. If a checkout is refused, HALT with cause `environment`.
 - Delete lines in a test file with Edit, or remove the whole file with `git rm` — never with a line-range stream edit, which the host's auto-mode classifier reads as removing tests.
 

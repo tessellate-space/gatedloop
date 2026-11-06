@@ -186,7 +186,7 @@
           "default": "separate"
         },
         "attempts": {
-          "description": "Failed attempts allowed per task, per context (retry-budget design D1, D5): red runs of the task's oracle gate (`unit` unless its tasks.md tag declares another) or of `ci`, after the task's RED run and since its last restart, counted from the ledger. Exit 75 never counts. Once reached, `gates run unit|ci` for the task refuses with exit 1. 0 is legal but `gates validate` warns.",
+          "description": "Failed attempts allowed per task, per context (retry-budget design D1, D5): red runs of the task's oracle gate (`unit` unless its tasks.md tag declares another) or of `ci` (and, under `loop.ci-at: ready`, of the commit gate `unit`), after the task's RED run and since its last restart, counted from the ledger. The READY `ci` under `ready` runs with every task checked and is change-level: no task's attempt. Exit 75 never counts. Once reached, `gates run unit|ci` for the task refuses with exit 1. 0 is legal but `gates validate` warns.",
           "type": "integer",
           "minimum": 0,
           "default": 2
@@ -207,6 +207,18 @@
           "type": "string",
           "enum": ["optional", "required"],
           "default": "optional"
+        },
+        "ci-at": {
+          "description": "When the full, unscoped `ci` runs (ci-at design D1). task (default): every task commit needs a green `ci` marker for its staged tree. ready: on a branch naming an active change, a task commit is also allowed on a green `unit` marker for the staged tree (plus the convention review), and `gates ledger record-ready` refuses until an unscoped `ci` passes on the head; the merge is unchanged. ready requires a global `gates.unit` (a surface override alone does not count). Change it between changes, not mid-change.",
+          "type": "string",
+          "enum": ["task", "ready"],
+          "default": "task"
+        },
+        "ci-scope": {
+          "description": "How `ci` scopes a staged diff that hits two or more non-catch-all surfaces (ci-at design D8). single (default): the global `ci` runs. union: when every changed path is matched and every hot surface declares a `ci` override, each override runs once (preconditions first, identical commands once, one lock, first non-zero exit wins) and the marker records scope `a+b`; a hot surface without an override, or an unmatched path, still runs the global `ci` alone. A union marker allows a commit, never READY, the merge's full-scope check or vouching.",
+          "type": "string",
+          "enum": ["single", "union"],
+          "default": "single"
         }
       }
     },

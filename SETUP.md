@@ -357,9 +357,9 @@ loop:
   attempts: 2         # default: failed attempts per task, per context
   fresh-restarts: 1   # default: restarts per task; 0 disables them
 ```
-The loop's stopping rule is enforced from the ledger, not by the prompt (`retry-budget`). For a task, a **failed attempt** is a red run of its oracle gate or of `ci`, recorded after the task's RED run (its first red oracle-gate run since the later of `gates task start` and its latest `gates tests place`) and after its latest restart. The oracle gate is the one the plan's tag declares, or `unit` for an untagged task, so an `[oracle: integration]` task's budget starts at its first red `integration` run. Counting from the placement means the red runs of a test-defect cycle, against tests the author has since replaced, spend nothing. Exit 75 never counts, because nothing judged the code. A green run doesn't reset the count, and the caller's `--attempt` is only a label, so a wrong value buys nothing. A `gates run ci` or `unit` with no `--task` belongs to the task the loop is in (the latest `task-start` after the handoff), unless that task is checked in `HEAD`'s `tasks.md`; then the run belongs to no task, is not budgeted, and its ledger row records no task. A tick only in the working tree or the index doesn't count, since it hasn't passed the commit gate. A run with `--task` is always budgeted. A run with no task at all is never budgeted, so a project not running the loop is unaffected.
+The loop's stopping rule is enforced from the ledger, not by the prompt (`retry-budget`). For a task, a **failed attempt** is a red run of its oracle gate or of `ci`, recorded after the task's RED run (its first red oracle-gate run since the later of `gates task start` and its latest `gates tests place`) and after its latest restart. The oracle gate is the one the plan's tag declares, or `unit` for an untagged task, so an `[oracle: integration]` task's budget starts at its first red `integration` run. Under `loop.ci-at: ready` a red run of the commit gate, `unit`, counts too, as a red `ci` does under `task`; for an untagged task the oracle gate and the commit gate coincide, and a run is counted once. Counting from the placement means the red runs of a test-defect cycle, against tests the author has since replaced, spend nothing. Exit 75 never counts, because nothing judged the code. A green run doesn't reset the count, and the caller's `--attempt` is only a label, so a wrong value buys nothing. A `gates run ci` or `unit` with no `--task` belongs to the task the loop is in (the latest `task-start` after the handoff), unless that task is checked in `HEAD`'s `tasks.md`; then the run belongs to no task, is not budgeted, and its ledger row records no task. A tick only in the working tree or the index doesn't count, since it hasn't passed the commit gate. A run with `--task` is always budgeted. A run with no task at all is never budgeted, so a project not running the loop is unaffected.
 
-**What refuses, and why.** Once a task's count reaches `loop.attempts`, `gates run unit` and `gates run ci` for it exit 1 without running the gate and without writing a ledger row. The message names the count, the budget and the way forward. That's `gates attempt restart <N.M>` while a restart remains; otherwise it's a halt with cause `stalled`. The merge's unscoped `ci` is never a task's attempt.
+**What refuses, and why.** Once a task's count reaches `loop.attempts`, `gates run unit` and `gates run ci` for it exit 1 without running the gate and without writing a ledger row. The message names the count, the budget and the way forward. That's `gates attempt restart <N.M>` while a restart remains; otherwise it's a halt with cause `stalled`. The merge's unscoped `ci` is never a task's attempt. Neither is the READY `ci` under `loop.ci-at: ready`: it runs with every task checked in `HEAD`, so it records no task and the budget never refuses it. It is change-level, like `verify` and `live-check`: the loop gives a red READY `ci` at most 2 focused fixes, then halts `stalled`. That cap lives in the prompt, not the ledger.
 
 ```bash
 gates attempt note 1.2 --hypothesis "..." --changed "..." --oracle "..." --next "..."   # after every failed attempt
@@ -369,9 +369,27 @@ gates attempt restart 1.2          # the dispatcher's fresh restart: resets the 
 - **`gates attempt note`** appends an `attempt-note` row numbered with the task's current failed-attempt count. Its four fields are required, single-line and at most 200 characters each. An over-long, multi-line or empty field is refused, naming it, and nothing is written. A resuming or restarted agent reads `gates attempt notes`, not a transcript.
 - **`gates attempt restart`** refuses on a dirty working tree (staged, unstaged or untracked) — the task's placed tests at exactly their placed content, and the removal of their holding files, count as clean, while a placed test edited after placement is named in the refusal — and once the task's `restart` rows number `loop.fresh-restarts`. Otherwise it records a `restart` row, and the count starts again from zero. The implementer never restarts itself. It halts `stalled`, and the halt row carries `restart_available`, computed by the shim. `/gatedloop:tdd-apply`, or your orchestrator, then dispatches one fresh implementer whose brief holds only the spec, the task and the notes. That agent's first act is the restart.
 
-Either key must be a non-negative integer, or `gates validate` fails naming it. `attempts: 0` is legal but warns: the first failed attempt after RED refuses. `gates stats --outcomes` reports `restarts` and `restart_recovered` (restarts after which the task reached a green `ci`) per change. A restart is never an intervention, because no human acted.
+Either key must be a non-negative integer, or `gates validate` fails naming it. `attempts: 0` is legal but warns: the first failed attempt after RED refuses. `gates stats --outcomes` reports `restarts` and `restart_recovered` (restarts after which the task reached a green `ci`, or under `loop.ci-at: ready` a green `unit`) per change. A restart is never an intervention, because no human acted.
 
 **Cost:** one author dispatch and one authored-set review per change, plus one author dispatch per defect.
+
+### `loop.ci-at` — when the full `ci` runs
+```yaml
+gates:
+  unit: "<your unit command>"   # required under ready: a global unit, not only surface overrides
+loop:
+  ci-at: ready   # default: task
+```
+`loop.ci-at` chooses *when* the full, unscoped `ci` runs. It never changes *whether* it runs: the merge proves an unscoped `ci` on the head and runs a full `ci` on the merged tree under both values.
+
+- **`task`** (the default, and what an absent key means): every task commit needs a green `ci` marker for its staged tree, as it always has.
+- **`ready`**: on a branch that names an active change (`openspec/changes/<branch>/` exists), a task commit is also allowed on a green `unit` marker for the staged tree, plus the convention review. A green `ci` marker still allows it too. The full `ci` runs once, with nothing staged, before `gates ledger record-ready`, and again at the merge. Off a change branch (`main`, `plan/*`, a docs branch, the detached HEAD `gates merge` integrates on), only a `ci` marker allows a commit.
+
+`ready` needs a global `gates.unit`. A surface-level `unit` override alone does not count: an unmatched path would select the absent global gate and leave no marker to commit on. `gates validate` fails on `ready` without one, naming the missing gate, and on any value other than `task` or `ready`, naming the key and both values.
+
+**READY, the audit and the merge under `ready`.** `gates ledger record-ready` refuses, exits 1 and writes no row until a green unscoped `ci` row names the head's tree (compared ledger-blind, so the run's own uncommitted row does not matter); a scoped or union-scoped `ci` does not count, and the refusal names `gates run ci` with nothing staged as the remedy. The `Stop` hook's audit accepts a green `unit` row for a commit's tree, so a unit-gated task commit is gated, not tainted and not `vouched`; a `unit` row never vouches for an ancestor, and a commit with neither row taints as before until the READY `ci` vouches for it or clears it. `gates merge` is unchanged: step 1 needs an unscoped `ci` marker on the head, which the READY `ci` already provides, and step 3 runs a full `ci` on the merged tree. Under `task` (or with the key absent) `record-ready` appends its row and reports `"ci": "fail"` as before.
+
+Change the key between changes, not mid-change. The audit reads the mode when it runs, so a change that flips from `ready` to `task` part-way taints its unit-gated commits until a green `ci` on the head clears them.
 
 ### Token usage: `usage` rows, `economics` and `loop.token-budget`
 ```yaml
@@ -461,9 +479,25 @@ whose scope names the components in run order joined with `+`, `full` for the gl
 (`unit[frontend+e2e]`, `unit[frontend+full]`). The global `unit` alone could miss a
 surface's own tests and read a task's required red as green.
 
-**A multi-surface `ci` still runs the global `ci`.** The global `ci` is the oracle
-the merge requires, so a union of scoped `ci` commands would only be a narrower
-oracle under another name.
+**A multi-surface `ci` runs the global `ci`, unless `loop.ci-scope: union`.**
+```yaml
+loop:
+  ci-scope: union   # default: single
+```
+Under `single` (the default, and what an absent key means) a staged diff that hits two
+or more non-catch-all surfaces runs the global `ci`: the global `ci` is the oracle the
+merge requires, and a union of scoped commands is a narrower oracle under another name.
+Under `union` it runs each hot surface's `ci` override instead, when every changed path
+is matched and **every** hot surface declares one, under the same rules as a
+multi-surface `unit` run: preconditions first (one failure runs nothing, exit 75),
+identical commands once, one lock, every command run, the first non-zero exit wins, and
+the scope names every surface (`ci[api+web]`). A hot surface without a `ci` override, or
+an unmatched path, sends the run to the global `ci` alone; unlike `unit`, the global is
+never added beside the overrides, because the global `ci` is the aggregate oracle and
+running it too would cost more than the run it undercuts. A union marker is a scoped
+marker: it allows a task commit, and never satisfies READY under `loop.ci-at: ready`,
+the merge's unscoped-`ci` requirement or the audit's vouching. `gates validate` fails on
+any value other than `single` or `union`, naming the key and both values.
 
 **The oracle chosen, and why, is announced** in the run's own output (`ci[frontend]
 — hot surface 'frontend' declares an override`, or `ci[full] — nothing scoped
@@ -527,7 +561,9 @@ gates ledger record-ready <change>               # append the `ready` row the im
 gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint, naming each tainted commit (a merge commit marked with the sync route); --ref reads the change a merge's incoming ref names
 gates lock status [--json]                       # each serialized gate's lock: free, or held by pid N (alive|dead?) for how long; flags "possibly hung"; names a merge waiting with priority
 gates tests brief <change>                       # the test author's inputs: artifacts, test and surface rules, runner, nearby test paths, fixtures
-gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger
+gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger; on success, stderr names the commit gate (as `gates task start`)
+gates task start <N.M>                           # record the tree the task starts from; stderr names the commit gate: `gatedloop: commit gate: gates run ci`, or `gates run unit (loop.ci-at: ready — …)`
+gates task changed [--task N.M]                  # every path that differs from the task-start tree, untracked included
 gates tests place <N.M>                          # move one task's held tests onto their real paths
 gates tests check [--task N.M]                   # the authored-test lock the commit hooks run
 gates tests check --ref <commit> [--change <name>]   # the same lock at a commit's tree and ledger, every task; no handoff passes
@@ -1273,10 +1309,18 @@ Layer 2 is **opt-in** — `gates hook install` (offered by `/gatedloop:gates-ini
 wires a git `pre-commit` hook that runs the same `gates discipline check-commit` as layer
 1 at the layer where the commit object is created, regardless of how it was phrased, so a
 ledger-only or planning-only commit is allowed at its grade on every path and anything
-else needs the `ci` marker. With `--verdict-file <path>`, `check-commit` also writes one
+else needs the `ci` marker (or, under `loop.ci-at: ready` on a branch naming an active
+change, a `unit` marker). With `--verdict-file <path>`, `check-commit` also writes one
 token to that path on success, naming the grade that allowed the commit (`ledger`,
-`planning` or `marker`); its exit status and printed text are unchanged, so a caller
-branches on the token rather than on the wording. The same install adds a git `pre-push` hook: a push that
+`planning`, `marker`, or `unit` for a commit allowed on a `unit` marker under
+`loop.ci-at: ready`); its exit status and printed text are unchanged, so a caller
+branches on the token rather than on the wording. A `unit` commit's allow line reads
+`gatedloop: 'unit' marker matches — <tree> (scope: <s>) — loop.ci-at: ready; the full
+ci runs before READY and at the merge`, and both hooks print it; both run the
+authored-test lock after it, as for `marker`. A denial ends with a gate-neutral remedy,
+"run the gate named above, then stage exactly what it tested and commit again"; under
+`ready` on a change branch the check itself names `gates run unit` (and that a green
+`gates run ci` also satisfies it). The same install adds a git `pre-push` hook: a push that
 updates the merge target is denied unless `gates discipline check-push <sha>
 --remote-ref <ref>` finds the pushed commit proven — a `merge` ledger row records it
 (what `gates merge` writes before its one push), or the merge gate's incoming-tree
@@ -1438,7 +1482,13 @@ applies while an active change's `.openspec.yaml` still carries approval keys in
 earlier spelling; adopting it means running `gates approval migrate` and committing the
 result. It recurs because a change attested by an older gatedloop can reappear. `confirm-gate` asks a project
 that binds a `live-check` whether to add the optional `confirm` gate, through
-onboarding's confirm offer.
+onboarding's confirm offer. `ci-at` (since 0.12.0) offers `loop.ci-at` to every project:
+leaving it unset (`task`) is recommended, and `ready` moves the full `ci` to READY and
+needs a global `unit`. `ci-scope` (since 0.12.0) offers `loop.ci-scope` to a project
+where some surface declares a `ci` override (its `applies_when` is a `surface-key`
+predicate on the dotted key `gates.ci`, read as a path into each surface). A project
+that adopts `ready` should also refresh its git-layer hook copy (`git-hook-refresh`) so
+its denials are gate-neutral.
 
 An item that doesn't apply to the project is never asked about, for example the
 schema-flow question in a project with no local schemas. The `gates` command

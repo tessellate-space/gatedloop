@@ -925,6 +925,32 @@ def _errors(m: dict, root: Path) -> list[str]:
                     f"{' or '.join(repr(v) for v in TASK_ORACLE_MODES)} "
                     f"(got {loop.get('task-oracle')!r})"
                 )
+            # ci-at D1: when the full `ci` runs. `ready` moves it to READY and
+            # gates a task commit on `unit`, so a global `unit` must exist: a
+            # surface override alone leaves an unmatched path with no gate.
+            if "ci-at" in loop:
+                v = loop.get("ci-at")
+                if v not in CI_AT_MODES:
+                    errs.append(
+                        "loop.ci-at must be "
+                        f"{' or '.join(repr(x) for x in CI_AT_MODES)} (got {v!r})"
+                    )
+                elif v == "ready":
+                    g = m.get("gates")
+                    if not (isinstance(g, dict) and g.get("unit") not in (None, "")):
+                        errs.append(
+                            "loop.ci-at: ready gates each task commit on `unit`, but no "
+                            "global gates.unit is declared (a surface override alone does "
+                            "not count) — declare gates.unit, or use loop.ci-at: task"
+                        )
+            # ci-at D8: whether a multi-surface staged diff runs the union of
+            # its surfaces' `ci` overrides instead of the global `ci`.
+            if "ci-scope" in loop and loop.get("ci-scope") not in CI_SCOPE_MODES:
+                errs.append(
+                    "loop.ci-scope must be "
+                    f"{' or '.join(repr(x) for x in CI_SCOPE_MODES)} "
+                    f"(got {loop.get('ci-scope')!r})"
+                )
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -991,7 +1017,10 @@ def _economics_errors(econ) -> list[str]:
 
 TEST_AUTHOR_MODES = ("separate", "inline")
 TASK_ORACLE_MODES = ("optional", "required")
-LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle")
+CI_AT_MODES = ("task", "ready")
+CI_SCOPE_MODES = ("single", "union")
+LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at",
+             "ci-scope")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
 
@@ -1030,6 +1059,42 @@ def _task_oracle_mode(m: dict) -> str:
     if isinstance(loop, dict) and loop.get("task-oracle") == "required":
         return "required"
     return "optional"
+
+
+def _ci_at_mode(m: dict) -> str:
+    """The effective `loop.ci-at` (ci-at D1): `ready` only when declared;
+    `task` otherwise, including absent or malformed (a malformed value is
+    `gates validate`'s business)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    if isinstance(loop, dict) and loop.get("ci-at") == "ready":
+        return "ready"
+    return "task"
+
+
+def _ci_scope_mode(m: dict) -> str:
+    """The effective `loop.ci-scope` (ci-at D8): `union` only when declared;
+    `single` otherwise (a malformed value is `gates validate`'s business)."""
+    loop = m.get("loop") if isinstance(m, dict) else None
+    if isinstance(loop, dict) and loop.get("ci-scope") == "union":
+        return "union"
+    return "single"
+
+
+def _commit_gate(m: dict) -> str:
+    """The gate a task commit on a change branch needs (ci-at D2): `unit`
+    under `loop.ci-at: ready`, `ci` otherwise."""
+    return "unit" if _ci_at_mode(m) == "ready" else "ci"
+
+
+def _print_commit_gate_line(m: dict) -> None:
+    """ci-at D7: name the commit gate in effect, on stderr, so the loop runs
+    it without reading the manifest and no stdout a caller parses changes."""
+    if _commit_gate(m) == "unit":
+        line = ("gatedloop: commit gate: gates run unit (loop.ci-at: ready — "
+                "the full ci runs before gates ledger record-ready)")
+    else:
+        line = "gatedloop: commit gate: gates run ci"
+    print(line, file=sys.stderr)
 
 
 def _test_author_mode(m: dict) -> str:
@@ -1324,9 +1389,12 @@ def adoption_applies(predicate, facts: dict) -> bool:
         return predicate["glob"] in facts["existing_globs"]
     if kind == "surface-key":
         # Some `surfaces[]` entry declares the key, e.g. a per-surface live-check.
+        # A dotted key is a path into each surface (ci-at D9: `gates.ci`, a
+        # surface's `ci` override), walked as `_dotted_present` walks the
+        # manifest; a flat key reads as before.
         surfaces = facts["manifest"].get("surfaces")
         return isinstance(surfaces, list) and any(
-            isinstance(s, dict) and s.get(predicate["key"]) is not None for s in surfaces)
+            isinstance(s, dict) and _dotted_present(s, predicate["key"]) for s in surfaces)
     if kind == "any":
         return any(adoption_applies(sub, facts) for sub in predicate["of"])
     if kind == "git-hook-copy":
@@ -3453,6 +3521,30 @@ def _unit_union(m: dict, changed: list[str] | None) -> list[tuple[str, str | dic
     return union or None
 
 
+def _ci_union(m: dict, changed: list[str] | None) -> list[tuple[str, str | dict]] | None:
+    """The `(surface name, raw spec)` pairs a multi-surface `ci` run runs
+    under `loop.ci-scope: union` (ci-at D8), or `None` when the run is not
+    one. It is one when every changed path is matched, two or more
+    non-catch-all surfaces are hot, and EVERY one declares a `ci` override.
+    Unlike `unit`, a hot surface without one sends the run to the global
+    `ci` alone: the global `ci` is the aggregate oracle, and running it
+    beside the overrides would cost more than the run it undercuts."""
+    if _ci_scope_mode(m) != "union":
+        return None
+    if not changed or _first_unmatched_path(m, changed) is not None:
+        return None
+    hot = [s for s in hot_surfaces(m, changed) if not _is_catchall_surface(s)]
+    if len(hot) < 2:
+        return None
+    union: list[tuple[str, str | dict]] = []
+    for surf in hot:
+        override = (surf.get("gates") or {}).get("ci")
+        if not override:
+            return None
+        union.append((surf.get("name", "<unnamed>"), override))
+    return union
+
+
 def cmd_surfaces(m: dict, root: Path, args) -> int:
     changed = _changed_files(args)
     hot = hot_surfaces(m, changed)
@@ -3785,7 +3877,7 @@ def _now_iso() -> str:
 _STALE_LIST_LIMIT = 10
 
 
-def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str) -> str:
+def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str, gate: str = "ci") -> str:
     """What changed between the tree `ci` last passed on and `normalized`
     (hook-correctness D4) -- the most recently recorded marker, by its own
     `ts`, stands for "the gate run just before this commit". Both trees are
@@ -3817,11 +3909,11 @@ def _stale_diagnosis(root: Path, gate_dir: Path, normalized: str) -> str:
     if all(e[0] == "A" for e in entries):
         paths = ", ".join(e[-1] for e in shown)
         return (
-            f"{len(entries)} file(s) were staged after `gates run ci` ran: "
+            f"{len(entries)} file(s) were staged after `gates run {gate}` ran: "
             f"{paths}{more_note} — re-run the gate"
         )
     listed = ", ".join(f"{e[0]} {e[-1]}" for e in shown)
-    return f"the staged tree differs from the one `ci` passed on: {listed}{more_note}"
+    return f"the staged tree differs from the one `{gate}` passed on: {listed}{more_note}"
 
 
 def _check_marker_and_report(root: Path, gate: str, tree: str, require_scope: str | None = None) -> int:
@@ -3859,8 +3951,8 @@ def _check_marker_and_report(root: Path, gate: str, tree: str, require_scope: st
             f"tree(s) are still retained. Run `gates run {gate}` again.",
             file=sys.stderr,
         )
-        if gate == "ci":
-            diagnosis = _stale_diagnosis(root, gate_dir, normalized)
+        if gate in ("ci", "unit"):
+            diagnosis = _stale_diagnosis(root, gate_dir, normalized, gate)
             if diagnosis:
                 print(f"gatedloop: {diagnosis}", file=sys.stderr)
         return 1
@@ -5143,6 +5235,17 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
         # apart from the committed ledger alone.
         change = args.change
         head = _head_tree(root)
+        if _ci_at_mode(m) == "ready" and _ready_gates(m, root, change, head)["ci"] != "pass":
+            # ci-at D4: under `ready` task commits ran `unit`, so READY is
+            # where the full `ci` runs -- refused in code, not only reported.
+            print(
+                f"gatedloop: refusing to record '{change}' as ready — loop.ci-at: ready, and "
+                "no green unscoped `ci` row names the head's tree (a scoped or union "
+                "`ci` does not count). Run `gates run ci` with nothing staged on the head, "
+                "then record ready again. No row was written.",
+                file=sys.stderr,
+            )
+            return 1
         _append_ledger_row(root, {
             "ts": _now_iso(), "gate": READY_EVENT, "exit": 0, "duration_ms": 0,
             "change": change, "task": None,
@@ -5435,7 +5538,7 @@ def cmd_audit(m: dict, root: Path, args) -> int:
         return 0  # not on a change branch — nothing to audit
     shas, head = _new_commits_to_audit(root, change)
     rows = _read_ledger_rows(root, change)
-    matcher = _GreenCiMatcher(root, rows)
+    matcher = _GreenCiMatcher(root, rows, _ci_at_mode(m))
     # escalation-outcomes D5: a commit is classified once, whichever row
     # recorded it — the SHA dedupe spans taints, interventions and
     # disclosures alike.
@@ -5492,11 +5595,15 @@ class _GreenCiMatcher:
     plumbing failure returns the raw tree, which can only miss (taint), never
     match falsely."""
 
-    def __init__(self, root: Path, rows: list[dict]):
+    def __init__(self, root: Path, rows: list[dict], ci_at: str = "task"):
+        # ci-at D4: under `loop.ci-at: ready` a green `unit` row also gates a
+        # commit (`rows_for`), as the commit hook allowed it; only `ci` rows
+        # ever vouch for an ancestor (`has_unscoped`).
+        gates_ = ("ci", "unit") if ci_at == "ready" else ("ci",)
         self._root = root
         self._by_raw: dict[str, list[dict]] = {}
         for r in rows:
-            if r.get("gate") == "ci" and r.get("exit") == 0 and r.get("tree"):
+            if r.get("gate") in gates_ and r.get("exit") == 0 and r.get("tree"):
                 self._by_raw.setdefault(r["tree"], []).append(r)
         self._by_norm: dict[str, list[dict]] | None = None
 
@@ -5520,7 +5627,8 @@ class _GreenCiMatcher:
         raw or ledger-blind (taint-preclear D1). Both sides are consulted: a
         raw hit that is only scoped must not hide an unscoped normalized one."""
         def unscoped(rs):
-            return any((r.get("scope") or "full") == "full" for r in rs)
+            return any(r.get("gate") == "ci" and (r.get("scope") or "full") == "full"
+                       for r in rs)
         if unscoped(self._by_raw.get(tree, [])):
             return True
         if not self._by_raw:
@@ -6081,6 +6189,7 @@ def cmd_task(m: dict, root: Path, args) -> int:
             f"in {_ledger_path(root, change)}. `gates task changed` now answers "
             "\"did I change this?\" against it."
         )
+        _print_commit_gate_line(m)
         return 0
 
     if args.task_cmd == "changed":
@@ -6461,6 +6570,7 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         f"{len(characterization)} characterization task(s) — in "
         f"{_ledger_path(root, change)}"
     )
+    _print_commit_gate_line(m)
     return 0
 
 
@@ -8390,7 +8500,8 @@ def _outcomes_utc(dt):
     return dt.astimezone(datetime.timezone.utc)
 
 
-def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -> dict:
+def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None,
+                       ci_at: str = "task") -> dict:
     """Pure (design D7): one change's parsed ledger rows in, its outcome out.
     No I/O, no git, no clock. `terminal` is `merged` if any `merge` row;
     else `halted` if the last `halt` follows the last `task-start` in file
@@ -8506,7 +8617,7 @@ def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -
     for r in rows:
         if r.get("gate") == TEST_DEFECT_EVENT:
             test_defects_by_kind[test_defect_kind(r)] += 1
-    restarts, restart_recovered = _restart_outcomes(rows)
+    restarts, restart_recovered = _restart_outcomes(rows, ci_at)
     return {
         "restarts": restarts,
         "restart_recovered": restart_recovered,
@@ -8526,11 +8637,13 @@ def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -
     }
 
 
-def _restart_outcomes(rows: list[dict]) -> tuple[int, int]:
+def _restart_outcomes(rows: list[dict], ci_at: str = "task") -> tuple[int, int]:
     """retry-budget D6: `(restarts, recovered)`. A restart recovered when its
     task reached a green `ci` after it with no `halt` of that task in between
-    (and before the task's next restart). A restart is never an intervention:
-    no human acted, so it is counted here and nowhere else."""
+    (and before the task's next restart); under `loop.ci-at: ready` a green
+    `unit`, the commit gate there, counts too (ci-at D5). A restart is never
+    an intervention: no human acted, so it is counted here and nowhere else."""
+    green_gates = ("ci", "unit") if ci_at == "ready" else ("ci",)
     restarts = recovered = 0
     for i, r in enumerate(rows):
         if r.get("gate") != "restart":
@@ -8543,7 +8656,7 @@ def _restart_outcomes(rows: list[dict]) -> tuple[int, int]:
             g = later.get("gate")
             if g in (HALT_EVENT, "restart"):
                 break
-            if g == "ci" and later.get("exit") == 0:
+            if g in green_gates and later.get("exit") == 0:
                 recovered += 1
                 break
     return restarts, recovered
@@ -8962,7 +9075,8 @@ def _outcomes_format_human(doc: dict, show_aggregate: bool,
 
 
 def _outcomes_report(root: Path, changes: list[str], as_json: bool,
-                     show_aggregate: bool, acceptance_policy: str | None = None) -> int:
+                     show_aggregate: bool, acceptance_policy: str | None = None,
+                     ci_at: str = "task") -> int:
     """`gates stats --outcomes`: read and format only -- all the arithmetic
     is in `outcomes_from_rows` / `outcomes_aggregate`. JSON is one
     `sort_keys` document, always carrying `changes`, `aggregate` and
@@ -8971,7 +9085,7 @@ def _outcomes_report(root: Path, changes: list[str], as_json: bool,
     dq_total = {k: 0 for k in ("unparseable_lines",) + _OUTCOMES_DQ_KEYS}
     for name in changes:
         rows, skipped = _read_ledger_rows_and_skipped(root, name)
-        out = outcomes_from_rows(rows, acceptance_policy)
+        out = outcomes_from_rows(rows, acceptance_policy, ci_at)
         out["change"] = name
         out["data_quality"]["unparseable_lines"] = skipped
         for k in dq_total:
@@ -9035,7 +9149,7 @@ def cmd_stats(m: dict, root: Path, args) -> int:
         # rules as above; only reading and formatting differ.
         return _outcomes_report(
             root, changes, getattr(args, "json", False), getattr(args, "all", False),
-            _acceptance_policy(m),
+            _acceptance_policy(m), _ci_at_mode(m),
         )
 
     reports = [_stats_change_report(root, c, idle_gap_ms) for c in changes]
@@ -11406,8 +11520,57 @@ def _check_commit_verdict(m: dict, root: Path, tree: str) -> tuple[int, str | No
         return 0, "ledger"
     # Mixed, empty, or the staged diff couldn't be read: the full
     # requirement.
-    rc = _check_marker_and_report(root, "ci", tree)
-    return rc, ("marker" if rc == 0 else None)
+    if not _unit_commits_allowed(m, root):
+        rc = _check_marker_and_report(root, "ci", tree)
+        return rc, ("marker" if rc == 0 else None)
+    # ci-at D2: under `loop.ci-at: ready`, on a branch naming an active
+    # change, a `ci` marker still allows the commit, and a `unit` marker
+    # for the staged tree allows it too, with its own token.
+    rc, out, err = _captured(_check_marker_and_report, root, "ci", tree)
+    if rc == 0:
+        print(out, end="")
+        return 0, "marker"
+    urc, uout, uerr = _captured(_check_marker_and_report, root, "unit", tree)
+    if urc == 0:
+        print(uout.rstrip("\n") + " — loop.ci-at: ready; the full ci runs before READY "
+              "and at the merge")
+        return 0, "unit"
+    # The denial quotes whichever gate's store holds the newest marker, so
+    # its stale diagnosis compares against the run just before this commit.
+    newest = _newest_marker_gate(root, ("unit", "ci"))
+    print(err if newest == "ci" else uerr, end="", file=sys.stderr)
+    print(
+        "gatedloop: loop.ci-at: ready — this task commit needs `gates run unit` green on "
+        "the staged tree (a green `gates run ci` satisfies it too)",
+        file=sys.stderr,
+    )
+    return 1, None
+
+
+def _unit_commits_allowed(m: dict, root: Path) -> bool:
+    """ci-at D2: a `unit` marker can allow a commit only under `loop.ci-at:
+    ready` and on a branch naming an active change -- never on `main`, a
+    `plan/*` or docs branch, or the detached HEAD `gates merge` commits on."""
+    if _ci_at_mode(m) != "ready":
+        return False
+    branch = _current_branch(root)
+    return bool(branch) and _is_active_change(root, branch)
+
+
+def _newest_marker_gate(root: Path, gates_: tuple[str, ...]) -> str:
+    """The gate whose marker store holds the most recently written marker,
+    by the marker's own `ts`; the first gate when none holds any."""
+    best: tuple[str, str] | None = None
+    for gate in gates_:
+        d = _marker_gate_dir(root, gate)
+        for p in d.glob("*.json") if d.exists() else []:
+            try:
+                ts = json.loads(p.read_text()).get("ts") or ""
+            except Exception:
+                continue
+            if best is None or ts > best[0]:
+                best = (ts, gate)
+    return best[1] if best else gates_[0]
 
 
 def _cmd_discipline_other(m: dict, root: Path, args) -> int:
@@ -12260,8 +12423,9 @@ def cmd_run(m: dict, root: Path, args) -> int:
         _maybe_print_fresh_worktree_hint(root, rc)
         return rc
 
-    def _run_unit_union(union: list[tuple[str, str | dict]]) -> int:
-        # err-full-scoping D2: every hot surface's oracle, each command once
+    def _run_union(union: list[tuple[str, str | dict]]) -> int:
+        # err-full-scoping D2 (and ci-at D8 for `ci`, gate-generic): every
+        # hot surface's oracle, each command once
         # (the live-check dedupe rule), every precondition before any command,
         # all under one lock acquisition; the first non-zero exit is the run's,
         # and every command runs so each surface's verdict is reported.
@@ -12271,7 +12435,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
         for name, raw in union:
             cmd, requires = _gate_spec(raw)
             if not cmd:
-                sys.exit(f"gatedloop: surface '{name}' unit has no 'run' command")
+                sys.exit(f"gatedloop: surface '{name}' {gate} has no 'run' command")
             if requires and requires not in checked:
                 checked.add(requires)
                 prc = _exec(requires, root)
@@ -12284,7 +12448,7 @@ def cmd_run(m: dict, root: Path, args) -> int:
             for name, requires, prc in failed:
                 print(
                     f"gatedloop: precondition '{requires}' failed (exit {prc}) — "
-                    f"unit [{name}] was not run; no unit command ran",
+                    f"{gate} [{name}] was not run; no {gate} command ran",
                     file=sys.stderr,
                 )
             record_precondition_failure(
@@ -12295,8 +12459,8 @@ def cmd_run(m: dict, root: Path, args) -> int:
         # global; readers treat scope as a free string (only `ci` markers
         # compare it to `full`), so none changes.
         scope = "+".join(name for name, _raw in union)
-        print(f"gatedloop: unit[{scope}] — the change spans several surfaces; "
-              "each one's unit oracle runs", file=sys.stderr)
+        print(f"gatedloop: {gate}[{scope}] — the change spans several surfaces; "
+              f"each one's {gate} oracle runs", file=sys.stderr)
         started = time.monotonic()
         rc = 0
         try:
@@ -12309,6 +12473,13 @@ def cmd_run(m: dict, root: Path, args) -> int:
         except _LockBusy as busy:
             return lock_busy(busy, started)
         tree = _write_tree(root)
+        if gate == "ci" and rc == 0 and tree:
+            # ci-at D8: a union marker is a scoped marker -- it allows a
+            # commit, never READY, the merge's full-scope check or vouching.
+            _write_marker(root, "ci", tree, scope=scope)
+        elif gate == "unit" and rc == 0 and tree and _ci_at_mode(m) == "ready":
+            # ci-at D2: under `ready` a green `unit` is a commit gate.
+            _write_marker(root, "unit", tree, scope=scope)
         record(rc, tree, started, scope=scope)
         _maybe_print_fresh_worktree_hint(root, rc)
         return rc
@@ -12332,9 +12503,10 @@ def cmd_run(m: dict, root: Path, args) -> int:
             changed_for_scope = []
         spec, scope = _select_scoped_gate(m, gate, changed_for_scope)
         unmatched = _first_unmatched_path(m, changed_for_scope) if changed_for_scope else None
-        union = _unit_union(m, changed_for_scope) if gate == "unit" else None
+        union = (_unit_union(m, changed_for_scope) if gate == "unit"
+                 else _ci_union(m, changed_for_scope))
         if union:
-            return _run_unit_union(union)
+            return _run_union(union)
     else:
         spec = gates.get(gate)
     if not spec:
@@ -12386,6 +12558,10 @@ def cmd_run(m: dict, root: Path, args) -> int:
     tree = _write_tree(root)
     if gate == "ci" and rc == 0 and tree:
         _write_marker(root, "ci", tree, scope=scope)
+    if gate == "unit" and rc == 0 and tree and _ci_at_mode(m) == "ready":
+        # ci-at D2: under `ready` a green `unit` is a commit gate, so it
+        # leaves the same tree-keyed marker `ci` does.
+        _write_marker(root, "unit", tree, scope=scope)
     record(rc, tree, started, scope=scope if gate in ("ci", "unit") else None)
     if gate == "ci" and rc == 0 and tree and change is not None:
         # A green ci on the branch head clears an outstanding audit taint (D7).
@@ -12410,7 +12586,8 @@ ATTEMPT_NOTE_EVENT = "attempt-note"
 BUDGETED_GATES = ("unit", "ci")
 
 
-def _attempt_state(rows: list[dict], task: str, gate: str = "unit") -> tuple[bool, int]:
+def _attempt_state(rows: list[dict], task: str, gate: str = "unit",
+                   commit_gate: str = "ci") -> tuple[bool, int]:
     """`(red_run_seen, failed_attempts)` for `task`, per design D1, from the
     rows after the later of its latest `task-start` and its latest test
     placement (all rows when it has neither). Starting at the placement
@@ -12418,7 +12595,9 @@ def _attempt_state(rows: list[dict], task: str, gate: str = "unit") -> tuple[boo
     tests the author has since replaced, are not attempts: the first red run
     against the re-placed tests is the task's red run. `gate` is the task's
     oracle gate (task-oracle D4): its first red run is the RED run, and its
-    later red runs and red `ci` runs are the attempts."""
+    later red runs and red `ci` runs are the attempts. `commit_gate` is the
+    gate a task commit needs (ci-at D5): `unit` under `loop.ci-at: ready`,
+    whose red runs then count too; a row is one gate, so none counts twice."""
     start = 0
     for i, r in enumerate(rows):
         if r.get("gate") in (TASK_BASELINE_EVENT, TESTS_PLACED_EVENT) and r.get("task") == task:
@@ -12431,7 +12610,8 @@ def _attempt_state(rows: list[dict], task: str, gate: str = "unit") -> tuple[boo
             if red_seen:
                 count += 1
             red_seen = True
-        elif red_seen and _is_red_gate_row(r, task, "ci"):
+        elif red_seen and (_is_red_gate_row(r, task, "ci")
+                           or _is_red_gate_row(r, task, commit_gate)):
             count += 1
     return red_seen, count
 
@@ -12443,9 +12623,10 @@ def _task_oracle_gate(root: Path, change: str, task: str) -> str:
     return (oracle or {}).get("gate") or "unit"
 
 
-def failed_attempt_count(rows: list[dict], task: str, gate: str = "unit") -> int:
+def failed_attempt_count(rows: list[dict], task: str, gate: str = "unit",
+                         commit_gate: str = "ci") -> int:
     """Pure: task's failed attempts since its RED run and its last restart."""
-    return _attempt_state(rows, task, gate)[1]
+    return _attempt_state(rows, task, gate, commit_gate)[1]
 
 
 def restarts_used(rows: list[dict], task: str) -> int:
@@ -12457,7 +12638,7 @@ def _budget_refusal(m: dict, rows: list[dict], task: str, gate: str = "unit") ->
     """Design D2: the refusal message once the task's budget is used, else
     `None`. Never refuses before the RED run -- that run is required."""
     attempts, limit = loop_budget(m)
-    red_seen, count = _attempt_state(rows, task, gate)
+    red_seen, count = _attempt_state(rows, task, gate, _commit_gate(m))
     if not red_seen or count < attempts:
         return None
     used = restarts_used(rows, task)
@@ -12567,7 +12748,8 @@ def cmd_attempt(m: dict, root: Path, args) -> int:
                 print(f"  - {p}", file=sys.stderr)
             print("Nothing was written.", file=sys.stderr)
             return 1
-        attempt = failed_attempt_count(rows, task, _task_oracle_gate(root, change, task))
+        attempt = failed_attempt_count(rows, task, _task_oracle_gate(root, change, task),
+                                       _commit_gate(m))
         _append_ledger_row(root, {
             "ts": _now_iso(), "gate": ATTEMPT_NOTE_EVENT, "exit": None, "duration_ms": 0,
             "change": change, "task": task, "tree": None, "attempt": attempt,
@@ -12831,17 +13013,19 @@ def _record_on_branch(root: Path, change: str, row: dict, message: str, step: in
             _git(root, "worktree", "prune")
 
 
-def _unrecorded_commits(root: Path, change: str, rows: list[dict]) -> list[str]:
+def _unrecorded_commits(root: Path, change: str, rows: list[dict],
+                        m: dict | None = None) -> list[str]:
     """The audit's verdict, read-only, for a branch no worktree has checked
     out: commits on `<change>` beyond the target whose tree no green-`ci`
-    row vouches for and that no earlier row already recorded."""
+    row (or, under `loop.ci-at: ready`, green-`unit` row) vouches for and
+    that no earlier row already recorded."""
     target, _reason = _resolve_merge_target(root)
     if target is None:
         return []
     out = _git(root, "rev-list", f"refs/heads/{change}", "--not", target)
     if out.returncode != 0:
         return []
-    matcher = _GreenCiMatcher(root, rows)
+    matcher = _GreenCiMatcher(root, rows, _ci_at_mode(m or {}))
     already = _existing_taint_shas(rows) | _existing_classified_shas(rows)
     bad = []
     for sha in reversed([s for s in out.stdout.splitlines() if s.strip()]):
@@ -12991,7 +13175,7 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
     if _taint_unresolved(rows):
         problems.append(_taint_refusal(change, rows, root))
     elif lane is None:
-        unrecorded = _unrecorded_commits(root, change, rows)
+        unrecorded = _unrecorded_commits(root, change, rows, m)
         if unrecorded:
             problems.append(
                 f"gatedloop: change '{change}' has commit(s) with no green-ci record: "
