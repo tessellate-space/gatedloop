@@ -8903,25 +8903,92 @@ def _plan_signals(m: dict, root: Path, change: str) -> list[dict]:
     ]
 
 
-def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str) -> dict:
-    """The classifier layer (D3), on the digest at `classifier-input-limit`.
-    Until a classifier runs it is reported as not yet run and raises
-    nothing; the digest's trim and hash are reported either way."""
-    limit = _plan_preflight_settings(m)["classifier-input-limit"]
-    digest, _fits = _plan_digest(m, root, change, limit)
-    return {"provider": "none", "cause": "not yet run", "tier": None,
-            "trimmed": digest["trimmed"],
-            "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
+def _plan_effective_dimensions(m: dict) -> list[dict]:
+    """The shipped dimensions with the manifest's overrides applied (D3):
+    an overridden threshold (or raising option) replaces the shipped one,
+    and `off` drops the dimension."""
+    over = _plan_preflight_settings(m)["dimensions"]
+    out = []
+    for d in _plan_tier_dimensions():
+        v = over.get(d["id"])
+        if v == "off":
+            continue
+        d = dict(d)
+        if v is not None:
+            d["raises" if d["kind"] == "choice" else "threshold"] = v
+        out.append(d)
+    return out
 
 
-def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False) -> dict:
+def _plan_run_classifier(root: Path, cmd: str, stdin: bytes, timeout: int) -> tuple[str | None, dict | None]:
+    """Run the adopter's classifier command (D3): stdin in, in the repository
+    root, under `timeout` seconds, with the shim's environment passed through
+    unchanged. Its stderr goes to `.gatedloop/out/plan-classifier-<ts>.log`
+    and nowhere else. `(cause, verdict)`: a fallback cause and no verdict,
+    or no cause and the validated verdict. The shim never reads `.env` or any
+    secret, and never prints or records the environment."""
+    d = _ensure_out_dir(root)
+    ts = _now_iso().replace(":", "").replace("+00:00", "Z")
+    with (d / f"plan-classifier-{ts}.log").open("wb") as log:
+        proc = subprocess.Popen(cmd, shell=True, cwd=root, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=log, start_new_session=True)
+        try:
+            out, _err = proc.communicate(stdin, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, 9)
+            proc.kill()
+            proc.communicate()
+            return f"timeout {timeout}s", None
+    if proc.returncode != 0:
+        return f"exit {proc.returncode}", None
+    verdict, errs = _plan_tier_parse(out.decode("utf-8", errors="replace"))
+    if errs:
+        return ("invalid: not JSON" if errs == ["not JSON"] else f"invalid: {errs[0]}"), None
+    return None, verdict
+
+
+def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
+                           run: bool = True) -> dict:
+    """The classifier layer (D3), on the digest at `classifier-input-limit`:
+    a declared command's validated verdict (provider `external`), else the
+    built-in lens with the fallback cause (provider `builtin`). It may only
+    raise the tier. `run=False` (`gates plan check`, which writes nothing)
+    reports a declared command as not run."""
+    s = _plan_preflight_settings(m)
+    digest, _fits = _plan_digest(m, root, change, s["classifier-input-limit"])
+    block = {"provider": "builtin", "cause": None, "tier": None, "confidence": None,
+             "reason": None, "evidence": [], "combined": None,
+             "trimmed": digest["trimmed"],
+             "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
+    cmd = s["classifier"]
+    if not cmd:
+        block["cause"] = "none-declared"
+        return block
+    if not run:
+        block.update(provider="none", cause="not run by gates plan check")
+        return block
+    dims = _plan_effective_dimensions(m)
+    cause, verdict = _plan_run_classifier(root, cmd, _plan_classifier_input(digest, dims),
+                                          s["classifier-timeout"])
+    if cause:
+        block["cause"] = cause
+        return block
+    block.update(provider="external", tier=verdict["tier"],
+                 confidence=verdict.get("confidence"), reason=verdict.get("reason"),
+                 evidence=verdict.get("evidence", []), combined=verdict["tier"])
+    return block
+
+
+def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False,
+                   run_classifier: bool = True) -> dict:
     """`{floor, signals, classifier, override: {source, reason}, tier}`: the
     floor, max'd with the classifier's verdict, then the plan's line (a
     reasoned `light` lowers, `full` raises), then `--tier full`."""
     signals = _plan_signals(m, root, change)
     floor = "full" if any(x["high"] for x in signals) else "light"
-    classifier = _plan_classifier_layer(m, root, change, floor)
-    tier = "full" if "full" in (floor, classifier.get("tier")) else "light"
+    classifier = _plan_classifier_layer(m, root, change, floor, run=run_classifier)
+    tier = "full" if "full" in (floor, classifier.get("combined")) else "light"
     override = {"source": None, "reason": None}
     lines = _plan_tier_lines(root, change)
     if any(x["tier"] == "full" for x in lines):
@@ -9206,7 +9273,7 @@ def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None
     return {
         "change": change,
         "preflight": _plan_preflight_mode(m),
-        "tier": _plan_tier_doc(m, root, change),
+        "tier": _plan_tier_doc(m, root, change, run_classifier=False),
         "against": against,
         "findings": findings,
     }

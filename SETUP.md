@@ -341,6 +341,60 @@ Gate names are yours, so the shim cannot know which gate is an end-to-end one: l
 
 **The limit is yours: `classifier-input-limit`, in bytes (default 48000).** The shim has no tokenizer, so count conservatively: about 2.5 bytes per token, because plan digests are dense with paths and identifiers, which split into more tokens than prose. By that rule 48000 bytes is at most about 19k tokens of state, which leaves headroom under a 32k-token per-question window. For another classifier, take its per-question window in tokens × 2.5 × 0.6. Over the limit, the shim trims from the bottom of the priority list: the decision headings first, then the "What Changes" bullets, then the task lines, each from its last entry up, until the compact JSON fits; `trimmed` names each trimmed section and how many entries it lost (`[{"section": "decisions", "lost": 10}, {"section": "tasks", "lost": 3}]`), and `gates plan tier --json` reports the trim and the digest's hash in its classifier block, so the printed digest can be matched to what was classified.
 
+**A classifier of your own: `loop.plan-preflight.classifier: "<command>"`.** It is a command, not a gate: a gate's contract is its exit code, and a classifier's verdict is the JSON it prints. `gates plan tier` (and `gates plan round`) runs it in the repository root under `classifier-timeout` seconds (default 60), with the shim's own environment passed through unchanged. On stdin it gets `{"digest": <the digest at classifier-input-limit>, "dimensions": <the effective dimensions>}`, the digest exactly as `gates plan digest <change> --json --limit <limit>` prints it. On stdout it prints one verdict, validated against `schema/plan-tier.schema.json`:
+```json
+{"tier": "light", "confidence": 0.8,
+ "evidence": [{"dimension": "persisted-data", "value": 0.1, "confidence": 0.9}],
+ "reason": null}
+```
+`reason` may be null or absent (a typed-answer classifier has none to give). A valid verdict is recorded as provider `external`. Anything else falls back, visibly: `gates plan tier` prints `classifier: builtin` and the cause, one of `none-declared`, `exit <n>` (`exit 127` for a missing command), `timeout <s>s` (the command is killed), `invalid: not JSON` or `invalid: <first schema error>`, and the planner runs the built-in `gatedloop.blast-radius` lens instead. **A classifier only raises.** The effective tier is the higher of the floor and the verdict, then the plan's own `Plan tier:` line; so whatever a classifier does or fails to do (a wrong answer, a crash, a timeout) can cost usage and never safety. `gates plan check` never runs it.
+
+**Declaring a classifier sends data off the machine.** The command receives the plan digest: file paths, requirement titles, task lines and decision headings. If it calls a third-party service, that text goes to that service, billed to your classifier's API key. **The shim never reads `.env` or any key**: it passes its environment through, never prints or records it, and records only the command's exit, duration and validated stdout. The command's stderr is captured to `.gatedloop/out/plan-classifier-<ts>.log`, which `.gatedloop/out/` ignores, and appears nowhere else; an adapter must never print its key or its request headers there.
+
+An example adapter, for a typed-answer model behind an HTTP API (yours to write and keep in your project; the plugin ships none). It reads its key from a gitignored `.env`, asks each dimension as a typed question with the digest as the state, retries rate-limit and overload responses with backoff, and maps the answers back to the contract:
+```python
+#!/usr/bin/env python3
+# scripts/plan-classifier.py -- bound as loop.plan-preflight.classifier: "python3 scripts/plan-classifier.py"
+import json, os, sys, time, urllib.error, urllib.request
+from pathlib import Path
+
+def key() -> str:                      # from the environment, else a gitignored .env
+    if os.environ.get("CLASSIFIER_API_KEY"):
+        return os.environ["CLASSIFIER_API_KEY"]
+    for line in Path(".env").read_text().splitlines():
+        if line.startswith("CLASSIFIER_API_KEY="):
+            return line.split("=", 1)[1].strip()
+    sys.exit("no CLASSIFIER_API_KEY")  # names the variable, never a value
+
+def ask(state: str, dim: dict) -> dict:
+    question = ({"type": "probability", "text": dim["question"]} if dim["kind"] == "probability"
+                else {"type": "choice", "text": dim["question"], "options": dim["options"]})
+    body = json.dumps({"state": state, "question": question}).encode()
+    for attempt in range(5):
+        req = urllib.request.Request("https://classifier.example.com/v1/answer", data=body,
+                                     headers={"Authorization": f"Bearer {key()}",
+                                              "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return json.load(r)    # {"answer": ..., "confidence": ...}
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 503, 529):
+                raise SystemExit(f"classifier request failed: HTTP {e.code}")  # no headers, no key
+            time.sleep(2 ** attempt)   # rate-limited or overloaded: back off and retry
+    raise SystemExit("classifier still overloaded after 5 attempts")
+
+payload = json.load(sys.stdin)
+state = json.dumps(payload["digest"])
+evidence = []
+for dim in payload["dimensions"]:
+    a = ask(state, dim)
+    evidence.append({"dimension": dim["id"], "value": a["answer"], "confidence": a.get("confidence")})
+overall = next((e["value"] for e in evidence if e["dimension"] == "overall-tier"), "light")
+print(json.dumps({"tier": overall if overall in ("light", "full") else "light",
+                  "confidence": None, "evidence": evidence, "reason": None}))
+```
+Keep `.env` in `.gitignore`. Each call is billed per input token to your classifier's API key with its provider, outside the Claude session: about 2.5 bytes per token of digest, times the number of dimensions, per `gates plan tier` or `gates plan round`.
+
 **The store travels on its own branch.** The store is ignored, so it would not survive a removed worktree or reach another machine. `gates plan save <change>` snapshots it into a new commit on the branch `gatedloop/preflight/<change>`, built with git plumbing only: it never touches your working tree, your index or `HEAD`, and runs no commit hook. The snapshot's tree holds only the store, at its root, and each save parents on the last, so the branch's history is the rounds; the message names the change, the loop and round, and the plan's two digests. `save` refuses an absent or empty store, and prints the new tip and the push command: push the branch together with the plan branch (`git push origin gatedloop/preflight/<change>`). It is an ordinary branch, so it travels with a plain push and fetch, and the `pre-push` hook passes it like every branch but the merge target. On another machine (or a fresh worktree), `gates plan restore <change>` rebuilds the store from the local branch, else `origin/gatedloop/preflight/<change>` (`--from <ref>` names another snapshot), and prints the tasks its digests still mark as kept. It refuses, naming each file, when the store holds a file that differs from or is absent in the snapshot; `--force` replaces the store with the snapshot. Two machines that save in turn without restoring diverge, and the second push is refused as a non-fast-forward: restore, then re-author the stale tasks. The branch outlives the plan's merge; delete it by hand once the change is archived (`git push origin --delete gatedloop/preflight/<change>` and `git branch -D gatedloop/preflight/<change>`).
 
 Per task, `gates tests place <N.M>` moves that task's tests onto their real paths (over the file as it was before the change, as main last delivered it at `git merge-base HEAD <target>`, or as an earlier placement left it — any other content is a test defect), `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it. Off a change branch (a `plan/*` branch, the merge target, any branch naming no active change) `gates tests check` refuses any staged path under `.gatedloop/authored/`, naming each one: held tests are committed only on their change's branch.
