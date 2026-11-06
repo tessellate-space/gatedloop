@@ -57,7 +57,7 @@ The preflight writes no ledger row: no `tests-handoff`, no `review` with `--scop
 - a handoff row records the base blobs of the tree it was taken on, and the preflight's tree is the plan branch before approval;
 - a reused set would be a lock with no provenance, authored before the approval it is supposed to follow.
 
-The price is a second authoring run per change. It is paid only by projects that opt in (D7), and it replaces the far costlier round trip of halt, amend and re-approve.
+The cost is a second authoring run per change: one extra test-author run plus one authored-set review run per plan, roughly 100k–200k tokens (a test-author run is budgeted at well under 40 tool calls; a review at about 10). On a Claude subscription that is usage drawn from the plan's included quota, not money; only a run on an API key is billed per token. Only projects that opt in (D7) spend it, and it replaces the far heavier round trip of halt, amend and re-approve.
 
 ### D3. A preflight holding area outside the tree (coordinator's option a), plus a backstop at the lock (option b)
 
@@ -89,7 +89,7 @@ Drift needs nothing new: `_named_paths` already extracts backticked repository p
 
 ### D7. `loop.plan-preflight: run | skip`, default `skip`; `gates plan check` always runs
 
-The model-token part of the preflight (author plus review, on every plan and every amendment that touches tasks, design or specs) is adopter-facing behaviour with a cost, so it is opt-in. The values are `run`/`skip`, not `on`/`off`: PyYAML reads `on` as `True` while `_mini_yaml` reads `"on"`, so the same manifest would mean two things depending on which parser a machine has. That is exactly the conditional-path defect `tests/` exists to catch. `gates validate` refuses `run` with `loop.test-author: inline`. An inline project has chosen not to have a separate author, and a planner authoring tests against its own plan would lose the cold read that makes the preflight worth its tokens.
+The model-token part of the preflight (author plus review, on every plan and every amendment that touches tasks, design or specs) is adopter-facing behaviour that spends usage, one extra test-author run plus one authored-set review run per plan, roughly 100k–200k tokens (a test-author run is budgeted at well under 40 tool calls; a review at about 10). On a Claude subscription that is usage drawn from the plan's included quota, not money; only a run on an API key is billed per token, so it is opt-in. If the docs give a dollar figure at all, it is labelled "API-equivalent, if you pay per token". The values are `run`/`skip`, not `on`/`off`: PyYAML reads `on` as `True` while `_mini_yaml` reads `"on"`, so the same manifest would mean two things depending on which parser a machine has. That is exactly the conditional-path defect `tests/` exists to catch. `gates validate` refuses `run` with `loop.test-author: inline`. An inline project has chosen not to have a separate author, and a planner authoring tests against its own plan would lose the cold read that makes the preflight worth its usage.
 
 `gates plan check` runs in the propose path whatever the key says. It costs nothing, records nothing, and reports only what the handoff would refuse after approval anyway.
 
@@ -122,7 +122,7 @@ The suggested order (author, dry run, review, plan check) is refined to plan che
 
 - [The preflight author misses what the real author later finds] → the preflight is advisory and the real run still happens. Stochastic misses cost what they cost today, and nothing is worse.
 - ["Plan wrong about the code" is only partly catchable] → the author reads public interfaces, never bodies, so a plan that misreads an implementation detail (tessellate's `gates conventions sync` grep) is caught only where the interface shows it. That is stated in SETUP, not claimed away.
-- [Token cost per amendment] → opt-in; on an update to an open plan PR, the propose step re-runs the model part only when the update changes `tasks.md`, `design.md` or a spec, never for a proposal-only edit.
+- [Usage per amendment: one test-author run plus one review run, roughly 100k–200k tokens, drawn from a subscription's included usage or billed per token on an API key] → opt-in; on an update to an open plan PR, the propose step re-runs the model part only when the update changes `tasks.md`, `design.md` or a spec, never for a proposal-only edit.
 - [A drift finding on a busy file is noise] → the planner reads it and decides. Findings are advice and never block `gates handoff`.
 - [The backstop refuses a commit on `main` that some workflow relies on] → no shipped flow commits held files off a change branch: the authoring commit is on the change branch, and placement empties the area before the merge. The suite's fixtures are the check. A fixture that does it is either wrong or names a flow to keep, and either way the implementer reports it.
 
