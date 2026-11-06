@@ -533,6 +533,16 @@
    ],
    "visibility": "public"
   },
+  "plan classify": {
+   "options": [
+    "--unavailable",
+    "--verdict"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan digest": {
    "options": [
     "--json",

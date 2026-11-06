@@ -8985,6 +8985,65 @@ def _plan_apply_verdict(m: dict, block: dict, verdict: dict, provider: str) -> d
     return block
 
 
+PLAN_CLASSIFIER_FILE = "classifier.json"
+
+
+def _plan_digests(root: Path, change: str) -> dict:
+    return {"plan_sha": _approval_sha_worktree(root, change),
+            "tasks_sha": _plan_tasks_sha(root, change)}
+
+
+def _plan_stored_classifier(root: Path, change: str) -> dict | None:
+    """The built-in lens's stored verdict (or `--unavailable` cause), only
+    when it was stored for the plan's current digests (D3)."""
+    try:
+        data = json.loads((_preflight_store(root, change) / PLAN_CLASSIFIER_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or any(data.get(k) != v for k, v in
+                                         _plan_digests(root, change).items()):
+        return None
+    return data
+
+
+def _plan_classify(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    if bool(args.verdict) == bool(args.unavailable):
+        print("gatedloop: give exactly one of --verdict <file> or --unavailable <cause>.",
+              file=sys.stderr)
+        return 1
+    record = dict(_plan_digests(root, change))
+    if args.verdict:
+        try:
+            text = Path(args.verdict).read_text()
+        except OSError as e:
+            print(f"gatedloop: cannot read --verdict {args.verdict} ({e.strerror}).",
+                  file=sys.stderr)
+            return 1
+        verdict, errs = _plan_tier_parse(text)
+        if errs:
+            print(f"gatedloop: the verdict does not meet schema/plan-tier.schema.json "
+                  f"({len(errs)} error(s)) — nothing was stored:", file=sys.stderr)
+            for e in errs:
+                print(f"  {e}", file=sys.stderr)
+            return 1
+        record["verdict"] = verdict
+    else:
+        if not args.unavailable.strip():
+            print("gatedloop: --unavailable needs a cause.", file=sys.stderr)
+            return 1
+        record["unavailable"] = args.unavailable.strip()
+    store = _preflight_ensure_store(root, change)
+    (store / PLAN_CLASSIFIER_FILE).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    what = (f"the built-in verdict ({record['verdict']['tier']})" if "verdict" in record
+            else f"no verdict (unavailable: {record['unavailable']})")
+    print(f"gatedloop: stored {what} for '{change}' at "
+          f"{(store / PLAN_CLASSIFIER_FILE).relative_to(root).as_posix()}, keyed on the plan's "
+          "current digests; an amendment voids it.")
+    return 0
+
+
 def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
                            run: bool = True) -> dict:
     """The classifier layer (D3), on the digest at `classifier-input-limit`:
@@ -8996,7 +9055,7 @@ def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
     digest, fits = _plan_digest(m, root, change, s["classifier-input-limit"])
     block = {"provider": "builtin", "cause": None, "tier": None, "confidence": None,
              "reason": None, "evidence": [], "combined": None, "raised_by": None,
-             "unknown_dimensions": [],
+             "unknown_dimensions": [], "unavailable": None,
              "trimmed": digest["trimmed"],
              "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
     if not fits:
@@ -9006,19 +9065,26 @@ def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
         block.update(provider="skipped", cause="digest over limit", combined="full")
         return block
     cmd = s["classifier"]
-    if not cmd:
-        block["cause"] = "none-declared"
-        return block
-    if not run:
+    if cmd and not run:
         block.update(provider="none", cause="not run by gates plan check")
         return block
-    dims = _plan_effective_dimensions(m)
-    cause, verdict = _plan_run_classifier(root, cmd, _plan_classifier_input(digest, dims),
-                                          s["classifier-timeout"])
-    if cause:
+    cause = "none-declared"
+    if cmd:
+        dims = _plan_effective_dimensions(m)
+        cause, verdict = _plan_run_classifier(root, cmd, _plan_classifier_input(digest, dims),
+                                              s["classifier-timeout"])
+        if not cause:
+            return _plan_apply_verdict(m, block, verdict, "external")
+    # The built-in lens: its verdict arrives through `gates plan classify`,
+    # used only for the plan it was stored for (D3).
+    block["cause"] = cause
+    stored = _plan_stored_classifier(root, change)
+    if stored and isinstance(stored.get("verdict"), dict):
+        _plan_apply_verdict(m, block, stored["verdict"], "builtin")
         block["cause"] = cause
-        return block
-    return _plan_apply_verdict(m, block, verdict, "external")
+    elif stored and stored.get("unavailable"):
+        block["unavailable"] = stored["unavailable"]
+    return block
 
 
 def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False,
@@ -9068,6 +9134,8 @@ def _plan_tier(m: dict, root: Path, args) -> int:
           + (f", verdict: {c['tier']}" if c.get("tier") else "")
           + (f", combined: {c['combined']}" if c.get("combined") else "")
           + (f" (raised by {c['raised_by']})" if c.get("raised_by") else ""))
+    if c.get("unavailable"):
+        print(f"  no verdict could be had ({c['unavailable']}): the tier is the floor")
     if c.get("unknown_dimensions"):
         print(f"  ignored unknown dimension(s): {', '.join(c['unknown_dimensions'])}")
     if c.get("trimmed"):
@@ -9362,6 +9430,7 @@ def cmd_plan(m: dict, root: Path, args) -> int:
         "check": _plan_check,
         "tier": _plan_tier,
         "digest": _plan_digest_cmd,
+        "classify": _plan_classify,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -15622,7 +15691,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
-    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier and digest, save and restore the preflight store")
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier and digest, record a classifier verdict, save and restore the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
@@ -15638,6 +15707,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_pd.add_argument("--json", action="store_true", help="the compact JSON a classifier receives as `digest`")
     sp_pd.add_argument("--limit", type=int, metavar="BYTES", help="build it at this many bytes of compact JSON (default: no limit)")
     sp_pd.set_defaults(fn=cmd_plan)
+    sp_pk = plan_sub.add_parser("classify", help="store the built-in gatedloop.blast-radius lens's verdict (validated against schema/plan-tier.schema.json), or that none could be had")
+    sp_pk.add_argument("change")
+    sp_pk.add_argument("--verdict", metavar="FILE", help="the lens's JSON verdict")
+    sp_pk.add_argument("--unavailable", metavar="CAUSE", help="record that no verdict could be had; the tier is then the floor")
+    sp_pk.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)
