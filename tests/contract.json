@@ -55,6 +55,18 @@
   "window",
   "messages",
   "source",
+  "loop",
+  "round",
+  "plan_sha",
+  "tasks_sha",
+  "signals",
+  "floor",
+  "classifier",
+  "override",
+  "tier",
+  "checker",
+  "report",
+  "snapshot",
   "v"
  ],
  "ledger_row_version": 1,
@@ -553,10 +565,39 @@
    ],
    "visibility": "public"
   },
+  "plan record": {
+   "options": [
+    "--checker",
+    "--report",
+    "--verdict"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan restore": {
    "options": [
     "--force",
     "--from"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan resume": {
+   "options": [
+    "--reason"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan round": {
+   "options": [
+    "--tier"
    ],
    "positionals": [
     "change"

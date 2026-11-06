@@ -2746,7 +2746,7 @@
   "description": null,
   "epilog": null,
   "formatter_class": "HelpFormatter",
-  "help_in_parent": "the plan preflight: check a plan, compute its tier and digest, record a classifier verdict, save and restore the preflight store",
+  "help_in_parent": "the plan preflight: check a plan, its tier and digest, its rounds and their record, and the preflight store",
   "prog": "gates plan"
  },
  "plan check": {
@@ -2953,6 +2953,93 @@
   "help_in_parent": "the plan digest: exactly what an external classifier is given (signals, paths, spec delta headers, task lines, What Changes, decisions)",
   "prog": "gates plan digest"
  },
+ "plan record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "checker",
+    "help": "lens:<id>, test-author, dry-run or authored-review",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--checker"
+    ],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "clean",
+     "findings",
+     "question"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "verdict",
+    "help": "clean, findings or question (not for dry-run)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--verdict"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "report",
+    "help": "the checker's report, copied to the preflight store's reports/",
+    "metavar": "FILE",
+    "nargs": null,
+    "option_strings": [
+     "--report"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record a checker's verdict for the open round (a `plan-review` row); the dry run is run and recorded by the shim",
+  "prog": "gates plan record"
+ },
  "plan restore": {
   "args": [
    {
@@ -3020,6 +3107,114 @@
   "formatter_class": "HelpFormatter",
   "help_in_parent": "rebuild the preflight store from its snapshot branch (local, else origin/)",
   "prog": "gates plan restore"
+ },
+ "plan resume": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "reason",
+    "help": "what the human decided",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--reason"
+    ],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "start a new plan loop with a fresh round budget, after a human's answer (a `plan-round` resume row)",
+  "prog": "gates plan resume"
+ },
+ "plan round": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "full"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "tier",
+    "help": "raise this round's tier to full (recorded as raised-flag)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--tier"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "open the next plan round: static checks first (no round on a finding), then the tier; exit 1 when the budget is spent (a `stalled` row)",
+  "prog": "gates plan round"
  },
  "plan save": {
   "args": [

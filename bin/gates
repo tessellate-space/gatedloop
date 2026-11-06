@@ -5262,6 +5262,16 @@ LEDGER_ROW_FIELDS = (
     # (USAGE_SOURCES). `None` on every other row kind. Appended per the
     # union rule.
     "tokens", "window", "messages", "source",
+    # plan-preflight D5: on `plan-round` and `plan-review` rows only, which
+    # nothing but `gates plan status` reads (record-only). `loop`/`round`
+    # place the row; `plan_sha` is the approval digest and `tasks_sha` the
+    # task lines without checkbox state; a round row adds the tier's layers
+    # (`signals`, `floor`, `classifier`, `override`, the effective `tier`); a
+    # review row adds `checker`, `report` (a store path) and `snapshot` (the
+    # local gatedloop/preflight/<change> tip, or None). `None` on every
+    # other row kind. Appended per the union rule.
+    "loop", "round", "plan_sha", "tasks_sha", "signals", "floor", "classifier", "override",
+    "tier", "checker", "report", "snapshot",
     # stability-contract D1: the row version, set by `_append_ledger_row`
     # itself on every row (as `session` is), so no caller can omit or forge
     # it. A row without the key was written before the field existed and is
@@ -9425,12 +9435,191 @@ def _plan_check(m: dict, root: Path, args) -> int:
     return 0
 
 
+# The plan loop's rounds (D4, D5). Rows are record-only: `plan-round` and
+# `plan-review`, in the change's own ledger, on any branch. Nothing in
+# approval, handoff, merge, check-implement or stats reads them.
+PLAN_LIGHT_CHECKERS = ("plan-check", "lens:gatedloop.implementability")
+PLAN_FULL_CHECKERS = ("plan-check", "lens:gatedloop.implementability",
+                      "lens:gatedloop.zero-decision", "test-author", "dry-run",
+                      "authored-review")
+PLAN_SHIM_CHECKERS = ("plan-check", "dry-run")
+PLAN_VERDICTS = ("clean", "findings", "question")
+
+
+def _plan_checkers(tier: str) -> tuple[str, ...]:
+    return PLAN_FULL_CHECKERS if tier == "full" else PLAN_LIGHT_CHECKERS
+
+
+def _plan_rows(root: Path, change: str) -> list[dict]:
+    return [r for r in _read_ledger_rows(root, change)
+            if r.get("gate") in (PLAN_ROUND_EVENT, PLAN_REVIEW_EVENT)]
+
+
+def _plan_open_round(rows: list[dict]) -> dict | None:
+    """The round that is open: the last `plan-round` row, when its outcome is
+    `open` (a later `stalled` or `resume` row closes it)."""
+    rounds = [r for r in rows if r.get("gate") == PLAN_ROUND_EVENT]
+    return rounds[-1] if rounds and rounds[-1].get("outcome") == "open" else None
+
+
+def _plan_row(root: Path, change: str, event: str, **fields) -> dict:
+    row = {"ts": _now_iso(), "gate": event, "exit": None, "duration_ms": None,
+           "change": change, "task": None, **fields}
+    _append_ledger_row(root, row)
+    return row
+
+
+def _plan_round(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    findings = _plan_check_findings(m, root, change)
+    if findings:
+        for f in findings:
+            print(f"{f['kind']}: {f['detail']}")
+        print(f"gatedloop: plan round — {len(findings)} static finding(s); no round was opened "
+              "and none is counted. Amend the plan and run `gates plan round` again.",
+              file=sys.stderr)
+        return 1
+    rows = _plan_rows(root, change)
+    loop, rnd = _plan_loop_position(rows)
+    in_loop = _plan_current_loop_rows(rows)
+    if any(r.get("gate") == PLAN_REVIEW_EVENT and r.get("verdict") == "question" for r in in_loop):
+        print(f"gatedloop: loop {loop} stopped on a question — no round opens until a human "
+              f"answers it and `gates plan resume {change} --reason <text>` records that.",
+              file=sys.stderr)
+        return 1
+    tier = _plan_tier_doc(m, root, change, raise_flag=(args.tier == "full"))
+    c = tier["classifier"]
+    has_verdict = (c.get("tier") is not None or c.get("unavailable")
+                   or c.get("provider") == "skipped")
+    if tier["floor"] == "light" and not has_verdict:
+        print(f"gatedloop: the floor is light, and no classifier verdict exists for the plan's "
+              f"current digests (classifier: {c.get('provider')}, cause: {c.get('cause')}). "
+              "Run the plan-review agent with `--lens gatedloop.blast-radius` and pass its "
+              f"JSON to `gates plan classify {change} --verdict <file>`, or record "
+              f"`gates plan classify {change} --unavailable <cause>`.", file=sys.stderr)
+        return 1
+    budget = _plan_preflight_settings(m)["rounds"] if tier["tier"] == "full" else 1
+    digests = _plan_digests(root, change)
+    common = {"loop": loop, "plan_sha": digests["plan_sha"], "tasks_sha": digests["tasks_sha"],
+              "signals": tier["signals"], "floor": tier["floor"], "classifier": c,
+              "override": tier["override"], "tier": tier["tier"]}
+    if rnd >= budget:
+        _plan_row(root, change, PLAN_ROUND_EVENT, round=rnd, outcome="stalled", exit=1, **common)
+        print(f"gatedloop: loop {loop} stalled — its {budget}-round budget ({tier['tier']} tier) "
+              f"is spent. A human decides: amend, then `gates plan resume {change} --reason "
+              "<text>` for a fresh budget.", file=sys.stderr)
+        return 1
+    _plan_row(root, change, PLAN_ROUND_EVENT, round=rnd + 1, outcome="open", exit=0, **common)
+    _plan_row(root, change, PLAN_REVIEW_EVENT, loop=loop, round=rnd + 1,
+              plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"],
+              checker="plan-check", verdict="clean", exit=0,
+              snapshot=_preflight_snapshot_tip(root, change))
+    over = tier["override"]["source"]
+    print(f"gatedloop: plan round {rnd + 1} of {budget} opened (loop {loop}) — tier "
+          f"{tier['tier']} (floor {tier['floor']}"
+          f"{', ' + over if over else ''}).")
+    print("checkers: " + ", ".join(_plan_checkers(tier["tier"]))
+          + "   (plan-check recorded clean)")
+    return 0
+
+
+def _plan_current_loop_rows(rows: list[dict]) -> list[dict]:
+    """The rows since the last `resume` (the current loop's)."""
+    last = max((i for i, r in enumerate(rows) if r.get("gate") == PLAN_ROUND_EVENT
+                and r.get("outcome") == "resume"), default=-1)
+    return rows[last + 1:]
+
+
+def _plan_record(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    rows = _plan_rows(root, change)
+    rnd = _plan_open_round(rows)
+    if rnd is None:
+        print(f"gatedloop: no plan round is open for '{change}' — `gates plan round {change}` "
+              "opens one.", file=sys.stderr)
+        return 1
+    digests = _plan_digests(root, change)
+    if (rnd.get("plan_sha"), rnd.get("tasks_sha")) != (digests["plan_sha"], digests["tasks_sha"]):
+        print(f"gatedloop: the plan changed since round {rnd.get('round')} opened — an amendment "
+              "means a new round: `gates plan round` again. Nothing was recorded.",
+              file=sys.stderr)
+        return 1
+    checker = args.checker
+    allowed = _plan_checkers(rnd.get("tier") or "light")
+    if checker not in allowed:
+        print(f"gatedloop: checker '{checker}' is not one the round's {rnd.get('tier')} tier runs "
+              f"(it runs: {', '.join(allowed)}).", file=sys.stderr)
+        return 1
+    if checker == "plan-check":
+        print("gatedloop: plan-check is recorded by `gates plan round` from its own run.",
+              file=sys.stderr)
+        return 1
+    report_text = None
+    if checker == "dry-run":
+        if args.verdict:
+            print("gatedloop: the shim records the dry-run checker from its own run — drop "
+                  "--verdict.", file=sys.stderr)
+            return 1
+        run = subprocess.run([sys.executable, str(Path(__file__).resolve()), "tests", "handoff",
+                              change, "--dry-run"], cwd=root, capture_output=True, text=True)
+        sys.stdout.write(run.stdout)
+        sys.stderr.write(run.stderr)
+        verdict, exit_code = ("clean" if run.returncode == 0 else "findings"), run.returncode
+        report_text = run.stdout + run.stderr
+    else:
+        if not args.verdict:
+            print(f"gatedloop: --verdict clean|findings|question is required for '{checker}'.",
+                  file=sys.stderr)
+            return 1
+        verdict, exit_code = args.verdict, None
+    store = _preflight_ensure_store(root, change)
+    report = None
+    name = f"{rnd.get('loop')}.{rnd.get('round')}-{checker.replace(':', '-')}.md"
+    if args.report:
+        try:
+            report_text = Path(args.report).read_text()
+        except OSError as e:
+            print(f"gatedloop: cannot read --report {args.report} ({e.strerror}).", file=sys.stderr)
+            return 1
+    if report_text is not None:
+        (store / "reports" / name).write_text(report_text)
+        report = (store / "reports" / name).relative_to(root).as_posix()
+    _plan_row(root, change, PLAN_REVIEW_EVENT, loop=rnd.get("loop"), round=rnd.get("round"),
+              plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"], checker=checker,
+              verdict=verdict, exit=exit_code, report=report,
+              snapshot=_preflight_snapshot_tip(root, change))
+    print(f"gatedloop: recorded {checker}: {verdict} for loop {rnd.get('loop')}, round "
+          f"{rnd.get('round')}" + (f" (report: {report})" if report else "") + ".")
+    return 0 if checker != "dry-run" else exit_code
+
+
+def _plan_resume(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    reason = (args.reason or "").strip()
+    if not reason:
+        print("gatedloop: gates plan resume needs a --reason: what the human decided.",
+              file=sys.stderr)
+        return 1
+    loop, _rnd = _plan_loop_position(_plan_rows(root, change))
+    digests = _plan_digests(root, change)
+    _plan_row(root, change, PLAN_ROUND_EVENT, loop=loop + 1, round=0, outcome="resume",
+              detail=reason, plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"])
+    print(f"gatedloop: loop {loop + 1} starts with a fresh round budget ({reason}).")
+    return 0
+
+
 def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
         "check": _plan_check,
         "tier": _plan_tier,
         "digest": _plan_digest_cmd,
         "classify": _plan_classify,
+        "round": _plan_round,
+        "record": _plan_record,
+        "resume": _plan_resume,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -15691,7 +15880,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
-    sp = sub.add_parser("plan", help="the plan preflight: check a plan, compute its tier and digest, record a classifier verdict, save and restore the preflight store")
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, its tier and digest, its rounds and their record, and the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
@@ -15712,6 +15901,20 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_pk.add_argument("--verdict", metavar="FILE", help="the lens's JSON verdict")
     sp_pk.add_argument("--unavailable", metavar="CAUSE", help="record that no verdict could be had; the tier is then the floor")
     sp_pk.set_defaults(fn=cmd_plan)
+    sp_pn = plan_sub.add_parser("round", help="open the next plan round: static checks first (no round on a finding), then the tier; exit 1 when the budget is spent (a `stalled` row)")
+    sp_pn.add_argument("change")
+    sp_pn.add_argument("--tier", choices=("full",), help="raise this round's tier to full (recorded as raised-flag)")
+    sp_pn.set_defaults(fn=cmd_plan)
+    sp_pe = plan_sub.add_parser("record", help="record a checker's verdict for the open round (a `plan-review` row); the dry run is run and recorded by the shim")
+    sp_pe.add_argument("change")
+    sp_pe.add_argument("--checker", required=True, help="lens:<id>, test-author, dry-run or authored-review")
+    sp_pe.add_argument("--verdict", choices=PLAN_VERDICTS, help="clean, findings or question (not for dry-run)")
+    sp_pe.add_argument("--report", metavar="FILE", help="the checker's report, copied to the preflight store's reports/")
+    sp_pe.set_defaults(fn=cmd_plan)
+    sp_pu = plan_sub.add_parser("resume", help="start a new plan loop with a fresh round budget, after a human's answer (a `plan-round` resume row)")
+    sp_pu.add_argument("change")
+    sp_pu.add_argument("--reason", required=True, help="what the human decided")
+    sp_pu.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)
