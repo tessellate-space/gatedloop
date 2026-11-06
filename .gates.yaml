@@ -72,6 +72,17 @@ surfaces:
     gates:
       ci: "python3 scripts/test-parallel --affected && python3 scripts/release check && claude plugin validate ."
 
+  # gatedloop's public contract (docs/stability.md): the CLI and row-field
+  # snapshot, the stability promise and the manifest schemas. `blast-radius:
+  # high` marks it for the plan tier (plan-preflight D3 signal 6): a plan that
+  # names a path here gets a full floor. No rules or gates of its own.
+  - name: contract
+    match:
+      - "tests/contract.json"
+      - "docs/stability.md"
+      - "schema/**"
+    blast-radius: high
+
   # Plans and docs. No rules of their own (review scope is unchanged); this
   # surface exists so a plan or docs commit runs the few modules that read them
   # instead of the whole suite.
