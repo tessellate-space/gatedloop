@@ -535,6 +535,15 @@
    "positionals": [],
    "visibility": "public"
   },
+  "plan brief": {
+   "options": [
+    "--lens"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan check": {
    "options": [
     "--against",

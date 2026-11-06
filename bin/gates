@@ -3746,21 +3746,34 @@ def cmd_surfaces(m: dict, root: Path, args) -> int:
 # listed by `gates rules` for every diff whatever surfaces are hot (D2).
 BUILTIN_RULES_FILE = Path(__file__).resolve().parent.parent / "rules" / "loop-rules.md"
 BUILTIN_RULE_IDS = (f"{NAME}.test-quality",)
+# The plan loop's lenses (plan-preflight D6): shipped beside the loop rules,
+# resolved the same way, and covered by the same fail-loud check.
+BUILTIN_LENSES_FILE = BUILTIN_RULES_FILE.parent / "plan-lenses.md"
+BUILTIN_LENS_IDS = (f"{NAME}.implementability", f"{NAME}.zero-decision",
+                    f"{NAME}.blast-radius")
+
+
+def _builtin_file_error(path: Path, ids: tuple[str, ...], what: str) -> str | None:
+    """Why a shipped rules file can't be resolved, or None. A listed id whose
+    section is absent would have a reviewer cite a check it cannot read, so
+    both a missing file and a missing `### <id>` heading fail loud."""
+    try:
+        text = path.read_text()
+    except OSError as e:
+        return f"built-in {what} file not readable at {path} ({e.strerror})"
+    missing = [r for r in ids if r not in _heading_ids(text)]
+    if missing:
+        return (f"built-in {what} id(s) {', '.join(missing)} have no '### <id>' "
+                f"section in {path}")
+    return None
 
 
 def _builtin_rules_error() -> str | None:
-    """Why the built-in rules can't be resolved, or None. A listed id whose
-    section is absent would have review cite a rule it cannot read, so both
-    a missing file and a missing `### <id>` heading fail loud."""
-    try:
-        text = BUILTIN_RULES_FILE.read_text()
-    except OSError as e:
-        return f"built-in rules file not readable at {BUILTIN_RULES_FILE} ({e.strerror})"
-    missing = [r for r in BUILTIN_RULE_IDS if r not in _heading_ids(text)]
-    if missing:
-        return (f"built-in rule-id(s) {', '.join(missing)} have no '### <id>' "
-                f"section in {BUILTIN_RULES_FILE}")
-    return None
+    return _builtin_file_error(BUILTIN_RULES_FILE, BUILTIN_RULE_IDS, "rules")
+
+
+def _builtin_lenses_error() -> str | None:
+    return _builtin_file_error(BUILTIN_LENSES_FILE, BUILTIN_LENS_IDS, "lenses")
 
 
 def _project_test_rule_ids(m: dict, root: Path) -> list[str]:
@@ -9722,8 +9735,75 @@ def _plan_status(m: dict, root: Path, args) -> int:
     return 0
 
 
+def _plan_brief_tier(m: dict, root: Path, change: str) -> str:
+    """The tier whose lenses the brief lists: the open round's, which
+    `gates plan round` computed with the classifier run; before a round, the
+    tier computed without running a declared classifier (a brief costs no
+    call)."""
+    open_round = _plan_open_round(_plan_rows(root, change))
+    if open_round and open_round.get("tier") in PLAN_TIERS:
+        return open_round["tier"]
+    return _plan_tier_doc(m, root, change, run_classifier=False)["tier"]
+
+
+def _plan_artifacts(root: Path, change: str) -> list[str]:
+    change_dir = root / "openspec" / "changes" / change
+    out = [f"openspec/changes/{change}/{n}" for n in ("proposal.md", "design.md", "tasks.md")
+           if (change_dir / n).is_file()]
+    if (change_dir / "specs").is_dir():
+        out += [f.relative_to(root).as_posix()
+                for f in sorted((change_dir / "specs").rglob("*.md"))]
+    return out
+
+
+def _plan_brief(m: dict, root: Path, args) -> int:
+    """`gates plan brief <change> [--lens <id>]` (D6): the lenses the tier
+    runs, or one lens's brief for the plan-review agent."""
+    change = args.change
+    _plan_require_change(root, change)
+    err = _builtin_lenses_error()
+    if err:
+        print(f"gatedloop: {err} — the plugin install is incomplete; reinstall it",
+              file=sys.stderr)
+        return 1
+    if args.lens is None:
+        tier = _plan_brief_tier(m, root, change)
+        print(f"plan brief: {change} — tier {tier}")
+        print("Lenses this tier runs (one plan-review run each):")
+        for c in _plan_checkers(tier):
+            if c.startswith("lens:"):
+                print(f"  - {c[len('lens:'):]}")
+        print(f"\nResolve lens ids against: {BUILTIN_LENSES_FILE}")
+        print(f"Brief one lens: gates plan brief {change} --lens <id>")
+        return 0
+    if args.lens not in BUILTIN_LENS_IDS:
+        print(f"gatedloop: unknown lens '{args.lens}' — the lenses are "
+              f"{', '.join(BUILTIN_LENS_IDS)}.", file=sys.stderr)
+        return 1
+    print(f"plan brief: {change}")
+    print(f"lens: {args.lens}")
+    print(f"Resolve against: {BUILTIN_LENSES_FILE}")
+    print("\nThe plan's artifacts:")
+    for a in _plan_artifacts(root, change):
+        print(f"  {a}")
+    named = list(_plan_named_paths(root, change))
+    named += [p for p in _plan_drift_named(root, change) if p not in named]
+    print("\nPaths the plan names (read only these, and only what a check needs):")
+    for p in named:
+        print(f"  {p} — {'exists' if _exists_at(root, 'HEAD', p) else 'absent'} at HEAD")
+    if not named:
+        print("  (none)")
+    if args.lens == f"{NAME}.blast-radius":
+        digest, _fits = _plan_digest(m, root, change)
+        print("\nAnswer every dimension; return only the schema/plan-tier.schema.json object.")
+        print(json.dumps({"digest": digest, "dimensions": _plan_effective_dimensions(m),
+                          "signals": digest["signals"], "floor": digest["floor"]}, indent=2))
+    return 0
+
+
 def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
+        "brief": _plan_brief,
         "check": _plan_check,
         "tier": _plan_tier,
         "digest": _plan_digest_cmd,
@@ -15999,6 +16079,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("plan", help="the plan preflight: check a plan, its tier and digest, its rounds and their record, and the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
+    sp_pb = plan_sub.add_parser("brief", help="the lenses the plan's tier runs; with --lens, that lens's brief for the plan-review agent: its rules path, the plan's artifacts, each named path at HEAD (blast-radius: the digest, dimensions, signals and floor as JSON)")
+    sp_pb.add_argument("change")
+    sp_pb.add_argument("--lens", metavar="ID", help="one lens: " + ", ".join(BUILTIN_LENS_IDS))
+    sp_pb.set_defaults(fn=cmd_plan)
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
     sp_pc.add_argument("--json", action="store_true", help="one JSON document: {change, preflight, tier, against, findings}")
