@@ -9611,6 +9611,117 @@ def _plan_resume(m: dict, root: Path, args) -> int:
     return 0
 
 
+def _plan_status_doc(m: dict, root: Path, change: str) -> dict:
+    """The plan loop's record, folded from its rows (D4): each loop and
+    round, the tier's layers, each checker's latest verdict and report,
+    every resume, and the current loop's state."""
+    rows = _plan_rows(root, change)
+    loops: list[dict] = []
+    cur = {"loop": 1, "resume": None, "rounds": [], "stalled": False}
+    loops.append(cur)
+    for r in rows:
+        if r.get("gate") == PLAN_ROUND_EVENT:
+            if r.get("outcome") == "resume":
+                cur = {"loop": r.get("loop"), "resume": r.get("detail"), "rounds": [],
+                       "stalled": False}
+                loops.append(cur)
+            elif r.get("outcome") == "stalled":
+                cur["stalled"] = True
+            elif r.get("outcome") == "open":
+                cur["rounds"].append({
+                    "round": r.get("round"), "plan_sha": r.get("plan_sha"),
+                    "tasks_sha": r.get("tasks_sha"), "floor": r.get("floor"),
+                    "classifier": r.get("classifier"), "override": r.get("override"),
+                    "tier": r.get("tier"), "checkers": {}})
+        elif r.get("gate") == PLAN_REVIEW_EVENT and cur["rounds"]:
+            rnd = cur["rounds"][-1]
+            if r.get("round") == rnd["round"]:
+                rnd["checkers"][r.get("checker")] = {"verdict": r.get("verdict"),
+                                                     "report": r.get("report"),
+                                                     "snapshot": r.get("snapshot")}
+    last = loops[-1]
+    green_round = None
+    for lp in loops:
+        for rnd in lp["rounds"]:
+            if all((rnd["checkers"].get(c) or {}).get("verdict") == "clean"
+                   for c in _plan_checkers(rnd.get("tier") or "light")):
+                green_round = rnd
+    latest = last["rounds"][-1] if last["rounds"] else None
+    verdicts = ({c: (latest["checkers"].get(c) or {}).get("verdict")
+                 for c in _plan_checkers(latest.get("tier") or "light")} if latest else {})
+    if any(c.get("verdict") == "question" for rnd in last["rounds"]
+           for c in rnd["checkers"].values()):
+        state = "question"
+    elif latest and all(v == "clean" for v in verdicts.values()):
+        state = "green"
+    elif last["stalled"]:
+        state = "stalled"
+    elif latest and latest.get("tier") == "light" and "findings" in verdicts.values():
+        state = "amended"
+    else:
+        state = "open"
+    digests = _plan_digests(root, change)
+    moved = bool(green_round) and (green_round["plan_sha"], green_round["tasks_sha"]) != (
+        digests["plan_sha"], digests["tasks_sha"])
+    return {"change": change, "state": state, "loops": loops,
+            "digests": digests, "green_round_moved": moved,
+            "snapshot": {"branch": _preflight_branch(change),
+                         "tip": _preflight_snapshot_tip(root, change)}}
+
+
+def _short(sha) -> str:
+    return sha[:12] if isinstance(sha, str) else "—"
+
+
+def _plan_status_lines(doc: dict, markdown: bool) -> list[str]:
+    b = "- " if markdown else "  "
+    out = []
+    if markdown:
+        out.append(f"### Plan preflight: `{doc['change']}` — **{doc['state']}**")
+        out.append("")
+    else:
+        out.append(f"plan loop: {doc['change']}   state: {doc['state']}")
+    for lp in doc["loops"]:
+        head = f"loop {lp['loop']}" + (f" (resumed: {lp['resume']})" if lp["resume"] else "")
+        if lp["stalled"]:
+            head += " — stalled"
+        out.append(("**" + head + "**") if markdown else head)
+        for rnd in lp["rounds"]:
+            c = rnd.get("classifier") or {}
+            o = rnd.get("override") or {}
+            layers = (f"floor {rnd.get('floor')}, classifier {c.get('provider')}"
+                      + (f" ({c.get('cause')})" if c.get("cause") else "")
+                      + (f" → {c.get('combined')}" if c.get("combined") else "")
+                      + (f", {o.get('source')}" if o.get("source") else "")
+                      + (f" — {o.get('reason')}" if o.get("reason") else "")
+                      + f", tier {rnd.get('tier')}")
+            out.append(f"{b}round {rnd['round']} — plan {_short(rnd.get('plan_sha'))}, tasks "
+                       f"{_short(rnd.get('tasks_sha'))} — {layers}")
+            for checker in _plan_checkers(rnd.get("tier") or "light"):
+                v = rnd["checkers"].get(checker)
+                verdict = v["verdict"] if v else "not run"
+                report = f" ({v['report']})" if v and v.get("report") else ""
+                out.append(("  - " if markdown else "      ") + f"{checker}: {verdict}{report}")
+    if doc["green_round_moved"]:
+        out.append("The plan's digests have moved since its last green round: that round "
+                   "checked other content.")
+    snap = doc["snapshot"]
+    out.append(f"Preflight snapshot: `{snap['branch']}` at {_short(snap['tip'])}" if markdown
+               else f"preflight snapshot: {snap['branch']} at {_short(snap['tip'])}")
+    return out
+
+
+def _plan_status(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    doc = _plan_status_doc(m, root, change)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        print("\n".join(_plan_status_lines(doc, markdown=args.markdown)))
+    return 0
+
+
 def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
         "check": _plan_check,
@@ -9620,6 +9731,7 @@ def cmd_plan(m: dict, root: Path, args) -> int:
         "round": _plan_round,
         "record": _plan_record,
         "resume": _plan_resume,
+        "status": _plan_status,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -15915,6 +16027,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_pu.add_argument("change")
     sp_pu.add_argument("--reason", required=True, help="what the human decided")
     sp_pu.set_defaults(fn=cmd_plan)
+    sp_pz = plan_sub.add_parser("status", help="the plan loop's record from its rows: each loop and round, the tier's layers, each checker's verdict, every resume, the state")
+    sp_pz.add_argument("change")
+    fmt = sp_pz.add_mutually_exclusive_group()
+    fmt.add_argument("--json", action="store_true", help="one JSON document")
+    fmt.add_argument("--markdown", action="store_true", help="a block for the plan PR's body")
+    sp_pz.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)

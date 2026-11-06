@@ -611,6 +611,16 @@
    ],
    "visibility": "public"
   },
+  "plan status": {
+   "options": [
+    "--json",
+    "--markdown"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan tier": {
    "options": [
     "--json"
