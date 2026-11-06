@@ -308,45 +308,45 @@ The built-in lenses `gatedloop.implementability`, `gatedloop.zero-decision` and 
 
 ### Requirement: Preflight output persists across rounds
 
-`gates tests brief <change> --preflight` SHALL print the preflight store as the place to write, and list the stale tasks: those whose digest changed or is absent, and those holding a path that a stale task holds. A clean `--dry-run` SHALL write the current digests.
+The preflight store `.gatedloop/out/preflight/<change>/` SHALL hold the held tests, per-task digests and each round's reports, ignored by git and kept by log rotation. `gates tests brief <change> --preflight` SHALL print the store as the place to write, and list the stale tasks: those whose digest changed or is absent, and those holding a path that a stale task holds. A clean `--dry-run` SHALL write the current digests.
 
 #### Scenario: An amendment to one task line
 
 - **WHEN** after a clean dry run the planner amends only task 2.1's line
 - **THEN** the next `gates tests brief <change> --preflight` lists 2.1 as stale and every other task as kept
 
-### Requirement: The preflight store is committed with the plan
+#### Scenario: The store stays out of git
 
-The preflight store `openspec/changes/<change>/preflight/` SHALL hold the held tests in the holding area's layout and suffix, the per-task digests, the classifier verdict and each round's reports, and SHALL be committed on the plan branch with the plan.
+- **WHEN** `gates tests brief <change> --preflight` runs in a repository with no `.gitignore` entry for `.gatedloop/out/`
+- **THEN** a file written in the store does not appear in `git status`
 
-#### Scenario: The store travels with the plan branch
+### Requirement: The preflight store is saved to its own branch
 
-- **WHEN** a round's store is committed on `plan/x` and pushed, and the branch is checked out in a fresh clone
-- **THEN** `gates tests brief x --preflight` in that clone lists as kept every task the first clone's last clean dry run covered
+`gates plan save <change>` SHALL snapshot the preflight store into a new commit on `gatedloop/preflight/<change>` whose tree holds only the store, parented on the branch's previous tip, without touching the working tree or the index.
 
-#### Scenario: Committing the store is planning-grade
+#### Scenario: Saving leaves the plan branch alone
 
-- **WHEN** the planner commits the store together with the plan and the change's ledger on `plan/x`
-- **THEN** both commit hooks allow it as planning-grade, with no ci run
+- **WHEN** the planner runs `gates plan save x` on `plan/x` with a populated store
+- **THEN** `gatedloop/preflight/x` gains one commit whose tree is the store, and `git status` and `plan/x`'s tip are unchanged
 
-#### Scenario: The store archives with its change
+#### Scenario: The plan PR carries no held test
 
-- **WHEN** the change is archived
-- **THEN** its `preflight/` directory is under the archived change's directory
+- **WHEN** a full loop ends green and the plan is committed
+- **THEN** no path in the plan commit's diff is a held test or a store file
 
-### Requirement: The preflight store's shape is checked
+### Requirement: The preflight store is restored from its branch
 
-`gates plan check` SHALL report as a finding each path under `openspec/changes/<change>/preflight/` outside the store's layout: `authored/<N.M>/` files with the `.authored` suffix or named `CHARACTERIZATION` or `NO-TESTS`, `digests.json`, `classifier.json`, and `reports/*.md`.
+`gates plan restore <change> [--from <ref>]` SHALL rebuild the store from the snapshot branch, and SHALL refuse to overwrite a store that differs from it unless given `--force`.
 
-#### Scenario: A stray file in the store
+#### Scenario: Resuming on another machine
 
-- **WHEN** `openspec/changes/x/preflight/notes.txt` exists
-- **THEN** `gates plan check x` exits 1 naming that path
+- **WHEN** the snapshot branch is pushed, and a fresh clone fetches it and runs `gates plan restore x`
+- **THEN** `gates tests brief x --preflight` in the clone lists as kept every task the last clean dry run covered
 
-#### Scenario: OpenSpec accepts the store
+#### Scenario: A differing store is not overwritten
 
-- **WHEN** a change holds a populated `preflight/` directory
-- **THEN** `openspec validate <change> --strict` and `openspec status --change <change>` report what they report without it
+- **WHEN** the store holds a file the snapshot lacks and `gates plan restore x` runs without `--force`
+- **THEN** it exits 1 naming that file and changes nothing
 
 ### Requirement: A preflight never touches the real holding area
 
@@ -499,17 +499,3 @@ In preflight mode the test author SHALL write only to the store that `gates test
 
 - **WHEN** on the change branch `x`, the holding area is staged for the authoring commit
 - **THEN** `gates tests check` gives the verdict it gives today
-
-### Requirement: A preflight test is never committed runnable
-
-`gates tests check` SHALL refuse, on any branch, a staged file under `openspec/changes/<change>/preflight/authored/` whose name lacks the `.authored` suffix and is not `CHARACTERIZATION` or `NO-TESTS`, naming each path and the name it should have.
-
-#### Scenario: An unsuffixed test in the store
-
-- **WHEN** on `plan/x`, `openspec/changes/x/preflight/authored/1.1/tests/a_test.py` is staged
-- **THEN** `gates tests check` exits 1 naming it and `tests/a_test.py.authored`, and both commit hooks deny the commit
-
-#### Scenario: A suffixed store
-
-- **WHEN** on `plan/x`, the store's held files all carry the suffix
-- **THEN** this refusal does not fire
