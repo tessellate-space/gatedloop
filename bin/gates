@@ -8948,6 +8948,43 @@ def _plan_run_classifier(root: Path, cmd: str, stdin: bytes, timeout: int) -> tu
     return None, verdict
 
 
+def _plan_combine(m: dict, verdict: dict) -> dict:
+    """Combine a verdict deterministically (D3): `full` when its own tier is
+    `full` or any evidence item for a known, enabled dimension meets its
+    threshold (`probability`/`score` at or above, `choice` equal to the
+    raising option), `light` otherwise. An unknown dimension is recorded and
+    ignored; a dimension turned `off` is ignored. Confidences never lower
+    anything: they are recorded as evidence."""
+    shipped = {d["id"] for d in _plan_tier_dimensions()}
+    enabled = {d["id"]: d for d in _plan_effective_dimensions(m)}
+    raised_by = "tier" if verdict.get("tier") == "full" else None
+    unknown: list[str] = []
+    for e in verdict.get("evidence") or []:
+        did, v = e.get("dimension"), e.get("value")
+        if did not in shipped:
+            if did not in unknown:
+                unknown.append(did)
+            continue
+        d = enabled.get(did)
+        if d is None or raised_by:
+            continue
+        if d["kind"] == "choice":
+            meets = v == d.get("raises")
+        else:
+            meets = _is_number(v) and v >= d["threshold"]
+        if meets:
+            raised_by = did
+    return {"combined": "full" if raised_by else "light", "raised_by": raised_by,
+            "unknown_dimensions": unknown}
+
+
+def _plan_apply_verdict(m: dict, block: dict, verdict: dict, provider: str) -> dict:
+    block.update(provider=provider, cause=None, tier=verdict["tier"],
+                 confidence=verdict.get("confidence"), reason=verdict.get("reason"),
+                 evidence=verdict.get("evidence", []), **_plan_combine(m, verdict))
+    return block
+
+
 def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
                            run: bool = True) -> dict:
     """The classifier layer (D3), on the digest at `classifier-input-limit`:
@@ -8958,7 +8995,8 @@ def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
     s = _plan_preflight_settings(m)
     digest, fits = _plan_digest(m, root, change, s["classifier-input-limit"])
     block = {"provider": "builtin", "cause": None, "tier": None, "confidence": None,
-             "reason": None, "evidence": [], "combined": None,
+             "reason": None, "evidence": [], "combined": None, "raised_by": None,
+             "unknown_dimensions": [],
              "trimmed": digest["trimmed"],
              "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
     if not fits:
@@ -8980,10 +9018,7 @@ def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
     if cause:
         block["cause"] = cause
         return block
-    block.update(provider="external", tier=verdict["tier"],
-                 confidence=verdict.get("confidence"), reason=verdict.get("reason"),
-                 evidence=verdict.get("evidence", []), combined=verdict["tier"])
-    return block
+    return _plan_apply_verdict(m, block, verdict, "external")
 
 
 def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False,
@@ -9030,7 +9065,11 @@ def _plan_tier(m: dict, root: Path, args) -> int:
     print(f"floor: {doc['floor']}")
     c = doc["classifier"]
     print(f"classifier: {c['provider']}" + (f", cause: {c['cause']}" if c.get("cause") else "")
-          + (f", verdict: {c['tier']}" if c.get("tier") else ""))
+          + (f", verdict: {c['tier']}" if c.get("tier") else "")
+          + (f", combined: {c['combined']}" if c.get("combined") else "")
+          + (f" (raised by {c['raised_by']})" if c.get("raised_by") else ""))
+    if c.get("unknown_dimensions"):
+        print(f"  ignored unknown dimension(s): {', '.join(c['unknown_dimensions'])}")
     if c.get("trimmed"):
         print("  digest trimmed to fit classifier-input-limit: "
               + ", ".join(f"{t['section']} -{t['lost']}" for t in c["trimmed"]))
