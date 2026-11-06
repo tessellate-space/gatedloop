@@ -121,11 +121,15 @@ LLM; the *selection* does not.
       per task: red (gates run unit) → green → gate → atomic commit
       gate = gates run ci green AND convention-review agent clean
       completion: gates run verify → gates run live-check (blocking) → squash-merge
-/gatedloop:propose   → /opsx:propose authors; this adds the plan branch, commit and PR
+/gatedloop:propose   → /opsx:propose authors; this adds the plan branch, the plan loop
+                      (gates plan check always; under loop.plan-preflight: run, rounds of
+                      plan review → preflight test author → dry-run handoff → authored-set review),
+                      commit and PR
 /gatedloop:merge     → gates merge <change>: prove the head, squash, ci, confirm, archive, one push
                       (pull-request mode: publish gatedloop/* statuses and hand the PR to the forge)
 /gatedloop:upgrade   → walk the settings a new plugin version asks this project to decide
-/gatedloop:planner   → propose in its own worktree, send `gates handoff`'s payload; never implements
+/gatedloop:planner   → propose in its own worktree, run the plan loop, send `gates handoff`'s payload;
+                      never implements
 /gatedloop:orchestrator → verify each handoff, dispatch lanes, merge and archive
 /gatedloop:archive   → delegates to /opsx:archive, then commits the move
 ```
@@ -142,6 +146,15 @@ LLM; the *selection* does not.
   is resumable because **done ⟺ committed** (a task's `[x]` flip is committed with
   its code), it always halts with a clean tree at a task boundary, and it **stops
   before the merge**.
+- `agents/plan-review.md` (Opus, read-only) reads a plan cold before approval, through one
+  lens per run (`rules/plan-lenses.md`, selected by `gates plan brief`), and reads only the
+  code the brief names; every finding cites `<lens-id> #<n>`. Its `gatedloop.blast-radius`
+  lens returns only the tier JSON (`schema/plan-tier.schema.json`). The tier's floor is
+  computed in `bin/gates` (`gates plan tier`); a classifier, built-in or an adopter's bound
+  command, may only raise it. The loop's rows (`plan-round`, `plan-review`) are a record
+  and never gate approval, handoff or merge. Its held tests live in the ignored
+  `.gatedloop/out/preflight/<change>/`, snapshotted to `gatedloop/preflight/<change>` by
+  `gates plan save`.
 - `agents/convention-review.md` (Sonnet, read-only) is deliberately cheap: diff →
   `gates rules` → read only those rules → judge. Under ~10 tool calls; every
   finding cites its rule-id.
@@ -227,7 +240,7 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.11.1. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.12.0. Read a change's
 `design.md` before touching the area it covers:
 
 - `review-provenance`: a `SubagentStop` hook records how each convention review ran, review rows

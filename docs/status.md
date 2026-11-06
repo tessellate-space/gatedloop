@@ -28,6 +28,8 @@ mostly one host: Claude Code, locally and on the web.
 | `/gatedloop:planner` and `/gatedloop:orchestrator` | not yet | new in 0.10.0; the planner/orchestrator split they encode has run by hand, as in [`topology.md`](./topology.md) |
 | The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13 on OpenSpec 1.14.3, plus one Ubuntu, Python 3.13 leg on OpenSpec 1.16.0; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
 | A task's `rewrites:` clause (`gates tests show --diff`) | not yet | new in 0.11.1; covered by the `unittest` suite only, no real change has declared one |
+| `loop.ci-at: ready` and `loop.ci-scope: union` | not yet | new in 0.12.0; covered by the `unittest` suite only, no real change has run under either |
+| The plan loop (`loop.plan-preflight`, `gates plan …`, the `plan-review` agent) | not yet | new in 0.12.0; the shim side is covered by the `unittest` suite, including an end-to-end fixture loop, and the prompts have not run a real plan; tessellate-space's interim preflight is what it replaces |
 | The READY report's gate block (`gates ledger record-ready`) | lightly | this repository's own changes since `loop-hardening` |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
@@ -108,6 +110,21 @@ existing test, and the rewrite is locked as the task's authored test. An existin
 a task must change but the plan doesn't name is still unreadable to the author, and
 stays a blocking question.
 
+### The plan loop's verdicts are judgements, recorded and never blocking — *shipped, opt-in*
+
+Since 0.12.0 (`plan-preflight`) `gates plan check` runs in every propose path and reports
+what the handoff would refuse after approval. Under `loop.plan-preflight: run` the
+planner also loops plan review, the preflight test author, a dry-run handoff and the
+authored-set review until the plan is green, asks a human, or spends its round budget.
+Those verdicts are LLM judgements: they are recorded in the change's ledger and shown in
+the plan PR, and nothing in approval, handoff or merge reads them. The tier's floor reads
+the paths a plan names, so a plan that names fewer paths computes a lower floor; the
+implementability lens flags a task that changes code without naming it. Declaring an
+external classifier sends the plan digest to that provider. The preflight's held tests
+are not yet the handed-off ones: the test author runs again after approval until
+`approved-tests` lands, and the `gatedloop/preflight/<change>` branch is deleted by hand
+once the change is archived.
+
 ### A scoped `ci` or `unit` errs full on an unmatched path — *shipped*
 
 Before 0.10.0 a diff holding one surface's file and a file no surface matched ran
@@ -121,6 +138,13 @@ change's own `tasks.md` doesn't count either, so the tick every task commit stag
 no longer forces the full `ci`; in 0.10.0 it did, and the `openspec/**` remedy the
 0.10.0 docs suggested only added a second hot surface (#122). Another change's
 `tasks.md` is an ordinary path.
+
+Since 0.12.0 (`ci-at`) two opt-in keys narrow `ci` further without dropping the last
+word. `loop.ci-at: ready` gates a task commit on a green `unit` for its staged tree and
+runs the full `ci` once before READY and again at the merge; a commit on the merge
+target, a `plan/*` branch or a detached merge head still needs `ci`. `loop.ci-scope:
+union` runs the hot surfaces' own `ci` overrides when every hot surface declares one.
+An adopter on `ready` refreshes a copied git hook with `gates hook install`.
 
 ### The merge rechecks the plan approval, and some commands are now denied — *shipped*
 
