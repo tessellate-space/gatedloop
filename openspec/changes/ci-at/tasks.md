@@ -16,7 +16,7 @@
 
 - [x] 3.1 Under `ready`, make `gates ledger record-ready` refuse with exit 1, write no row, and name an unscoped `gates run ci` on the head unless `_ready_gates` would report `ci: pass`. Verify with tests: refused under `ready` with no full `ci` row, refused with only a scoped or union `ci` row, allowed after an unscoped green `ci` on the head (ledger-blind), and unchanged under `task` (row appended, `"ci": "fail"` printed) [oracle: unit]
 - [x] 3.2 Under `ready`, make `_GreenCiMatcher` also index green `unit` rows for `rows_for` (never for `has_unscoped`), as used by both `cmd_audit` and `_unrecorded_commits`. Verify with tests on real repositories: under `ready` a unit-gated task commit audited by the `Stop` hook before any full `ci` records no taint and no `vouched` row and is classified by session; under `task` the same commit taints; under `ready` a commit with no row taints until a READY `ci` vouches for it; a `unit` row never vouches for an ancestor; and `gates merge` step 1 on a branch no worktree holds names no unit-gated commit under `ready` [oracle: unit]
-- [ ] 3.3 Document in AUTOMATION.md (the audit layer) and SETUP.md (`loop.ci-at`) that under `ready` the audit accepts `unit` rows, that READY refuses without the full `ci`, and that the merge is unchanged. Verify `scripts/release docs` reports no gap [oracle: none]
+- [x] 3.3 Document in AUTOMATION.md (the audit layer) and SETUP.md (`loop.ci-at`) that under `ready` the audit accepts `unit` rows, that READY refuses without the full `ci`, and that the merge is unchanged. Verify `scripts/release docs` reports no gap [oracle: none]
 
 ## 4. The budget and the outcomes view (D5)
 

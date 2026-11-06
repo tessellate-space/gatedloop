@@ -387,6 +387,8 @@ loop:
 
 `ready` needs a global `gates.unit`. A surface-level `unit` override alone does not count: an unmatched path would select the absent global gate and leave no marker to commit on. `gates validate` fails on `ready` without one, naming the missing gate, and on any value other than `task` or `ready`, naming the key and both values.
 
+**READY, the audit and the merge under `ready`.** `gates ledger record-ready` refuses, exits 1 and writes no row until a green unscoped `ci` row names the head's tree (compared ledger-blind, so the run's own uncommitted row does not matter); a scoped or union-scoped `ci` does not count, and the refusal names `gates run ci` with nothing staged as the remedy. The `Stop` hook's audit accepts a green `unit` row for a commit's tree, so a unit-gated task commit is gated, not tainted and not `vouched`; a `unit` row never vouches for an ancestor, and a commit with neither row taints as before until the READY `ci` vouches for it or clears it. `gates merge` is unchanged: step 1 needs an unscoped `ci` marker on the head, which the READY `ci` already provides, and step 3 runs a full `ci` on the merged tree. Under `task` (or with the key absent) `record-ready` appends its row and reports `"ci": "fail"` as before.
+
 Change the key between changes, not mid-change. The audit reads the mode when it runs, so a change that flips from `ready` to `task` part-way taints its unit-gated commits until a green `ci` on the head clears them.
 
 ### Token usage: `usage` rows, `economics` and `loop.token-budget`

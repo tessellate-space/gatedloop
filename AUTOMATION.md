@@ -135,6 +135,17 @@ wall with one clearly-marked door that is then reported."
   sha but counts neither as an incident nor as individually gated; the cost is that a
   hook-slipping mid-branch commit a later full head `ci` covers is no longer counted as a
   taint.
+  **Under `loop.ci-at: ready`** (`ci-at` D4) the audit accepts what the commit hook
+  accepted: a green `unit` row for a commit's tree gates it as a green `ci` row does, so a
+  unit-gated task commit audited on a `Stop` before any full `ci` exists records no taint
+  and no `vouched` row, and is classified by its row's session (an agent's records
+  nothing, a human's a `human-commit`). The merge's read-only check of a branch no worktree
+  holds accepts the same rows. A `unit` row never vouches for an ancestor: only a green
+  unscoped `ci` on the head does, as before, and a commit with neither row still taints.
+  The mode is read when the audit runs, so flipping `ready` to `task` mid-change makes
+  unaudited unit-only commits taint until a green `ci` on the head clears them. READY is
+  where the full `ci` moves: `gates ledger record-ready` refuses (exit 1, no row) until a
+  green unscoped `ci` row names the head's tree. The merge is unchanged.
 - **Layer 4 is a documented adopter requirement**, not gatedloop code — for
   `integration.mode: pull-request`, the forge's own branch protection is the only thing
   covering `gh pr merge`; see `SETUP.md`'s "Branch protection is required for
