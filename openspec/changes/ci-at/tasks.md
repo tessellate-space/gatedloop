@@ -31,7 +31,7 @@
 
 ## 6. The prompts (D5, D7, D10)
 
-- [ ] 6.1 Make `skills/tdd-apply/SKILL.md` (5e, 5f, 5h, 4b's authoring commit, the sync route, the budget paragraph, 7.5 and the guardrail list) and `agents/tdd-implementer.md` (§2, §4 and §5) say: the per-task gate is the one `gates task start` names (`gates run ci`, or under `loop.ci-at: ready` `gates run unit` on the staged tree, with the review); under `ready`, run `gates run ci` with nothing staged before `gates ledger record-ready`, which refuses otherwise; and a red READY `ci` gets at most 2 focused fixes, then HALT `stalled`. Verify that the convention review of the `prompts` surface reports no `stack-agnostic-prompts` finding [oracle: none]
+- [x] 6.1 Make `skills/tdd-apply/SKILL.md` (5e, 5f, 5h, 4b's authoring commit, the sync route, the budget paragraph, 7.5 and the guardrail list) and `agents/tdd-implementer.md` (§2, §4 and §5) say: the per-task gate is the one `gates task start` names (`gates run ci`, or under `loop.ci-at: ready` `gates run unit` on the staged tree, with the review); under `ready`, run `gates run ci` with nothing staged before `gates ledger record-ready`, which refuses otherwise; and a red READY `ci` gets at most 2 focused fixes, then HALT `stalled`. Verify that the convention review of the `prompts` surface reports no `stack-agnostic-prompts` finding [oracle: none]
 
 ## 7. Adoption (D9)
 
