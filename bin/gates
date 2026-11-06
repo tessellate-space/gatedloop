@@ -8562,6 +8562,67 @@ def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> 
     return findings
 
 
+def _plan_drift_named(root: Path, change: str) -> list[str]:
+    """The paths the drift check watches (D11): backticked paths on the task
+    lines and in `design.md`, and every `rewrites:` clause, excluding the
+    change's own directory."""
+    change_dir = root / "openspec" / "changes" / change
+    own = f"openspec/changes/{change}/"
+    named: list[str] = []
+    texts: list[str] = []
+    for _tid, text, oracle in _task_lines(change_dir / "tasks.md"):
+        texts.append(text)
+        named.extend(_oracle_rewrites(oracle))
+    design = change_dir / "design.md"
+    if design.is_file():
+        texts.append(design.read_text())
+    for text in texts:
+        named.extend(_named_paths(text))
+    out: list[str] = []
+    for p in named:
+        if p not in out and not (p + "/").startswith(own) and not p.startswith(own):
+            out.append(p)
+    return out
+
+
+def _plan_drift_base(root: Path, change: str, ref: str) -> str | None:
+    """The plan's base for `--against <ref>` (D11): the latest commit in
+    `<ref>`'s history touching the change's directory when `<ref>` holds the
+    change, else `git merge-base HEAD <ref>`."""
+    rel = f"openspec/changes/{change}"
+    if _git(root, "cat-file", "-e", f"{ref}:{rel}").returncode == 0:
+        last = _git(root, "log", "-1", "--format=%H", ref, "--", rel + "/").stdout.strip()
+        if last:
+            return last
+    mb = _git(root, "merge-base", "HEAD", ref)
+    return mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else None
+
+
+def _plan_drift_findings(root: Path, change: str, ref: str, base: str) -> list[dict]:
+    """Each named path modified, deleted or renamed between the plan's base
+    and `<ref>` (D11). "Re-read this", not "this is wrong"."""
+    diff = _git(root, "diff", "--name-status", "-M", base, ref)
+    moved: list[tuple[str, str, str | None]] = []
+    for line in diff.stdout.splitlines():
+        parts = line.split("\t")
+        status = parts[0][:1]
+        if status == "M":
+            moved.append((parts[1], "modified", None))
+        elif status == "D":
+            moved.append((parts[1], "deleted", None))
+        elif status == "R" and len(parts) >= 3:
+            moved.append((parts[1], "renamed", parts[2]))
+    findings: list[dict] = []
+    for named in _plan_drift_named(root, change):
+        for path, how, new in moved:
+            if path == named or ("*" in named and fnmatch.fnmatch(path, named)):
+                findings.append(_plan_finding(
+                    "drift", None, path,
+                    f"{path} was {how}{f' to {new}' if new else ''} between the plan's base "
+                    f"{base[:12]} and {ref} — re-read it against the plan before the handoff"))
+    return findings
+
+
 def _plan_preflight_mode(m: dict) -> str:
     """The effective `loop.plan-preflight` mode: `run` or `skip` (D12),
     `skip` when absent."""
@@ -8572,13 +8633,17 @@ def _plan_preflight_mode(m: dict) -> str:
     return v if v in ("run", "skip") else "skip"
 
 
-def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None) -> dict:
+def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None,
+                    base: str | None = None) -> dict:
+    findings = _plan_check_findings(m, root, change, against or "HEAD")
+    if against and base:
+        findings += _plan_drift_findings(root, change, against, base)
     return {
         "change": change,
         "preflight": _plan_preflight_mode(m),
         "tier": None,
         "against": against,
-        "findings": _plan_check_findings(m, root, change, against or "HEAD"),
+        "findings": findings,
     }
 
 
@@ -8588,7 +8653,18 @@ def _plan_check(m: dict, root: Path, args) -> int:
         print(f"gatedloop: no change '{change}' under openspec/changes/ — nothing to check.",
               file=sys.stderr)
         return 1
-    doc = _plan_check_doc(m, root, change)
+    against = getattr(args, "against", None)
+    base = None
+    if against:
+        if not _ref_commit(root, against):
+            print(f"gatedloop: --against {against} does not name a commit.", file=sys.stderr)
+            return 1
+        base = _plan_drift_base(root, change, against)
+        if base is None:
+            print(f"gatedloop: no base for the plan against {against} — {against} does not hold "
+                  f"the change and shares no history with HEAD.", file=sys.stderr)
+            return 1
+    doc = _plan_check_doc(m, root, change, against, base)
     if args.json:
         print(json.dumps(doc, indent=2))
         return 1 if doc["findings"] else 0
@@ -14872,6 +14948,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
     sp_pc.add_argument("change")
     sp_pc.add_argument("--json", action="store_true", help="one JSON document: {change, preflight, tier, against, findings}")
+    sp_pc.add_argument("--against", metavar="REF", help="check existence at REF and report each path the plan names that moved between the plan's base and REF")
     sp_pc.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")

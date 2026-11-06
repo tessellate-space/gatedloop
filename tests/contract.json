@@ -525,6 +525,7 @@
   },
   "plan check": {
    "options": [
+    "--against",
     "--json"
    ],
    "positionals": [

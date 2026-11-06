@@ -2794,6 +2794,21 @@
     ],
     "required": false,
     "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "against",
+    "help": "check existence at REF and report each path the plan names that moved between the plan's base and REF",
+    "metavar": "REF",
+    "nargs": null,
+    "option_strings": [
+     "--against"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,
