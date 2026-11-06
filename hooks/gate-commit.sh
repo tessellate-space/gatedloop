@@ -112,9 +112,15 @@ if out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict
   # A ledger-grade commit stages only `.gatedloop/runs/**`: a ledger row
   # cannot change a test, so the lock has nothing to judge in it. Its usage
   # is still recorded; the staged row keeps the commit ledger-only.
-  if [ "$(cat "${verdict_file}" 2>/dev/null)" = "ledger" ]; then
+  verdict="$(cat "${verdict_file}" 2>/dev/null)"
+  if [ "${verdict}" = "ledger" ]; then
     record_usage
     exit 0
+  fi
+  # ci-at D3: a commit allowed on a `unit` marker (loop.ci-at: ready) says
+  # so, naming the mode; a `ci`-marker commit stays silent, as before.
+  if [ "${verdict}" = "unit" ]; then
+    echo "${out}"
   fi
   # split-test-author D4: the authored tests are locked wherever the marker
   # is checked -- a placed or held test edited, or no red run after
@@ -129,5 +135,5 @@ if out="$("${GATES}" discipline check-commit "${tree}" --verdict-file "${verdict
 fi
 
 echo "${out}" >&2
-echo "gatedloop: commit denied in '${resolved_repo}' — run \`gates run ci\` and stage exactly what it tested, then commit again." >&2
+echo "gatedloop: commit denied in '${resolved_repo}' — run the gate named above, then stage exactly what it tested and commit again." >&2
 exit 2
