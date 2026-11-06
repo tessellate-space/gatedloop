@@ -90,15 +90,44 @@ A small change should not pay for the whole loop. The depth must not be the agen
 A middle tier (for example, full without the test author) was considered and rejected for now. Most of the field defects that only the author's run catches are the tag, characterization and rewrite refusals (#110 #112 #122 #123 #128 #130). Those concentrate in exactly the changes that a full floor already selects: changes that modify existing behaviour, or that span several surfaces. A third tier would add a threshold to calibrate without evidence that it catches anything the other two miss.
 
 **Layer 1: the floor, computed in code.** The floor is `full` when any one signal is high, and `light` otherwise:
-1. **Tasks:** the number of task lines in `tasks.md` is at least `full-at.tasks` (default 8).
+1. **Tasks:** the number of task lines in `tasks.md` is at least `full-at.tasks` (default 20). This is a size backstop, not a risk signal (see "Calibration" below).
 2. **Named files:** the number of repository paths the plan names is at least `full-at.files` (default 12). The paths come from `_named_paths` over the proposal, the design and the task lines, excluding the change's own directory.
 3. **Surfaces:** the number of surfaces hot for those paths (`hot_surfaces`) is at least `full-at.surfaces` (default 2).
 4. **Existing requirements:** a spec delta of the change has a `## MODIFIED Requirements`, `## REMOVED Requirements` or `## RENAMED Requirements` section.
-5. **High blast radius:** a hot surface (as in 3) declares `blast-radius: high`. This is also how a **public contract** reaches the floor. What counts as a project's public contract is the adopter's to say, so the adopter marks the surface that covers it. This repository marks a `contract` surface over `tests/contract.json`, `docs/stability.md` and `schema/**` (task 4.3).
+5. **Costly oracle (adopter-declared, off by default):** any task's oracle tag names a gate listed in `full-at.oracles` (default: empty), or, when that list is non-empty, carries a `rewrites:` clause. Gate names are the adopter's, so the shim cannot know which gate is an end-to-end one; the adopter lists its costly gates (for example `full-at.oracles: [e2e]`). Read from the tags the plan already has, so it is deterministic and free.
+6. **High blast radius:** a hot surface (as in 3) declares `blast-radius: high`. This is also how a **public contract** reaches the floor. What counts as a project's public contract is the adopter's to say, so the adopter marks the surface that covers it. This repository marks a `contract` surface over `tests/contract.json`, `docs/stability.md` and `schema/**` (task 4.3).
 
 **Reach is left out.** Counting how many modules import a named file would need each language's import syntax. That is a stack fact, so by the rejection test it is not the shim's. A project that wants reach can bind it through the classifier slot below.
 
-**Why these defaults.** Eight tasks is about two task groups, which is where a task needing a later task's artifact (#133) becomes possible at all. Twelve named files, or two surfaces, is where a plan's claims about the code span parts of the tree that the planner did not write together. Changing an existing requirement means existing tests pin the old behaviour, so the plan needs `rewrites:` clauses and `characterization` tags: that is the family of handoff refusals in the field report. Blast radius is the adopter's own word for "important", so the shim does not guess it. A one-surface, additive change of up to seven tasks gets a light floor, and its likeliest defect, a wrong claim about the code (#114 to #127), is the implementability lens's job. The thresholds are not calibrated on field data. That is why they are overridable, and why every round records its signals, so a later change can calibrate them from the rows.
+**Calibration (recorded 2026-11-06).** The maintainer judged a task floor of 8 too low, and the field data agrees:
+
+| | gatedloop (67 archived changes) | tessellate-space (266 changes) |
+|---|---|---|
+| median tasks | 10 | 8 |
+| p75 | 17 | 13 |
+| p90 | 27 | 20 |
+| share at 8 or more tasks | 64 % | 55 % |
+
+A floor of 8 would have sent most changes to `full`. Task count also barely predicts which plans fail. tessellate-space's amendment-after-approval rate by task count (from `amend <change>` commit subjects, which undercount the history before November):
+
+| tasks | 1–3 | 4–7 | 8–11 | 12–15 | 16–23 | 24+ |
+|---|---|---|---|---|---|---|
+| changes | 30 | 91 | 65 | 33 | 26 | 21 |
+| amended | 20 % | 5 % | 13 % | 6 % | 15 % | 14 % |
+
+The smallest plans are amended most often, and their failures were end-to-end and test mechanics (`staged-edits-are-visible`: 4 tasks, 3 amendments), not size. So task count is demoted to a size backstop at roughly the p90 (20).
+
+Three oracle signals were then tested on the 33 tessellate-space changes whose tasks carried oracle tags at approval (the other 233 predate tags and are excluded; 17 of the 33 were amended):
+
+| signal | amended, fired | not amended, fired |
+|---|---|---|
+| any gate other than `unit` | 11/17 (65 %) | 9/16 (56 %) |
+| `rewrites:` alone | 3/17 | 5/16 |
+| `rewrites:` or the project's `e2e` gate | 10/17 (59 %) | 9/16 (56 %) |
+
+Read naively, none separates. But 7 of the 9 "not amended" hits for the last signal are plans never implemented, so "not amended" there means "not yet tested". Counting only implemented plans (n = 23), it fired on 7 of 14 amended plans (50 %) and on 2 of 9 that ran clean (22 %): about twice as often on amended plans, though it catches only half of them. The amended ones it caught include the costliest (`staged-edits-are-visible` and `workbench-modes-and-outline`, three amendments each). That is suggestive at a tiny n, not proof. So "any non-unit gate" is rejected as a default (it would send about 61 % of plans to `full` for no separation), and the end-to-end form ships as signal 5, **opt-in and empty by default**: an adopter declares its costly gates, and the round rows (D5) record every signal so a later change can calibrate it on real outcomes.
+
+**Why these defaults.** Twelve named files, or two surfaces, is where a plan's claims about the code span parts of the tree that the planner did not write together. Changing an existing requirement means existing tests pin the old behaviour, so the plan needs `rewrites:` clauses and `characterization` tags: that is the family of handoff refusals in the field report. Blast radius is the adopter's own word for "important", so the shim does not guess it. A one-surface, additive change of up to nineteen tasks, with no costly oracle the adopter declared, gets a light floor, and its likeliest defect, a wrong claim about the code (#114 to #127), is the implementability lens's job. The thresholds are not calibrated on field data. That is why they are overridable, and why every round records its signals, so a later change can calibrate them from the rows.
 
 **Layer 2: a classifier, which may only raise the tier.** A cheap judgement reads the plan digest and answers a set of narrow blast-radius questions. The shim combines the answers into `light` or `full`. It catches what no count sees: a two-task change to a data format other systems read, say. **The effective tier is max(floor, classifier).** The classifier can raise the tier and can never lower it, so whatever the classifier does, or fails to do, can only cost usage and never safety. That includes a fallback, a crash or a missing verdict.
 
@@ -274,10 +303,11 @@ loop:
   plan-preflight:
     mode: run                  # run | skip
     rounds: 3                  # the full tier's round budget, a positive integer
-    full-at:                   # positive integers; the D3 floor thresholds
-      tasks: 8
+    full-at:                   # the D3 floor thresholds (positive integers) and costly gates
+      tasks: 20
       files: 12
       surfaces: 2
+      oracles: []              # gate names whose tags make the floor full, e.g. [e2e]
     classifier: "<command>"    # optional; JSON on stdin, JSON on stdout (D3)
     classifier-timeout: 60     # seconds, a positive integer
     classifier-input-limit: 48000   # bytes of digest JSON, a positive integer (D3)

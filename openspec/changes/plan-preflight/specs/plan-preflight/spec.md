@@ -54,17 +54,32 @@ A checker's finding that only a human can answer SHALL be recorded with `gates p
 
 ### Requirement: The floor is computed from deterministic signals
 
-`gates plan tier <change>` SHALL compute a floor of `full` when any one signal is high, and `light` otherwise. The signals SHALL be: task lines at least `full-at.tasks` (default 8); named paths at least `full-at.files` (default 12); hot surfaces for the named paths at least `full-at.surfaces` (default 2); a spec delta with a MODIFIED, REMOVED or RENAMED requirements section; and a hot surface declaring `blast-radius: high`. It SHALL print each signal's value and whether it is high.
+`gates plan tier <change>` SHALL compute a floor of `full` when any one signal is high, and `light` otherwise. The signals SHALL be: task lines (default threshold 20); named paths (12); hot surfaces for those paths (2); a MODIFIED, REMOVED or RENAMED requirements section; an oracle tag naming a gate in `full-at.oracles` (empty by default), or with `rewrites:` when that list is non-empty; and a hot `blast-radius: high` surface. It SHALL print each signal's value and whether it is high.
 
 #### Scenario: A light floor
 
-- **WHEN** a plan has four tasks, names three files on one surface, has only ADDED requirements and no high-radius surface
+- **WHEN** a plan has four tasks tagged `[oracle: unit]`, names three files on one surface, has only ADDED requirements and no high-radius surface
 - **THEN** `gates plan tier` prints a `light` floor with every signal low
 
 #### Scenario: A modified requirement makes the floor full
 
 - **WHEN** a plan has two tasks and a spec delta with a `## MODIFIED Requirements` section
 - **THEN** `gates plan tier` prints a `full` floor naming that signal
+
+#### Scenario: A declared costly oracle makes the floor full
+
+- **WHEN** `.gates.yaml` declares `full-at.oracles: [e2e]` and a three-task plan has a task tagged `[oracle: e2e]`
+- **THEN** `gates plan tier` prints a `full` floor naming the oracle signal
+
+#### Scenario: No costly oracle is declared
+
+- **WHEN** `full-at.oracles` is absent and a three-task plan has a task tagged `[oracle: integration rewrites: tests/a.test.ts]`
+- **THEN** the oracle signal is low
+
+#### Scenario: Task count alone is a size backstop
+
+- **WHEN** a plan has twelve tasks, all tagged `[oracle: unit]`, on one surface, with only ADDED requirements
+- **THEN** `gates plan tier` prints a `light` floor
 
 #### Scenario: A high-radius surface makes the floor full
 
