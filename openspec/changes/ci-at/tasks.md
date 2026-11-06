@@ -21,7 +21,7 @@
 ## 4. The budget and the outcomes view (D5)
 
 - [x] 4.1 Make `_attempt_state` count, after the RED run, red rows of the commit gate (`unit` under `ready`) beside the oracle gate and `ci`, threading the mode through `_budget_refusal` and `failed_attempt_count`. Verify with tests: under `ready` a red `unit` after an `[oracle: integration]` task's RED run counts; under `task` it does not; an untagged task's red `unit` counts once; and a red READY `ci` with every task checked in HEAD is no task's attempt and is not refused [oracle: unit]
-- [ ] 4.2 Under `ready`, make `gates stats --outcomes` count a restart as recovered on a green `unit` of the task followed by its commit, with `task` behaviour unchanged. Verify with tests for both modes [oracle: unit]
+- [x] 4.2 Under `ready`, make `gates stats --outcomes` count a restart as recovered on a green `unit` of the task followed by its commit, with `task` behaviour unchanged. Verify with tests for both modes [oracle: unit]
 - [ ] 4.3 Update SETUP.md's retry-budget section and the `loop.attempts` description in `schema/gates.schema.json` to say the commit gate's red runs count under `ready` and the READY `ci` is change-level. Add a `docs/candidates.md` entry for a code-enforced budget on the READY `ci`. Verify `gates validate` and `scripts/release docs` pass [oracle: none]
 
 ## 5. Union-scoped ci (D8)

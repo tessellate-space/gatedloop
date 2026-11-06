@@ -8454,7 +8454,8 @@ def _outcomes_utc(dt):
     return dt.astimezone(datetime.timezone.utc)
 
 
-def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -> dict:
+def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None,
+                       ci_at: str = "task") -> dict:
     """Pure (design D7): one change's parsed ledger rows in, its outcome out.
     No I/O, no git, no clock. `terminal` is `merged` if any `merge` row;
     else `halted` if the last `halt` follows the last `task-start` in file
@@ -8570,7 +8571,7 @@ def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -
     for r in rows:
         if r.get("gate") == TEST_DEFECT_EVENT:
             test_defects_by_kind[test_defect_kind(r)] += 1
-    restarts, restart_recovered = _restart_outcomes(rows)
+    restarts, restart_recovered = _restart_outcomes(rows, ci_at)
     return {
         "restarts": restarts,
         "restart_recovered": restart_recovered,
@@ -8590,11 +8591,13 @@ def outcomes_from_rows(rows: list[dict], acceptance_policy: str | None = None) -
     }
 
 
-def _restart_outcomes(rows: list[dict]) -> tuple[int, int]:
+def _restart_outcomes(rows: list[dict], ci_at: str = "task") -> tuple[int, int]:
     """retry-budget D6: `(restarts, recovered)`. A restart recovered when its
     task reached a green `ci` after it with no `halt` of that task in between
-    (and before the task's next restart). A restart is never an intervention:
-    no human acted, so it is counted here and nowhere else."""
+    (and before the task's next restart); under `loop.ci-at: ready` a green
+    `unit`, the commit gate there, counts too (ci-at D5). A restart is never
+    an intervention: no human acted, so it is counted here and nowhere else."""
+    green_gates = ("ci", "unit") if ci_at == "ready" else ("ci",)
     restarts = recovered = 0
     for i, r in enumerate(rows):
         if r.get("gate") != "restart":
@@ -8607,7 +8610,7 @@ def _restart_outcomes(rows: list[dict]) -> tuple[int, int]:
             g = later.get("gate")
             if g in (HALT_EVENT, "restart"):
                 break
-            if g == "ci" and later.get("exit") == 0:
+            if g in green_gates and later.get("exit") == 0:
                 recovered += 1
                 break
     return restarts, recovered
@@ -9026,7 +9029,8 @@ def _outcomes_format_human(doc: dict, show_aggregate: bool,
 
 
 def _outcomes_report(root: Path, changes: list[str], as_json: bool,
-                     show_aggregate: bool, acceptance_policy: str | None = None) -> int:
+                     show_aggregate: bool, acceptance_policy: str | None = None,
+                     ci_at: str = "task") -> int:
     """`gates stats --outcomes`: read and format only -- all the arithmetic
     is in `outcomes_from_rows` / `outcomes_aggregate`. JSON is one
     `sort_keys` document, always carrying `changes`, `aggregate` and
@@ -9035,7 +9039,7 @@ def _outcomes_report(root: Path, changes: list[str], as_json: bool,
     dq_total = {k: 0 for k in ("unparseable_lines",) + _OUTCOMES_DQ_KEYS}
     for name in changes:
         rows, skipped = _read_ledger_rows_and_skipped(root, name)
-        out = outcomes_from_rows(rows, acceptance_policy)
+        out = outcomes_from_rows(rows, acceptance_policy, ci_at)
         out["change"] = name
         out["data_quality"]["unparseable_lines"] = skipped
         for k in dq_total:
@@ -9099,7 +9103,7 @@ def cmd_stats(m: dict, root: Path, args) -> int:
         # rules as above; only reading and formatting differ.
         return _outcomes_report(
             root, changes, getattr(args, "json", False), getattr(args, "all", False),
-            _acceptance_policy(m),
+            _acceptance_policy(m), _ci_at_mode(m),
         )
 
     reports = [_stats_change_report(root, c, idle_gap_ms) for c in changes]
