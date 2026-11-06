@@ -35,7 +35,7 @@
 
 ## 7. Adoption (D9)
 
-- [ ] 7.1 Make the `surface-key` predicate read a dotted key as a path into each surface mapping, flat keys unchanged. Add the `ci-at` and `ci-scope` items (`since: 0.12.0`) to `adoption/catalog.json`, shaped as in D9. Verify with adoption tests through `gates adoption status`: each item listed on 0.12.0 while its key is absent, not listed on 0.11.1 or once declared, `ci-scope` listed only when a surface declares `gates.ci`, each answer recordable, and a flat `live-check` predicate behaving as before [oracle: unit]
+- [x] 7.1 Make the `surface-key` predicate read a dotted key as a path into each surface mapping, flat keys unchanged. Add the `ci-at` and `ci-scope` items (`since: 0.12.0`) to `adoption/catalog.json`, shaped as in D9. Verify with adoption tests through `gates adoption status`: each item listed on 0.12.0 while its key is absent, not listed on 0.11.1 or once declared, `ci-scope` listed only when a surface declares `gates.ci`, each answer recordable, and a flat `live-check` predicate behaving as before [oracle: unit]
 - [ ] 7.2 Name both keys in README.md (where it describes the loop's knobs and gate cost) and in SETUP.md's upgrading section. Verify `scripts/release docs` reports no gap [oracle: none]
 
 ## 8. Integration

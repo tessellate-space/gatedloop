@@ -1389,9 +1389,12 @@ def adoption_applies(predicate, facts: dict) -> bool:
         return predicate["glob"] in facts["existing_globs"]
     if kind == "surface-key":
         # Some `surfaces[]` entry declares the key, e.g. a per-surface live-check.
+        # A dotted key is a path into each surface (ci-at D9: `gates.ci`, a
+        # surface's `ci` override), walked as `_dotted_present` walks the
+        # manifest; a flat key reads as before.
         surfaces = facts["manifest"].get("surfaces")
         return isinstance(surfaces, list) and any(
-            isinstance(s, dict) and s.get(predicate["key"]) is not None for s in surfaces)
+            isinstance(s, dict) and _dotted_present(s, predicate["key"]) for s in surfaces)
     if kind == "any":
         return any(adoption_applies(sub, facts) for sub in predicate["of"])
     if kind == "git-hook-copy":

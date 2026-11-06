@@ -212,6 +212,34 @@
       "detector": {"kind": "decision-only"},
       "applies_when": {"kind": "manifest-key", "key": "loop.task-oracle"},
       "action": {"kind": "confirm", "detail": "In your own `openspec/config.yaml` `rules.tasks` (or the `Applies to: tasks` rule in your rules-doc, then `gates conventions sync`), replace the oracle-tag line with: \"End each task line with its oracle tag: `[oracle: <gate>]` (red first on that gate), `[oracle: <gate> characterization]` (green first) or `[oracle: none]` (no tests), where <gate> is a gate in .gates.yaml other than ci, live-check, eval and confirm. When a task changes behaviour an existing test pins, end its gate tag with `rewrites: <path>` for each such existing test file, comma-separated, as in `[oracle: unit rewrites: <path>]`.\" This is the adopter's own edit; gatedloop never makes it. A plan without the clause hashes and behaves exactly as before."}
+    },
+    {
+      "id": "ci-at",
+      "since": "0.12.0",
+      "what": "`loop.ci-at` chooses when the full, unscoped `ci` runs. `task` (the default) keeps a full `ci` before every task commit. `ready` gates a task commit on a change branch on a green `unit` for its staged tree plus the convention review, and moves the full `ci` to READY: `gates ledger record-ready` refuses until an unscoped `ci` passes on the head, and the merge still runs its full `ci`. `ready` needs a declared global `unit` gate. In the field report behind it, per-task full `ci` runs were about 70 % of `ci` time.",
+      "question": "When should the full `ci` run?",
+      "options": [
+        {"answer": "declined", "label": "Leave `loop.ci-at` unset: `task` applies, a full `ci` before every task commit (Recommended)"},
+        {"answer": "adopted", "value": "task", "label": "Set `ci-at: task` explicitly: keep a full `ci` per task"},
+        {"answer": "adopted", "value": "ready", "label": "Set `ci-at: ready`: task commits run `unit` (needs a global `gates.unit`), and the full `ci` moves to READY and the merge"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.ci-at"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.ci-at"}
+    },
+    {
+      "id": "ci-scope",
+      "since": "0.12.0",
+      "what": "`loop.ci-scope` decides what `ci` runs for a staged diff that hits two or more surfaces. `single` (the default) runs the global `ci`. `union` runs each hot surface's `ci` override instead, when every changed path is matched and every hot surface declares one; otherwise the global `ci` runs alone. A union run is scoped: it allows a task commit, never READY or the merge, which still need an unscoped `ci`.",
+      "question": "A surface here scopes `ci`. Should a diff spanning several such surfaces run their overrides instead of the global `ci`?",
+      "options": [
+        {"answer": "declined", "label": "Leave `loop.ci-scope` unset: `single` applies, a multi-surface diff runs the global `ci` (Recommended)"},
+        {"answer": "adopted", "value": "union", "label": "Set `ci-scope: union`: run the union of the hot surfaces' `ci` overrides when every one declares one"},
+        {"answer": "adopted", "value": "single", "label": "Set `ci-scope: single` explicitly"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.ci-scope"},
+      "applies_when": {"kind": "surface-key", "key": "gates.ci"},
+      "action": {"kind": "manifest-key", "key": "loop.ci-scope"}
     }
   ]
 }
