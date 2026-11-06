@@ -5492,7 +5492,7 @@ def cmd_audit(m: dict, root: Path, args) -> int:
         return 0  # not on a change branch — nothing to audit
     shas, head = _new_commits_to_audit(root, change)
     rows = _read_ledger_rows(root, change)
-    matcher = _GreenCiMatcher(root, rows)
+    matcher = _GreenCiMatcher(root, rows, _ci_at_mode(m))
     # escalation-outcomes D5: a commit is classified once, whichever row
     # recorded it — the SHA dedupe spans taints, interventions and
     # disclosures alike.
@@ -5549,11 +5549,15 @@ class _GreenCiMatcher:
     plumbing failure returns the raw tree, which can only miss (taint), never
     match falsely."""
 
-    def __init__(self, root: Path, rows: list[dict]):
+    def __init__(self, root: Path, rows: list[dict], ci_at: str = "task"):
+        # ci-at D4: under `loop.ci-at: ready` a green `unit` row also gates a
+        # commit (`rows_for`), as the commit hook allowed it; only `ci` rows
+        # ever vouch for an ancestor (`has_unscoped`).
+        gates_ = ("ci", "unit") if ci_at == "ready" else ("ci",)
         self._root = root
         self._by_raw: dict[str, list[dict]] = {}
         for r in rows:
-            if r.get("gate") == "ci" and r.get("exit") == 0 and r.get("tree"):
+            if r.get("gate") in gates_ and r.get("exit") == 0 and r.get("tree"):
                 self._by_raw.setdefault(r["tree"], []).append(r)
         self._by_norm: dict[str, list[dict]] | None = None
 
@@ -5577,7 +5581,8 @@ class _GreenCiMatcher:
         raw or ledger-blind (taint-preclear D1). Both sides are consulted: a
         raw hit that is only scoped must not hide an unscoped normalized one."""
         def unscoped(rs):
-            return any((r.get("scope") or "full") == "full" for r in rs)
+            return any(r.get("gate") == "ci" and (r.get("scope") or "full") == "full"
+                       for r in rs)
         if unscoped(self._by_raw.get(tree, [])):
             return True
         if not self._by_raw:
@@ -12946,17 +12951,19 @@ def _record_on_branch(root: Path, change: str, row: dict, message: str, step: in
             _git(root, "worktree", "prune")
 
 
-def _unrecorded_commits(root: Path, change: str, rows: list[dict]) -> list[str]:
+def _unrecorded_commits(root: Path, change: str, rows: list[dict],
+                        m: dict | None = None) -> list[str]:
     """The audit's verdict, read-only, for a branch no worktree has checked
     out: commits on `<change>` beyond the target whose tree no green-`ci`
-    row vouches for and that no earlier row already recorded."""
+    row (or, under `loop.ci-at: ready`, green-`unit` row) vouches for and
+    that no earlier row already recorded."""
     target, _reason = _resolve_merge_target(root)
     if target is None:
         return []
     out = _git(root, "rev-list", f"refs/heads/{change}", "--not", target)
     if out.returncode != 0:
         return []
-    matcher = _GreenCiMatcher(root, rows)
+    matcher = _GreenCiMatcher(root, rows, _ci_at_mode(m or {}))
     already = _existing_taint_shas(rows) | _existing_classified_shas(rows)
     bad = []
     for sha in reversed([s for s in out.stdout.splitlines() if s.strip()]):
@@ -13106,7 +13113,7 @@ def _merge_prove_head(m: dict, root: Path, change: str, require_acceptance: bool
     if _taint_unresolved(rows):
         problems.append(_taint_refusal(change, rows, root))
     elif lane is None:
-        unrecorded = _unrecorded_commits(root, change, rows)
+        unrecorded = _unrecorded_commits(root, change, rows, m)
         if unrecorded:
             problems.append(
                 f"gatedloop: change '{change}' has commit(s) with no green-ci record: "
