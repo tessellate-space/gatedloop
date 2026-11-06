@@ -8956,11 +8956,17 @@ def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
     raise the tier. `run=False` (`gates plan check`, which writes nothing)
     reports a declared command as not run."""
     s = _plan_preflight_settings(m)
-    digest, _fits = _plan_digest(m, root, change, s["classifier-input-limit"])
+    digest, fits = _plan_digest(m, root, change, s["classifier-input-limit"])
     block = {"provider": "builtin", "cause": None, "tier": None, "confidence": None,
              "reason": None, "evidence": [], "combined": None,
              "trimmed": digest["trimmed"],
              "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
+    if not fits:
+        # D3: the signals, floor, paths and spec headers alone are over the
+        # limit. The most a classifier could do is raise the tier to full, so
+        # full is taken with no call and no built-in fallback.
+        block.update(provider="skipped", cause="digest over limit", combined="full")
+        return block
     cmd = s["classifier"]
     if not cmd:
         block["cause"] = "none-declared"
