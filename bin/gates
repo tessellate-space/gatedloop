@@ -5189,6 +5189,17 @@ def cmd_ledger(m: dict, root: Path, args) -> int:
         # apart from the committed ledger alone.
         change = args.change
         head = _head_tree(root)
+        if _ci_at_mode(m) == "ready" and _ready_gates(m, root, change, head)["ci"] != "pass":
+            # ci-at D4: under `ready` task commits ran `unit`, so READY is
+            # where the full `ci` runs -- refused in code, not only reported.
+            print(
+                f"gatedloop: refusing to record '{change}' as ready — loop.ci-at: ready, and "
+                "no green unscoped `ci` row names the head's tree (a scoped or union "
+                "`ci` does not count). Run `gates run ci` with nothing staged on the head, "
+                "then record ready again. No row was written.",
+                file=sys.stderr,
+            )
+            return 1
         _append_ledger_row(root, {
             "ts": _now_iso(), "gate": READY_EVENT, "exit": 0, "duration_ms": 0,
             "change": change, "task": None,
