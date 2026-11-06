@@ -373,6 +373,22 @@ Either key must be a non-negative integer, or `gates validate` fails naming it. 
 
 **Cost:** one author dispatch and one authored-set review per change, plus one author dispatch per defect.
 
+### `loop.ci-at` — when the full `ci` runs
+```yaml
+gates:
+  unit: "<your unit command>"   # required under ready: a global unit, not only surface overrides
+loop:
+  ci-at: ready   # default: task
+```
+`loop.ci-at` chooses *when* the full, unscoped `ci` runs. It never changes *whether* it runs: the merge proves an unscoped `ci` on the head and runs a full `ci` on the merged tree under both values.
+
+- **`task`** (the default, and what an absent key means): every task commit needs a green `ci` marker for its staged tree, as it always has.
+- **`ready`**: on a branch that names an active change (`openspec/changes/<branch>/` exists), a task commit is also allowed on a green `unit` marker for the staged tree, plus the convention review. A green `ci` marker still allows it too. The full `ci` runs once, with nothing staged, before `gates ledger record-ready`, and again at the merge. Off a change branch (`main`, `plan/*`, a docs branch, the detached HEAD `gates merge` integrates on), only a `ci` marker allows a commit.
+
+`ready` needs a global `gates.unit`. A surface-level `unit` override alone does not count: an unmatched path would select the absent global gate and leave no marker to commit on. `gates validate` fails on `ready` without one, naming the missing gate, and on any value other than `task` or `ready`, naming the key and both values.
+
+Change the key between changes, not mid-change. The audit reads the mode when it runs, so a change that flips from `ready` to `task` part-way taints its unit-gated commits until a green `ci` on the head clears them.
+
 ### Token usage: `usage` rows, `economics` and `loop.token-budget`
 ```yaml
 economics:                 # optional: only `gates stats --cost` reads it
