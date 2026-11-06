@@ -523,6 +523,15 @@
    "positionals": [],
    "visibility": "public"
   },
+  "plan check": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "plan restore": {
    "options": [
     "--force",

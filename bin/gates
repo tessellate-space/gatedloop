@@ -8505,8 +8505,108 @@ def _plan_restore(m: dict, root: Path, args) -> int:
     return 0
 
 
+# `gates plan check` (D10): what the shim can check about a plan
+# deterministically, in the words the handoff and `validate` already use. It
+# writes nothing and runs no model.
+
+_PLAN_FINDING_TASK_RE = re.compile(rf"\btask ({TASK_ID_PATTERN}):")
+_PLAN_FINDING_LINE_RE = re.compile(r"the task line '([^']+)'")
+
+
+def _plan_finding(kind: str, task: str | None, path: str | None, detail: str) -> dict:
+    return {"kind": kind, "task": task, "path": path, "detail": detail}
+
+
+def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> list[dict]:
+    """Every static finding for one change's plan (D10): its oracle-tag errors
+    and warnings, its untagged tasks under `loop.task-oracle: required`, and
+    each `rewrites:` path absent at `at`."""
+    findings: list[dict] = []
+    prefix = f"change '{change}'"
+    errs, warns = _task_oracle_problems(m, root)
+    for kind, msgs in (("oracle-error", errs), ("oracle-warning", warns)):
+        for msg in msgs:
+            if not msg.startswith(prefix):
+                continue
+            mt = _PLAN_FINDING_TASK_RE.search(msg) or _PLAN_FINDING_LINE_RE.search(msg)
+            rw = re.search(r"declares rewrites: (\S+?),", msg)
+            findings.append(_plan_finding(kind, mt.group(1) if mt else None,
+                                          rw.group(1) if rw else None, msg))
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    lines = []
+    if tasks_md.is_file():
+        for line in tasks_md.read_text().splitlines():
+            mt = _TASK_LINE_RE.match(line)
+            if mt:
+                lines.append((mt.group(1), mt.group(2), *_split_oracle_tag(mt.group(2))))
+    if _task_oracle_mode(m) == "required":
+        for tid, _raw, _text, _oracle, tag in lines:
+            if tag is None:
+                findings.append(_plan_finding(
+                    "untagged", tid, None,
+                    f"task {tid} declares no oracle, and loop.task-oracle is required — "
+                    f"end its line with {ORACLE_TAG_SYNTAX}"))
+    for i, (tid, _raw, _text, oracle, _tag) in enumerate(lines):
+        for path in _oracle_rewrites(oracle):
+            if _blob_at(root, at, path) is not None:
+                continue
+            creator = next((e[0] for e in lines[:i] if path in _named_paths(e[1])), None)
+            detail = f"task {tid} declares rewrites: {path}, which does not exist at {at}"
+            if creator:
+                detail += (f" — task {creator} creates the file, so a rewrite of it cannot "
+                           f"be authored against {at}; drop the clause, or move the work "
+                           f"into task {creator}")
+            else:
+                detail += " — the handoff refuses a rewrite of a file absent at the base"
+            findings.append(_plan_finding("rewrite-absent", tid, path, detail))
+    return findings
+
+
+def _plan_preflight_mode(m: dict) -> str:
+    """The effective `loop.plan-preflight` mode: `run` or `skip` (D12),
+    `skip` when absent."""
+    loop = m.get("loop") if isinstance(m.get("loop"), dict) else {}
+    v = loop.get("plan-preflight")
+    if isinstance(v, dict):
+        v = v.get("mode")
+    return v if v in ("run", "skip") else "skip"
+
+
+def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None) -> dict:
+    return {
+        "change": change,
+        "preflight": _plan_preflight_mode(m),
+        "tier": None,
+        "against": against,
+        "findings": _plan_check_findings(m, root, change, against or "HEAD"),
+    }
+
+
+def _plan_check(m: dict, root: Path, args) -> int:
+    change = args.change
+    if not (root / "openspec" / "changes" / change).is_dir():
+        print(f"gatedloop: no change '{change}' under openspec/changes/ — nothing to check.",
+              file=sys.stderr)
+        return 1
+    doc = _plan_check_doc(m, root, change)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+        return 1 if doc["findings"] else 0
+    for f in doc["findings"]:
+        where = " ".join(x for x in (f"task {f['task']}" if f["task"] else None,
+                                     f["path"]) if x)
+        print(f"{f['kind']}: {where + ': ' if where else ''}{f['detail']}")
+    if doc["findings"]:
+        print(f"gatedloop: plan check — {len(doc['findings'])} finding(s) in '{change}'. "
+              "Amend the plan; a round opens only on a plan with none.", file=sys.stderr)
+        return 1
+    print(f"gatedloop: plan check — '{change}' is clean.")
+    return 0
+
+
 def cmd_plan(m: dict, root: Path, args) -> int:
     handlers = {
+        "check": _plan_check,
         "save": _plan_save,
         "restore": _plan_restore,
     }
@@ -14767,8 +14867,12 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
-    sp = sub.add_parser("plan", help="the plan preflight: save and restore the preflight store")
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, save and restore the preflight store")
     plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
+    sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
+    sp_pc.add_argument("change")
+    sp_pc.add_argument("--json", action="store_true", help="one JSON document: {change, preflight, tier, against, findings}")
+    sp_pc.set_defaults(fn=cmd_plan)
     sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
     sp_ps.add_argument("change")
     sp_ps.set_defaults(fn=cmd_plan)
