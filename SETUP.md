@@ -1482,7 +1482,13 @@ applies while an active change's `.openspec.yaml` still carries approval keys in
 earlier spelling; adopting it means running `gates approval migrate` and committing the
 result. It recurs because a change attested by an older gatedloop can reappear. `confirm-gate` asks a project
 that binds a `live-check` whether to add the optional `confirm` gate, through
-onboarding's confirm offer.
+onboarding's confirm offer. `ci-at` (since 0.12.0) offers `loop.ci-at` to every project:
+leaving it unset (`task`) is recommended, and `ready` moves the full `ci` to READY and
+needs a global `unit`. `ci-scope` (since 0.12.0) offers `loop.ci-scope` to a project
+where some surface declares a `ci` override (its `applies_when` is a `surface-key`
+predicate on the dotted key `gates.ci`, read as a path into each surface). A project
+that adopts `ready` should also refresh its git-layer hook copy (`git-hook-refresh`) so
+its denials are gate-neutral.
 
 An item that doesn't apply to the project is never asked about, for example the
 schema-flow question in a project with no local schemas. The `gates` command
