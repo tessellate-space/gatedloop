@@ -513,6 +513,28 @@ marker: it allows a task commit, and never satisfies READY under `loop.ci-at: re
 the merge's unscoped-`ci` requirement or the audit's vouching. `gates validate` fails on
 any value other than `single` or `union`, naming the key and both values.
 
+**The plan preflight is opt-in: `loop.plan-preflight`.** It decides whether the propose path runs the model part of the plan loop before a plan PR. `gates plan check` runs whatever it says, because it runs no model.
+```yaml
+loop:
+  plan-preflight: run          # shorthand for { mode: run }; default: skip
+# or
+loop:
+  plan-preflight:
+    mode: run                  # run | skip (default: skip)
+    rounds: 3                  # the full tier's round budget per loop (default 3)
+    full-at:                   # the floor's thresholds: full when any signal reaches one
+      tasks: 20                # task lines (default 20)
+      files: 12                # repository paths the plan names (default 12)
+      surfaces: 2              # surfaces hot for those paths (default 2)
+      oracles: []              # gate names whose tags make the floor full (default: none), e.g. [e2e]
+    classifier: "<command>"    # optional; {digest, dimensions} on stdin, a verdict on stdout
+    classifier-timeout: 60     # seconds (default 60)
+    classifier-input-limit: 48000   # bytes of digest JSON (default 48000)
+    dimensions:                # optional overrides of the shipped blast-radius dimensions
+      persisted-data: 0.3      # a raise threshold, or `off`
+```
+An absent key, or a partial mapping, takes every default above for what it leaves out. `gates validate` refuses: any mode other than `run` or `skip` (the values are `run`/`skip`, never `on`/`off`: PyYAML reads `on` as true while the zero-dependency parser reads the string, so one manifest would mean two things, and `on` is refused under both); an unknown key in the mapping or in `full-at`; a `rounds`, `classifier-timeout`, `classifier-input-limit` or `full-at` count that is not a positive integer (a boolean included); an empty `classifier`; `full-at.oracles` that is not a list of gate names; a `dimensions` id that `rules/plan-tier-dimensions.json` does not list, or a threshold outside its range; and `run`, in either form, with `loop.test-author: inline`, naming both keys, because a planner authoring tests against its own plan loses the cold read that makes the loop worth its usage. `gates plan check --json` reports the effective mode as `preflight`.
+
 **The oracle chosen, and why, is announced** in the run's own output (`ci[frontend]
 — hot surface 'frontend' declares an override`, or `ci[full] — nothing scoped
 narrower`), and the marker/ledger row it writes records the same `scope` value — an

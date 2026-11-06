@@ -219,6 +219,39 @@
           "type": "string",
           "enum": ["single", "union"],
           "default": "single"
+        },
+        "plan-preflight": {
+          "description": "The plan preflight (plan-preflight design D12): whether the propose path runs the plan loop (plan review and, on the full tier, the preflight test author, the dry run and the authored-set review) before a plan PR. skip (default): only `gates plan check`, which runs no model. A scalar is shorthand for {mode: <it>}. run needs loop.test-author: separate. The values are run/skip, never on/off, which PyYAML and the fallback parser read differently.",
+          "oneOf": [
+            { "type": "string", "enum": ["run", "skip"] },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": { "type": "string", "enum": ["run", "skip"], "default": "skip" },
+                "rounds": { "description": "The full tier's round budget per loop.", "type": "integer", "minimum": 1, "default": 3 },
+                "full-at": {
+                  "description": "The floor's thresholds (design D3): the floor is full when any signal reaches its threshold.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "tasks": { "description": "Task lines in tasks.md (a size backstop).", "type": "integer", "minimum": 1, "default": 20 },
+                    "files": { "description": "Repository paths the plan names.", "type": "integer", "minimum": 1, "default": 12 },
+                    "surfaces": { "description": "Surfaces hot for those paths.", "type": "integer", "minimum": 1, "default": 2 },
+                    "oracles": { "description": "Gate names whose oracle tags make the floor full (and, while non-empty, any rewrites: clause). Empty by default.", "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [] }
+                  }
+                },
+                "classifier": { "description": "A command reading {digest, dimensions} on stdin and printing a schema/plan-tier.schema.json verdict; it may only raise the tier. Declaring one sends the plan digest to its provider.", "type": "string", "minLength": 1 },
+                "classifier-timeout": { "description": "Seconds before the classifier is killed and the built-in lens runs instead.", "type": "integer", "minimum": 1, "default": 60 },
+                "classifier-input-limit": { "description": "Bytes of compact digest JSON the classifier receives; an over-limit digest is trimmed from the bottom.", "type": "integer", "minimum": 1, "default": 48000 },
+                "dimensions": {
+                  "description": "Overrides of rules/plan-tier-dimensions.json: a dimension id mapped to its raise threshold (a probability or score, or a choice option), or off.",
+                  "type": "object",
+                  "additionalProperties": { "oneOf": [{ "type": "number" }, { "type": "string", "minLength": 1 }, { "const": false }] }
+                }
+              }
+            }
+          ]
         }
       }
     },

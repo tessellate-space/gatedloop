@@ -952,6 +952,7 @@ def _errors(m: dict, root: Path) -> list[str]:
                     f"{' or '.join(repr(x) for x in CI_SCOPE_MODES)} "
                     f"(got {loop.get('ci-scope')!r})"
                 )
+            errs.extend(_plan_preflight_errors(loop))
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -1021,9 +1022,182 @@ TASK_ORACLE_MODES = ("optional", "required")
 CI_AT_MODES = ("task", "ready")
 CI_SCOPE_MODES = ("single", "union")
 LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at",
-             "ci-scope")
+             "ci-scope", "plan-preflight")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
+
+# plan-preflight D12: `loop.plan-preflight`, a scalar (`run` | `skip`) or a
+# mapping. `run`/`skip`, never `on`/`off`: PyYAML reads `on` as True while
+# `_mini_yaml` reads "on", so one manifest would mean two things.
+PLAN_PREFLIGHT_MODES = ("run", "skip")
+PLAN_PREFLIGHT_KEYS = ("mode", "rounds", "full-at", "classifier", "classifier-timeout",
+                       "classifier-input-limit", "dimensions")
+PLAN_FULL_AT_KEYS = ("tasks", "files", "surfaces", "oracles")
+PLAN_FULL_AT_DEFAULTS = {"tasks": 20, "files": 12, "surfaces": 2}
+PLAN_PREFLIGHT_DEFAULTS = {"rounds": 3, "classifier-timeout": 60,
+                           "classifier-input-limit": 48000}
+PLAN_TIER_DIMENSIONS_FILE = Path(__file__).resolve().parent.parent / "rules" / "plan-tier-dimensions.json"
+PLAN_TIER_DIMENSION_KINDS = ("probability", "choice", "score")
+
+
+def _plan_tier_dimensions() -> list[dict]:
+    """The shipped blast-radius dimensions (D3), from the plugin's own
+    `rules/plan-tier-dimensions.json`. A missing or malformed file fails loud,
+    as a missing built-in rule does."""
+    where = PLAN_TIER_DIMENSIONS_FILE
+    try:
+        data = json.loads(where.read_text())
+    except OSError:
+        sys.exit(f"gatedloop: the plugin's {where.name} is missing at {where} — reinstall the plugin.")
+    except ValueError as e:
+        sys.exit(f"gatedloop: the plugin's {where.name} is not JSON ({e}) — reinstall the plugin.")
+    dims = data.get("dimensions") if isinstance(data, dict) else None
+    problems: list[str] = []
+    if not isinstance(dims, list) or not dims:
+        problems.append("it holds no `dimensions` list")
+        dims = []
+    seen: set[str] = set()
+    for i, d in enumerate(dims):
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str) or not d["id"]:
+            problems.append(f"dimension #{i + 1} has no id")
+            continue
+        did, kind = d["id"], d.get("kind")
+        if did in seen:
+            problems.append(f"dimension {did} is listed twice")
+        seen.add(did)
+        if kind not in PLAN_TIER_DIMENSION_KINDS:
+            problems.append(f"dimension {did} has kind {kind!r}")
+        if not isinstance(d.get("question"), str) or not d["question"].strip():
+            problems.append(f"dimension {did} has no question")
+        if kind == "choice":
+            opts = d.get("options")
+            if not (isinstance(opts, list) and opts and d.get("raises") in opts):
+                problems.append(f"dimension {did} needs `options` and a `raises` among them")
+        elif kind in ("probability", "score"):
+            t = d.get("threshold")
+            lo, hi = (0, 1) if kind == "probability" else (1, 10)
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not lo <= t <= hi:
+                problems.append(f"dimension {did} needs a threshold from {lo} to {hi}")
+    if problems:
+        sys.exit(f"gatedloop: the plugin's {where.name} is malformed: {'; '.join(problems)} — "
+                 "reinstall the plugin.")
+    return dims
+
+
+def _is_positive_int(v) -> bool:
+    return not isinstance(v, bool) and isinstance(v, int) and v > 0
+
+
+def _is_off(v) -> bool:
+    # PyYAML reads a bare `off` as False and `_mini_yaml` as "off": both mean off.
+    return v is False or v == "off"
+
+
+def _plan_dimension_override_error(dim: dict, v) -> str | None:
+    if _is_off(v):
+        return None
+    kind = dim.get("kind")
+    if kind == "choice":
+        if v in dim.get("options", []):
+            return None
+        return f"one of {', '.join(map(repr, dim.get('options', [])))} or `off`"
+    lo, hi = (0, 1) if kind == "probability" else (1, 10)
+    if not isinstance(v, bool) and isinstance(v, (int, float)) and lo <= v <= hi:
+        return None
+    return f"a threshold from {lo} to {hi}, or `off`"
+
+
+def _plan_preflight_errors(loop: dict) -> list[str]:
+    """`gates validate`'s refusals for `loop.plan-preflight` (D12)."""
+    if "plan-preflight" not in loop:
+        return []
+    v = loop.get("plan-preflight")
+    modes = " or ".join(repr(x) for x in PLAN_PREFLIGHT_MODES)
+    errs: list[str] = []
+    if not isinstance(v, dict):
+        if v not in PLAN_PREFLIGHT_MODES:
+            return [f"loop.plan-preflight must be {modes}, or a mapping with `mode` (got {v!r})"]
+        mode = v
+    else:
+        for key in v:
+            if key not in PLAN_PREFLIGHT_KEYS:
+                errs.append(f"loop.plan-preflight has an unknown key '{key}' "
+                            f"(known: {', '.join(PLAN_PREFLIGHT_KEYS)})")
+        mode = v.get("mode", "skip")
+        if mode not in PLAN_PREFLIGHT_MODES:
+            errs.append(f"loop.plan-preflight.mode must be {modes} (got {mode!r})")
+        for key in ("rounds", "classifier-timeout", "classifier-input-limit"):
+            if key in v and not _is_positive_int(v[key]):
+                errs.append(f"loop.plan-preflight.{key} must be a positive integer (got {v[key]!r})")
+        if "classifier" in v and not (isinstance(v["classifier"], str) and v["classifier"].strip()):
+            errs.append(f"loop.plan-preflight.classifier must be a non-empty command string "
+                        f"(got {v['classifier']!r})")
+        if "full-at" in v:
+            fa = v["full-at"]
+            if not isinstance(fa, dict):
+                errs.append(f"loop.plan-preflight.full-at must be a mapping (got {fa!r})")
+            else:
+                for key in fa:
+                    if key not in PLAN_FULL_AT_KEYS:
+                        errs.append(f"loop.plan-preflight.full-at has an unknown key '{key}' "
+                                    f"(known: {', '.join(PLAN_FULL_AT_KEYS)})")
+                for key in PLAN_FULL_AT_DEFAULTS:
+                    if key in fa and not _is_positive_int(fa[key]):
+                        errs.append(f"loop.plan-preflight.full-at.{key} must be a positive "
+                                    f"integer (got {fa[key]!r})")
+                if "oracles" in fa:
+                    o = fa["oracles"]
+                    if not (isinstance(o, list) and all(isinstance(g, str) and g for g in o)):
+                        errs.append("loop.plan-preflight.full-at.oracles must be a list of gate "
+                                    f"names (got {o!r})")
+        if "dimensions" in v:
+            dv = v["dimensions"]
+            if not isinstance(dv, dict):
+                errs.append(f"loop.plan-preflight.dimensions must be a mapping (got {dv!r})")
+            else:
+                known = {d["id"]: d for d in _plan_tier_dimensions()}
+                for did, val in dv.items():
+                    if did not in known:
+                        errs.append(f"loop.plan-preflight.dimensions names an unknown dimension "
+                                    f"'{did}' (known: {', '.join(known)})")
+                        continue
+                    want = _plan_dimension_override_error(known[did], val)
+                    if want:
+                        errs.append(f"loop.plan-preflight.dimensions.{did} must be {want} "
+                                    f"(got {val!r})")
+    if mode == "run" and loop.get("test-author") == "inline":
+        errs.append("loop.plan-preflight: run needs a separate test author, but "
+                    "loop.test-author is inline — a planner authoring tests against its own "
+                    "plan loses the cold read; set loop.test-author: separate, or "
+                    "loop.plan-preflight: skip")
+    return errs
+
+
+def _plan_preflight_settings(m: dict) -> dict:
+    """The effective `loop.plan-preflight` (D12): every default filled in,
+    the scalar form read as `{mode: <it>}`. `dimensions` maps each overridden
+    id to its threshold, or to "off"."""
+    loop = m.get("loop") if isinstance(m.get("loop"), dict) else {}
+    raw = loop.get("plan-preflight")
+    raw = {"mode": raw} if not isinstance(raw, dict) else raw
+    fa = raw.get("full-at") if isinstance(raw.get("full-at"), dict) else {}
+    mode = raw.get("mode")
+    dims = raw.get("dimensions") if isinstance(raw.get("dimensions"), dict) else {}
+    return {
+        "mode": mode if mode in PLAN_PREFLIGHT_MODES else "skip",
+        "rounds": raw.get("rounds", PLAN_PREFLIGHT_DEFAULTS["rounds"]),
+        "full-at": {
+            **{k: fa.get(k, d) for k, d in PLAN_FULL_AT_DEFAULTS.items()},
+            "oracles": list(fa.get("oracles") or []),
+        },
+        "classifier": raw.get("classifier"),
+        "classifier-timeout": raw.get("classifier-timeout",
+                                      PLAN_PREFLIGHT_DEFAULTS["classifier-timeout"]),
+        "classifier-input-limit": raw.get("classifier-input-limit",
+                                          PLAN_PREFLIGHT_DEFAULTS["classifier-input-limit"]),
+        "dimensions": {k: ("off" if _is_off(v) else v) for k, v in dims.items()},
+    }
+
 
 
 def loop_budget(m: dict) -> tuple[int, int]:
@@ -8624,13 +8798,8 @@ def _plan_drift_findings(root: Path, change: str, ref: str, base: str) -> list[d
 
 
 def _plan_preflight_mode(m: dict) -> str:
-    """The effective `loop.plan-preflight` mode: `run` or `skip` (D12),
-    `skip` when absent."""
-    loop = m.get("loop") if isinstance(m.get("loop"), dict) else {}
-    v = loop.get("plan-preflight")
-    if isinstance(v, dict):
-        v = v.get("mode")
-    return v if v in ("run", "skip") else "skip"
+    """The effective `loop.plan-preflight` mode, `run` or `skip` (D12)."""
+    return _plan_preflight_settings(m)["mode"]
 
 
 def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None,
