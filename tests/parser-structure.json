@@ -2711,6 +2711,150 @@
   "help_in_parent": "move this project onto the gatedloop names: state directory, change metadata, hook markers; prints the edits it does not make",
   "prog": "gates migrate-name"
  },
+ "plan": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "plan_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": null,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan preflight: save and restore the preflight store",
+  "prog": "gates plan"
+ },
+ "plan restore": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "source",
+    "help": "restore this ref instead of the snapshot branch",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--from"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "force",
+    "help": "replace a store that differs from the snapshot",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--force"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "rebuild the preflight store from its snapshot branch (local, else origin/)",
+  "prog": "gates plan restore"
+ },
+ "plan save": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)",
+  "prog": "gates plan save"
+ },
  "record-merged": {
   "args": [
    {

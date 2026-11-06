@@ -8272,6 +8272,230 @@ def cmd_tests(m: dict, root: Path, args) -> int:
     return handler(m, root, args)
 
 
+# ---------- gates plan (plan-preflight) ---------------------------------------
+#
+# The plan loop's commands. `save` and `restore` (D7) carry the preflight
+# store between machines on its own branch, `gatedloop/preflight/<change>`,
+# built with git plumbing only: the working tree, the index and `HEAD` never
+# move, and no commit hook runs.
+
+PREFLIGHT_BRANCH_PREFIX = "gatedloop/preflight/"
+PLAN_ROUND_EVENT = "plan-round"
+PLAN_REVIEW_EVENT = "plan-review"
+_ZERO_OID = "0" * 40
+
+
+def _preflight_branch(change: str) -> str:
+    return PREFLIGHT_BRANCH_PREFIX + change
+
+
+def _plan_tasks_sha(root: Path, change: str) -> str | None:
+    """`tasks_sha` (D5): the task lines, tags included, without their
+    checkbox state, so ticking a box never moves it."""
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    if not tasks_md.is_file():
+        return None
+    h = hashlib.sha256()
+    for line in tasks_md.read_text().splitlines():
+        mt = _TASK_LINE_RE.match(line)
+        if mt:
+            h.update(f"{mt.group(1)} {mt.group(2).rstrip()}\n".encode())
+    return h.hexdigest()
+
+
+def _plan_loop_position(rows: list[dict]) -> tuple[int, int]:
+    """`(loop, round)` from `plan-round` rows (D4): a `resume` row starts a
+    new loop, an `open` row is a round of the current one. `(1, 0)` before
+    any round."""
+    loop, rnd = 1, 0
+    for r in rows:
+        if r.get("gate") != PLAN_ROUND_EVENT:
+            continue
+        if r.get("outcome") == "resume":
+            loop, rnd = loop + 1, 0
+        elif r.get("outcome") == "open":
+            rnd += 1
+    return loop, rnd
+
+
+def _ref_commit(root: Path, ref: str) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _preflight_snapshot_tip(root: Path, change: str) -> str | None:
+    """The local snapshot branch's tip, or None. D7 records the tip saved on
+    the next `plan-review` row; those rows arrive with `gates plan record`
+    (task 6.1), which reads it here."""
+    return _ref_commit(root, f"refs/heads/{_preflight_branch(change)}")
+
+
+def _store_files(store: Path) -> dict[str, Path]:
+    if not store.is_dir():
+        return {}
+    return {p.relative_to(store).as_posix(): p for p in sorted(store.rglob("*")) if p.is_file()}
+
+
+def _plumbing_tree(root: Path, files: dict[str, Path]) -> str:
+    """A tree object holding `files` (store-relative paths) at its root,
+    built with `hash-object -w` and `mktree` -- nothing touches the index."""
+    rels = sorted(files)
+    r = subprocess.run(["git", "hash-object", "-w", "--no-filters", "--stdin-paths"],
+                       cwd=root, input="\n".join(str(files[k]) for k in rels) + "\n",
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"gatedloop: git hash-object failed: {r.stderr.strip()}")
+    blobs = dict(zip(rels, r.stdout.split()))
+
+    def build(prefix: str) -> str:
+        entries: dict[str, str] = {}
+        subdirs: set[str] = set()
+        for rel in rels:
+            if not rel.startswith(prefix):
+                continue
+            rest = rel[len(prefix):]
+            head, sep, _tail = rest.partition("/")
+            if sep:
+                subdirs.add(head)
+            else:
+                entries[head] = f"100644 blob {blobs[rel]}\t{head}"
+        for d in subdirs:
+            entries[d] = f"040000 tree {build(prefix + d + '/')}\t{d}"
+        body = "".join(entries[k] + "\0" for k in sorted(entries))
+        t = subprocess.run(["git", "mktree", "-z"], cwd=root, input=body,
+                           capture_output=True, text=True)
+        if t.returncode != 0:
+            sys.exit(f"gatedloop: git mktree failed: {t.stderr.strip()}")
+        return t.stdout.strip()
+
+    return build("")
+
+
+def _plan_require_change(root: Path, change: str) -> None:
+    if not (root / "openspec" / "changes" / change).is_dir():
+        print(f"gatedloop: no change '{change}' under openspec/changes/.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _plan_save(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    store = _preflight_store(root, change)
+    rel_store = store.relative_to(root).as_posix() if store.is_relative_to(root) else str(store)
+    if not store.is_dir():
+        print(f"gatedloop: no preflight store at {rel_store}/ — nothing to save. "
+              f"`gates tests brief {change} --preflight` creates it.", file=sys.stderr)
+        return 1
+    files = _store_files(store)
+    if not files:
+        print(f"gatedloop: the preflight store {rel_store}/ is empty — nothing to save.",
+              file=sys.stderr)
+        return 1
+    tree = _plumbing_tree(root, files)
+    ref = f"refs/heads/{_preflight_branch(change)}"
+    old = _ref_commit(root, ref)
+    loop, rnd = _plan_loop_position(_read_ledger_rows(root, change))
+    msg = (f"gatedloop preflight snapshot: {change}\n\n"
+           f"loop {loop}, round {rnd}\n"
+           f"plan_sha: {_approval_sha_worktree(root, change)}\n"
+           f"tasks_sha: {_plan_tasks_sha(root, change)}\n")
+    cmd = ["git", "commit-tree", tree, "-F", "-"]
+    if old:
+        cmd[3:3] = ["-p", old]
+    c = subprocess.run(cmd, cwd=root, input=msg, capture_output=True, text=True)
+    if c.returncode != 0:
+        print(f"gatedloop: git commit-tree failed: {c.stderr.strip()}", file=sys.stderr)
+        return 1
+    tip = c.stdout.strip()
+    u = _git(root, "update-ref", "-m", f"gates plan save {change}", ref, tip, old or _ZERO_OID)
+    if u.returncode != 0:
+        print(f"gatedloop: {ref} moved while saving ({u.stderr.strip()}) — nothing saved; "
+              "run `gates plan save` again.", file=sys.stderr)
+        return 1
+    print(f"gatedloop: saved the preflight store ({len(files)} file(s)) to "
+          f"{_preflight_branch(change)} at {tip} (loop {loop}, round {rnd}"
+          f"{', parent ' + old[:12] if old else ', first snapshot'}).")
+    print(f"Push it with the plan branch:  git push origin {_preflight_branch(change)}")
+    return 0
+
+
+def _plan_restore(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    branch = _preflight_branch(change)
+    if args.source:
+        source = _ref_commit(root, args.source)
+        if not source:
+            print(f"gatedloop: --from {args.source} does not name a commit.", file=sys.stderr)
+            return 1
+        label = args.source
+    else:
+        source, label = None, None
+        for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+            source = _ref_commit(root, ref)
+            if source:
+                label = ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+                break
+        if not source:
+            print(f"gatedloop: no snapshot to restore — neither {branch} nor origin/{branch} "
+                  "exists. `git fetch origin` first, or pass --from <ref>.", file=sys.stderr)
+            return 1
+    ls = subprocess.run(["git", "ls-tree", "-r", "-z", source], cwd=root, capture_output=True)
+    if ls.returncode != 0:
+        print(f"gatedloop: could not read {label}'s tree.", file=sys.stderr)
+        return 1
+    snap: dict[str, bytes] = {}
+    for entry in ls.stdout.split(b"\0"):
+        if not entry:
+            continue
+        meta, _tab, path = entry.partition(b"\t")
+        _mode, kind, sha = meta.split()
+        if kind != b"blob":
+            continue
+        blob = subprocess.run(["git", "cat-file", "blob", sha.decode()], cwd=root,
+                              capture_output=True)
+        if blob.returncode != 0:
+            print(f"gatedloop: could not read {path.decode()} from {label} "
+                  f"({blob.stderr.decode(errors='replace').strip()}) — nothing was restored.",
+                  file=sys.stderr)
+            return 1
+        snap[path.decode()] = blob.stdout
+    store = _preflight_store(root, change)
+    current = _store_files(store)
+    differ = [rel for rel, p in current.items() if snap.get(rel) != p.read_bytes()]
+    if differ and not args.force:
+        print(f"gatedloop: the preflight store holds {len(differ)} file(s) that differ from "
+              f"or are absent in {label} ({source[:12]}):", file=sys.stderr)
+        for rel in differ:
+            print(f"  {rel}", file=sys.stderr)
+        print("Nothing was restored. Save them first (`gates plan save`), or pass --force "
+              "to replace the store with the snapshot.", file=sys.stderr)
+        return 1
+    if store.is_dir():
+        shutil.rmtree(store)
+    store = _preflight_ensure_store(root, change)
+    for rel, data in snap.items():
+        dest = store / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+    _stale, kept = _preflight_reuse(m, root, change)
+    print(f"gatedloop: restored {len(snap)} file(s) from {label} ({source[:12]}) into "
+          f"{store.relative_to(root).as_posix()}/.")
+    print(f"Kept from the snapshot (digests still match): {', '.join(kept) if kept else 'none'}")
+    return 0
+
+
+def cmd_plan(m: dict, root: Path, args) -> int:
+    handlers = {
+        "save": _plan_save,
+        "restore": _plan_restore,
+    }
+    handler = handlers.get(args.plan_cmd)
+    if handler is None:
+        sys.exit(f"gatedloop: unknown plan subcommand '{args.plan_cmd}'")
+    return handler(m, root, args)
+
+
 # ---------- token accounting (token-ledger D1-D3) ---------------------------
 #
 # What the host session spent on a task, as counts in the durable ledger. The
@@ -14522,6 +14746,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tb.add_argument("--preflight", action="store_true",
                        help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
+
+    sp = sub.add_parser("plan", help="the plan preflight: save and restore the preflight store")
+    plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
+    sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
+    sp_ps.add_argument("change")
+    sp_ps.set_defaults(fn=cmd_plan)
+    sp_pr = plan_sub.add_parser("restore", help="rebuild the preflight store from its snapshot branch (local, else origin/)")
+    sp_pr.add_argument("change")
+    sp_pr.add_argument("--from", dest="source", help="restore this ref instead of the snapshot branch")
+    sp_pr.add_argument("--force", action="store_true", help="replace a store that differs from the snapshot")
+    sp_pr.set_defaults(fn=cmd_plan)
 
     sp = sub.add_parser("integration", help="print the declared integration process (mode + requireApproval)")
     sp.set_defaults(fn=cmd_integration)

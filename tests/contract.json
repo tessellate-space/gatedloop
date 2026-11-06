@@ -518,6 +518,28 @@
    "positionals": [],
    "visibility": "public"
   },
+  "plan": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "plan restore": {
+   "options": [
+    "--force",
+    "--from"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan save": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "record-merged": {
    "options": [],
    "positionals": [
