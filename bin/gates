@@ -7345,6 +7345,26 @@ def _tests_check(m: dict, root: Path, args) -> int:
         return _tests_check_ref(root, args)
     change = _resolve_change_name(root, getattr(args, "change", None))
     if change is None:
+        # plan-preflight D8: held tests are committed only on their change's
+        # branch. A staged path under `authored/` here (a plan branch, the
+        # merge target, any branch naming no change) is refused; a staged
+        # deletion carries no held test, so it is not.
+        staged = _git(root, "diff", "--cached", "--name-only", "--diff-filter=d")
+        if staged.returncode != 0:
+            print("gatedloop: tests check could not read the git index — refusing rather "
+                  "than reporting a pass.", file=sys.stderr)
+            return 1
+        prefix = _state_rel(root, "authored") + "/"
+        held = [p for p in staged.stdout.splitlines() if p.startswith(prefix)]
+        if held:
+            print(f"gatedloop: tests check — {len(held)} held test path(s) staged with no "
+                  "change branch checked out:", file=sys.stderr)
+            for p in held:
+                print(f"  {p}", file=sys.stderr)
+            print("Held tests are committed only on their change's branch, in the authoring "
+                  "commit. Unstage them (`git restore --staged <path>`); a preflight writes "
+                  "to the ignored preflight store instead.", file=sys.stderr)
+            return 1
         print("gatedloop: tests check — no change branch checked out, nothing to check")
         return 0
     rows = _read_ledger_rows(root, change)

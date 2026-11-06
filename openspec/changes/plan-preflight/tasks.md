@@ -12,7 +12,7 @@ Target: 0.12.0. Tests are authored inline by the implementer. Docs travel with e
 
 ## 2. The backstop at the lock (D8)
 
-- [ ] 2.1 Make `gates tests check` refuse (exit 1) a staged path under the state directory's `authored/` when `_resolve_change_name` resolves no change, naming each path and saying that held tests are committed only on their change's branch. Leave every other verdict unchanged. Add the guarantee's row to AUTOMATION.md and one sentence to SETUP.md's lock section. Verify with tests on a real repository and a worktree: a staged held file on `plan/x` and on `main` is refused by `gates tests check`, by `hooks/gate-commit.sh` and by the installed git-layer `pre-commit`; a plan-only commit on `plan/x`, including the change's ledger file, is still allowed; the authoring commit on the change branch gets today's verdict [oracle: unit]
+- [x] 2.1 Make `gates tests check` refuse (exit 1) a staged path under the state directory's `authored/` when `_resolve_change_name` resolves no change, naming each path and saying that held tests are committed only on their change's branch. Leave every other verdict unchanged. Add the guarantee's row to AUTOMATION.md and one sentence to SETUP.md's lock section. Verify with tests on a real repository and a worktree: a staged held file on `plan/x` and on `main` is refused by `gates tests check`, by `hooks/gate-commit.sh` and by the installed git-layer `pre-commit`; a plan-only commit on `plan/x`, including the change's ledger file, is still allowed; the authoring commit on the change branch gets today's verdict [oracle: unit]
 
 ## 3. `gates plan check` (D2, D10, D11)
 
