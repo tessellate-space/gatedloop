@@ -27,7 +27,7 @@
 ## 5. Union-scoped ci (D8)
 
 - [x] 5.1 Add `ci-scope` (`single` | `union`) to `LOOP_KEYS`, `gates validate` and `schema/gates.schema.json`. Make the multi-surface runner gate-generic and, under `union`, run the `ci` union when the staged diff is fully matched and every hot non-catch-all surface declares a `ci` override, writing the `ci` marker with scope `a+b`. Otherwise run the global `ci` alone. Verify with tests: under `union` two overrides both run and the first non-zero exit wins; identical commands run once; a precondition failure runs nothing; a hot surface without an override runs the global alone; an unmatched path runs the global and names it; the union marker allows a commit but fails `gate-marker check ci --require-scope full`, `_ready_gates` and vouching; key absent or `single` keeps the global run; and an unknown value fails validation [oracle: unit]
-- [ ] 5.2 Replace SETUP.md's "A multi-surface `ci` still runs the global `ci`" paragraph with the `loop.ci-scope` behaviour and its default, and update `docs/gate-economics.md` §2 to name `loop.ci-at: ready` and `loop.ci-scope: union` as the two declared splits, keeping §4. Verify `scripts/release docs` reports no gap [oracle: none]
+- [x] 5.2 Replace SETUP.md's "A multi-surface `ci` still runs the global `ci`" paragraph with the `loop.ci-scope` behaviour and its default, and update `docs/gate-economics.md` §2 to name `loop.ci-at: ready` and `loop.ci-scope: union` as the two declared splits, keeping §4. Verify `scripts/release docs` reports no gap [oracle: none]
 
 ## 6. The prompts (D5, D7, D10)
 

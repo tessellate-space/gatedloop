@@ -479,9 +479,25 @@ whose scope names the components in run order joined with `+`, `full` for the gl
 (`unit[frontend+e2e]`, `unit[frontend+full]`). The global `unit` alone could miss a
 surface's own tests and read a task's required red as green.
 
-**A multi-surface `ci` still runs the global `ci`.** The global `ci` is the oracle
-the merge requires, so a union of scoped `ci` commands would only be a narrower
-oracle under another name.
+**A multi-surface `ci` runs the global `ci`, unless `loop.ci-scope: union`.**
+```yaml
+loop:
+  ci-scope: union   # default: single
+```
+Under `single` (the default, and what an absent key means) a staged diff that hits two
+or more non-catch-all surfaces runs the global `ci`: the global `ci` is the oracle the
+merge requires, and a union of scoped commands is a narrower oracle under another name.
+Under `union` it runs each hot surface's `ci` override instead, when every changed path
+is matched and **every** hot surface declares one, under the same rules as a
+multi-surface `unit` run: preconditions first (one failure runs nothing, exit 75),
+identical commands once, one lock, every command run, the first non-zero exit wins, and
+the scope names every surface (`ci[api+web]`). A hot surface without a `ci` override, or
+an unmatched path, sends the run to the global `ci` alone; unlike `unit`, the global is
+never added beside the overrides, because the global `ci` is the aggregate oracle and
+running it too would cost more than the run it undercuts. A union marker is a scoped
+marker: it allows a task commit, and never satisfies READY under `loop.ci-at: ready`,
+the merge's unscoped-`ci` requirement or the audit's vouching. `gates validate` fails on
+any value other than `single` or `union`, naming the key and both values.
 
 **The oracle chosen, and why, is announced** in the run's own output (`ci[frontend]
 — hot surface 'frontend' declares an override`, or `ci[full] — nothing scoped
