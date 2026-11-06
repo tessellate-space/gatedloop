@@ -233,6 +233,13 @@ surfaces:
 
 No distinct areas? One catch-all surface: `match: "**"`.
 
+**A surface may declare its blast radius: `blast-radius: high | normal`** (default `normal`). It is your word for "this surface matters", and it says what it measures, not what it triggers: a plan that names a path on a `high` surface gets a full plan-tier floor (see the plan tier below). It is also how your public contract reaches the floor: mark the surface that covers it. `gates validate` refuses any other value, naming the surface, and `gates surfaces` shows `blast-radius=<value>` on a hot surface that declares one.
+```yaml
+  - name: contract
+    match: ["api/schema/**", "docs/public-api.md"]
+    blast-radius: high
+```
+
 **Identically-spelled `live-check` commands run once per invocation.** If two
 hot surfaces bind the exact same command string, that is one recipe, not two —
 string equality *is* recipe identity, since the manifest binds plain commands
@@ -299,7 +306,126 @@ The authoring phase:
 2. It writes every task's tests into the **holding area**, `.gatedloop/authored/<change>/<N.M>/<real path>.authored` (the full intended file after that task), or `<N.M>/NO-TESTS` with a reason for a task that changes no behaviour. A task whose tests **all** pin behaviour the tree already has (characterization tests before a refactor, a guard for output the task must not change) also gets `<N.M>/CHARACTERIZATION` with its reason, beside its tests; a task with both `CHARACTERIZATION` and `NO-TESTS` is refused at handoff. A task mixing new red tests with such guards needs no declaration. The `.authored` suffix means no test runner discovers them, so `ci` stays green while they are committed.
 3. `gates tests handoff <change>` records every blob in the ledger; convention review checks the whole set once (`gates review record … --scope authored`); the holding area and the ledger are committed as `author tests: <change>`. Once a task is placed, its holding directory is empty, so a later full handoff would drop it: `gates tests handoff` without `--task` then refuses, naming the placed task, and the tasks being re-authored are handed off with `--task <N.M>`.
 
-Per task, `gates tests place <N.M>` moves that task's tests onto their real paths (over the file as it was before the change, as main last delivered it at `git merge-base HEAD <target>`, or as an earlier placement left it — any other content is a test defect), `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it.
+**A preflight authors into a store, not the holding area.** Before a plan is approved, a plan loop runs the test author against the plan to surface what the real run would object to. That run never touches the holding area:
+- `gates tests brief <change> --preflight` creates the **preflight store**, `.gatedloop/out/preflight/<change>/` (`authored/` in the holding area's layout, `reports/`, `digests.json`), and prints `authored/` as the place to write. The store is ignored by git because `.gatedloop/out/` ignores itself (no `.gitignore` entry needed), and log rotation leaves it alone.
+- **Reuse across rounds.** The brief's "Preflight reuse" section compares each task's digest (its task line with its tag, its declared rewrites' copies at `HEAD`, and the brief's change-wide content: the design, the spec deltas, your `tests` rules and the runner) with `digests.json`. A task is **stale** when its digest moved or is absent, or when it holds a path a stale task also holds; the author re-authors only the stale tasks and leaves the **kept** ones as they are. So an amendment confined to task lines re-authors only those tasks, and an amendment to the design or a spec re-authors every task.
+- `gates tests handoff <change> --dry-run` reads the store and runs every refusal a real handoff runs, under `--task` too, with the same messages and exit status. It skips only the tag comparison with the merge target, and prints a line saying so (on a plan branch the tags are the plan being amended; a real handoff still compares them). It computes the undeclared-overwrite advisories from file existence, writes no ledger row and no git object, needs no approval, and on success writes the current digests to `digests.json` and says what a real handoff would record.
+- `gates tests show <change> --preflight` (text, `--json`, `--diff`) reports the store's held tests with no ledger read; each rewrite's counts and diff are taken against the path at `HEAD`.
+
+A real `gates tests handoff` keeps reading only `.gatedloop/authored/<change>/`.
+
+**`gates plan check <change>` reports, before approval, what the handoff would refuse after it.** It costs nothing, runs no model and writes nothing, so the propose path runs it whatever `loop.plan-preflight` says. Its findings, each naming its task and path: this change's oracle-tag errors and warnings in `gates validate`'s words (`oracle-error`, `oracle-warning`); under `loop.task-oracle: required`, every untagged task (`untagged`); and each `rewrites:` path absent at `HEAD` (`rewrite-absent`), saying so when an earlier task's line names the path, because then that earlier task creates the file and the rewrite cannot be authored against the base. It exits 1 on any finding, 0 with "clean" otherwise, and 1 for an unknown change. `--json` prints `{change, preflight, tier, against, findings: [{kind, task, path, detail}]}`.
+
+**`--against <ref>` checks the plan against where the change branch will be cut.** The planner runs `gates plan check <change> --against <target>` before `gates handoff`. The existence checks then run at `<ref>`, and every path the plan names (backticked paths on the task lines and in `design.md`, and every `rewrites:` clause, never the change's own directory) that was modified, deleted or renamed between the plan's base and `<ref>` is a `drift` finding. The base is the latest commit in `<ref>`'s history touching `openspec/changes/<change>/` when `<ref>` holds the change (the approved plan's merge), and `git merge-base HEAD <ref>` otherwise (a plan branch still waiting). A drift finding means "re-read this file against the plan", not "the plan is wrong": send the handoff when the plan still holds, and amend it otherwise. An unresolvable `<ref>` exits 1.
+
+**How deep the loop goes: the plan tier.** Under `loop.plan-preflight: run` a plan gets one of two tiers, and the shim decides which, so an agent under budget pressure cannot quietly pick the cheap path:
+- **light** — `gates plan check` plus one plan-review run through `gatedloop.implementability`; a single pass with a budget of one round.
+- **full** — the whole loop: every lens, then the test author in preflight mode, the dry run and the authored-set review, with the round budget (`rounds`, default 3).
+
+`gates plan tier <change> [--json]` prints every layer. **Layer 1, the floor**, is computed in code: `full` when any one signal is high, `light` otherwise.
+
+| Signal | High when | Default |
+|---|---|---|
+| `tasks` | task lines in `tasks.md` reach `full-at.tasks` (a size backstop, not a risk signal) | 20 |
+| `files` | repository paths the plan names (backticked, in the proposal, the design and the task lines, never the change's own directory) reach `full-at.files` | 12 |
+| `surfaces` | surfaces hot for those paths reach `full-at.surfaces` | 2 |
+| `existing-requirements` | a spec delta has a `## MODIFIED`, `## REMOVED` or `## RENAMED Requirements` section | — |
+| `costly-oracle` | a task's oracle tag names a gate in `full-at.oracles`, or, while that list is non-empty, carries `rewrites:` | off (empty list) |
+| `blast-radius` | a hot surface declares `blast-radius: high` | — |
+
+Gate names are yours, so the shim cannot know which gate is an end-to-end one: list your costly gates (`full-at.oracles: [e2e]`). The thresholds are not calibrated on field data, which is why they are overridable and why every round records its signals. **Layer 2, a classifier**, may only raise the tier (the effective tier is the higher of the floor and its verdict); until a classifier runs, `gates plan tier` reports it as not yet run. **Layer 3, the plan's own line**, is applied last and is never silent: a line `Plan tier: full` in `proposal.md` or `design.md` raises the tier for every round, and `gates plan round --tier full` raises it for one; a line `Plan tier: light — <reason>` lowers it to light whatever raised it, and both files are covered by the approval digest, so the approver reads the reason. A `Plan tier: light` line with no reason lowers nothing and is a `gates plan check` finding (`tier-lower-unreasoned`). `gates plan check --json` carries the same tier object as `tier`: `{floor, signals: [{id, value, threshold, high}], classifier, override: {source, reason}, tier}`, with `source` one of `raised-plan`, `lowered-plan`, `raised-flag` or null.
+
+**Known gap: the floor reads what the plan names.** `files`, `surfaces` and `costly-oracle` read the paths and tags the plan states, so a plan that names fewer paths computes a lower floor; `tasks` and `existing-requirements` do not depend on naming. The classifier reads the plan itself, and the implementability lens treats a task that changes code without naming its files as a finding. Name the files a task changes.
+
+**The plan digest is all a classifier sees.** The shim builds it deterministically, never a prompt, and no classifier receives whole artifacts. Its sections, in priority order: (1) the signals and the floor; (2) the named paths, each with its hot surfaces and `blast-radius`; (3) each spec delta's `## ADDED|MODIFIED|REMOVED|RENAMED Requirements` sections with their requirement titles; (4) the task lines, without checkboxes or oracle tags; (5) the proposal's "What Changes" bullets, first lines only; (6) the design's decision headings (`### D<n>. …`). It is JSON, `{change, floor, signals, paths, spec_deltas, tasks, what_changes, decisions, trimmed}`, measured as the byte length of its compact UTF-8 serialization. `gates plan digest <change>` prints it readably; `--json` prints the compact JSON exactly as a classifier receives it as `digest` (the trailing newline aside), and `--limit <bytes>` builds it at that limit, so `gates plan digest <change> --json --limit <your classifier-input-limit>` shows what your classifier saw. Without `--limit` no limit applies. The same plan always gives the same bytes.
+
+**The limit is yours: `classifier-input-limit`, in bytes (default 48000).** The shim has no tokenizer, so count conservatively: about 2.5 bytes per token, because plan digests are dense with paths and identifiers, which split into more tokens than prose. By that rule 48000 bytes is at most about 19k tokens of state, which leaves headroom under a 32k-token per-question window. For another classifier, take its per-question window in tokens × 2.5 × 0.6. Over the limit, the shim trims from the bottom of the priority list: the decision headings first, then the "What Changes" bullets, then the task lines, each from its last entry up, until the compact JSON fits; `trimmed` names each trimmed section and how many entries it lost (`[{"section": "decisions", "lost": 10}, {"section": "tasks", "lost": 3}]`), and `gates plan tier --json` reports the trim and the digest's hash in its classifier block, so the printed digest can be matched to what was classified.
+
+**Blast radius is asked as typed dimensions, and the shim combines the answers.** The questions live in shipped data, `rules/plan-tier-dimensions.json`, never in a prompt, and both providers (your classifier and the built-in lens) answer the same ones:
+
+| Dimension | Kind | Asks whether the plan… | Raises at |
+|---|---|---|---|
+| `security-path` | probability | changes an authentication, authorization or security path | 0.5 |
+| `persisted-data` | probability | changes persisted data or its format | 0.5 |
+| `public-interface` | probability | changes an interface other code or other systems call or read | 0.5 |
+| `irreversible` | probability | performs or enables an operation that cannot be undone | 0.5 |
+| `overall-tier` | choice (`light`, `full`) | needs the full tier, taken as a whole | `full` |
+
+A verdict is `full` when its own `tier` is `full`, or when any evidence item for a known, enabled dimension meets its threshold (a probability or score at or above it, a choice equal to the raising option); `light` otherwise. `gates plan tier --json`'s classifier block reports the verdict's `tier`, the `combined` result, the dimension that raised it (`raised_by`, or `tier` when the verdict said `full` itself), the verdict's `confidence` and each evidence item with its own. An evidence item naming a dimension the file does not list is ignored and recorded in `unknown_dimensions`. A low confidence never lowers anything: confidences are evidence for the approver and for later calibration. `loop.plan-preflight.dimensions` overrides a dimension's threshold (`persisted-data: 0.3`; for a choice, the raising option) or turns it `off`, for both providers alike. Adding a dimension of your own waits for a later change.
+
+**The built-in lens's verdict goes through `gates plan classify`.** When `gates plan tier` says `classifier: builtin` (no classifier declared, or yours failed), the planner runs the plan-review agent with `--lens gatedloop.blast-radius`, which answers the same dimensions in the same JSON, and passes it to `gates plan classify <change> --verdict <file>`. The shim validates it against `schema/plan-tier.schema.json`: an invalid one exits 1 naming every error and stores nothing, and the planner dispatches the lens again. A valid one is stored in the preflight store as `classifier.json` with the plan's two digests, combined by the same dimension rules, and used by `gates plan tier` only while those digests match: an amendment voids it. When no verdict can be had, `gates plan classify <change> --unavailable <cause>` records the cause, and the effective tier is then the floor.
+
+**Too large to classify cheaply means full, with no call.** When the signals, the floor, the named paths and the spec delta headers alone are over the limit (nothing trimmable is left), the shim runs no classifier and asks for no built-in fallback, sets the effective tier to `full`, and prints and records `classifier: skipped, cause: digest over limit`. That is sound because a classifier only raises: the most any call could do is raise the tier to `full`, so skipping it and taking `full` gives the answer the call could at most have given, and a plan that large is a blast-radius signal in itself.
+
+**A classifier of your own: `loop.plan-preflight.classifier: "<command>"`.** It is a command, not a gate: a gate's contract is its exit code, and a classifier's verdict is the JSON it prints. `gates plan tier` (and `gates plan round`) runs it in the repository root under `classifier-timeout` seconds (default 60), with the shim's own environment passed through unchanged. On stdin it gets `{"digest": <the digest at classifier-input-limit>, "dimensions": <the effective dimensions>}`, the digest exactly as `gates plan digest <change> --json --limit <limit>` prints it. On stdout it prints one verdict, validated against `schema/plan-tier.schema.json`:
+```json
+{"tier": "light", "confidence": 0.8,
+ "evidence": [{"dimension": "persisted-data", "value": 0.1, "confidence": 0.9}],
+ "reason": null}
+```
+`reason` may be null or absent (a typed-answer classifier has none to give). A valid verdict is recorded as provider `external`. Anything else falls back, visibly: `gates plan tier` prints `classifier: builtin` and the cause, one of `none-declared`, `exit <n>` (`exit 127` for a missing command), `timeout <s>s` (the command is killed), `invalid: not JSON` or `invalid: <first schema error>`, and the planner runs the built-in `gatedloop.blast-radius` lens instead. **A classifier only raises.** The effective tier is the higher of the floor and the verdict, then the plan's own `Plan tier:` line; so whatever a classifier does or fails to do (a wrong answer, a crash, a timeout) can cost usage and never safety. `gates plan check` never runs it.
+
+**Declaring a classifier sends data off the machine.** The command receives the plan digest: file paths, requirement titles, task lines and decision headings. If it calls a third-party service, that text goes to that service, billed to your classifier's API key. **The shim never reads `.env` or any key**: it passes its environment through, never prints or records it, and records only the command's exit, duration and validated stdout. The command's stderr is captured to `.gatedloop/out/plan-classifier-<ts>.log`, which `.gatedloop/out/` ignores, and appears nowhere else; an adapter must never print its key or its request headers there.
+
+An example adapter, for a typed-answer model behind an HTTP API (yours to write and keep in your project; the plugin ships none). It reads its key from a gitignored `.env`, asks each dimension as a typed question with the digest as the state, retries rate-limit and overload responses with backoff, and maps the answers back to the contract:
+```python
+#!/usr/bin/env python3
+# scripts/plan-classifier.py -- bound as loop.plan-preflight.classifier: "python3 scripts/plan-classifier.py"
+import json, os, sys, time, urllib.error, urllib.request
+from pathlib import Path
+
+def key() -> str:                      # from the environment, else a gitignored .env
+    if os.environ.get("CLASSIFIER_API_KEY"):
+        return os.environ["CLASSIFIER_API_KEY"]
+    for line in Path(".env").read_text().splitlines():
+        if line.startswith("CLASSIFIER_API_KEY="):
+            return line.split("=", 1)[1].strip()
+    sys.exit("no CLASSIFIER_API_KEY")  # names the variable, never a value
+
+def ask(state: str, dim: dict) -> dict:
+    question = ({"type": "probability", "text": dim["question"]} if dim["kind"] == "probability"
+                else {"type": "choice", "text": dim["question"], "options": dim["options"]})
+    body = json.dumps({"state": state, "question": question}).encode()
+    for attempt in range(5):
+        req = urllib.request.Request("https://classifier.example.com/v1/answer", data=body,
+                                     headers={"Authorization": f"Bearer {key()}",
+                                              "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return json.load(r)    # {"answer": ..., "confidence": ...}
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 503, 529):
+                raise SystemExit(f"classifier request failed: HTTP {e.code}")  # no headers, no key
+            time.sleep(2 ** attempt)   # rate-limited or overloaded: back off and retry
+    raise SystemExit("classifier still overloaded after 5 attempts")
+
+payload = json.load(sys.stdin)
+state = json.dumps(payload["digest"])
+evidence = []
+for dim in payload["dimensions"]:
+    a = ask(state, dim)
+    evidence.append({"dimension": dim["id"], "value": a["answer"], "confidence": a.get("confidence")})
+overall = next((e["value"] for e in evidence if e["dimension"] == "overall-tier"), "light")
+print(json.dumps({"tier": overall if overall in ("light", "full") else "light",
+                  "confidence": None, "evidence": evidence, "reason": None}))
+```
+Keep `.env` in `.gitignore`. Each call is billed per input token to your classifier's API key with its provider, outside the Claude session: about 2.5 bytes per token of digest, times the number of dimensions, per `gates plan tier` or `gates plan round`.
+
+**Lenses: what a plan review judges through.** A plan review reads the plan cold through one lens per run and cites each finding as `<lens-id> #<n>`. The built-in lenses ship in the plugin's `rules/plan-lenses.md`, one `### <lens-id>` section each, shaped like your rules-doc and prefixed `gatedloop.` so they cannot collide with your ids: `gatedloop.implementability` (the plan is right about the code: what it names exists or an earlier task creates it, its order is executable, nothing needs what an earlier task removed, every interface a test would target is stated or present), `gatedloop.zero-decision` (no task leaves a choice to the implementer, every behaviour change has a scenario, every oracle tag fits its task, every decision a task relies on is in `design.md`) and `gatedloop.blast-radius` (the built-in tier classifier above, which returns only the verdict object). `gates plan brief <change>` lists the lenses the tier runs (the open round's tier; before a round, the tier computed without running your classifier): light runs `gatedloop.implementability`, full adds `gatedloop.zero-decision`. The `plan-review` agent (`agents/plan-review.md`) runs them: read-only, on Opus, because a plan review runs a few times per plan, reads code no diff touches and must notice what the plan does not say; it reads the plan's artifacts and only the files its brief names, reports each finding as `<lens-id> #<n>` with the task or line, what is wrong and the amendment, marks a human's decision as `question` with its options, and under `gatedloop.blast-radius` returns only the verdict object. Each plan-review run draws more usage than a Sonnet run of the same length. `gates plan brief <change> --lens <id>` is the plan-review agent's first call: it prints the lens, the path to resolve it against, the plan's artifacts, and each path the plan names (backticked paths in the proposal, the design and the task lines, and every `rewrites:` clause) with whether it exists at `HEAD`; for `gatedloop.blast-radius` it adds one JSON object, `{digest, dimensions, signals, floor}`, carrying the digest with no limit and the effective dimensions. An unknown lens exits 1 naming the known ones, and a missing `plan-lenses.md` or a missing lens section exits 1 naming it, as a missing built-in rule does.
+
+**The plan loop: rounds, exits and the budget.** Under `loop.plan-preflight: run` the planner runs rounds, and the shim keeps the count, from `plan-round` rows exactly as it counts attempts, so a prompt cannot miscount it:
+- `gates plan round <change> [--tier full]` runs `gates plan check` first: on any finding it opens no round, counts none, and exits 1 (static findings are free). On a light floor it refuses until a classifier verdict (yours, or the built-in lens's through `gates plan classify`), or an `--unavailable` cause, exists for the plan's current digests, unless the digest was too large to classify. Then it computes the tier (running your classifier), appends a `plan-round` row and a `plan-review` row for `plan-check`, and prints the round, the budget, the tier and the checkers it runs: light runs `plan-check` and `lens:gatedloop.implementability`; full adds `lens:gatedloop.zero-decision`, `test-author`, `dry-run` and `authored-review`. `--tier full` raises the round's tier (recorded as `raised-flag`).
+- **The budget** is `loop.plan-preflight.rounds` (default 3) under full and 1 under light, per loop. When it is spent, `gates plan round` appends a `plan-round` row with outcome `stalled`, exits 1 and says so: a human decides next. A loop with a recorded `question` opens no further round either.
+- `gates plan record <change> --checker <id> --verdict clean|findings|question [--report <file>]` records one checker's verdict for the open round as a `plan-review` row, and copies the report to the store's `reports/<loop>.<round>-<checker>.md`. It refuses when no round is open, when the plan's digests changed since the round opened (an amendment means a new round), and for a checker the round's tier does not run. `--checker dry-run` takes no `--verdict`: the shim runs `gates tests handoff <change> --dry-run` itself and records its exit. `question` is for a finding only a human can answer, with the question and its options in the report.
+- `gates plan resume <change> --reason <text>` starts a new loop with a fresh budget after a human answered a question, reviewed the PR or decided to continue past a stall; it refuses an empty reason, and every resume is listed in the status.
+
+The rows go to `.gatedloop/runs/<change>.jsonl` on any branch and are committed with the plan. They are record-only: `plan-round` carries `{loop, round, plan_sha, tasks_sha, signals, floor, classifier, override, tier, outcome}` and `plan-review` `{loop, round, plan_sha, tasks_sha, checker, verdict, report, snapshot}`, where `plan_sha` is the approval digest, `tasks_sha` hashes the task lines without their checkboxes, and `snapshot` is the local `gatedloop/preflight/<change>` tip when the row was written. Nothing in approval, the handoff, the merge, `check-implement` or `gates stats` reads them.
+
+**`gates plan status <change> [--json|--markdown]` is the record the approver reads.** It folds the rows into each loop and round with its digests (short), the tier's layers (floor, classifier, override, effective tier), each checker's verdict and report path, every resume with its reason, the snapshot branch and its tip, and the loop's state, computed and never declared: **green** when the latest round has `clean` from every checker its tier runs; **question** when a checker recorded one (no round opens until `gates plan resume`); **stalled** past the budget; **amended** for a light pass whose lens had findings (the planner amended, and the single pass is spent); **open** otherwise. It says so when the plan's current digests differ from its last green round's, because that round checked other content. `--markdown` prints the same as a block for the plan PR's body, so the PR body is rendered from the rows and the record survives an edited or lost PR body.
+
+**The store travels on its own branch.** The store is ignored, so it would not survive a removed worktree or reach another machine. `gates plan save <change>` snapshots it into a new commit on the branch `gatedloop/preflight/<change>`, built with git plumbing only: it never touches your working tree, your index or `HEAD`, and runs no commit hook. The snapshot's tree holds only the store, at its root, and each save parents on the last, so the branch's history is the rounds; the message names the change, the loop and round, and the plan's two digests. `save` refuses an absent or empty store, and prints the new tip and the push command: push the branch together with the plan branch (`git push origin gatedloop/preflight/<change>`). It is an ordinary branch, so it travels with a plain push and fetch, and the `pre-push` hook passes it like every branch but the merge target. On another machine (or a fresh worktree), `gates plan restore <change>` rebuilds the store from the local branch, else `origin/gatedloop/preflight/<change>` (`--from <ref>` names another snapshot), and prints the tasks its digests still mark as kept. It refuses, naming each file, when the store holds a file that differs from or is absent in the snapshot; `--force` replaces the store with the snapshot. Two machines that save in turn without restoring diverge, and the second push is refused as a non-fast-forward: restore, then re-author the stale tasks. The branch outlives the plan's merge; delete it by hand once the change is archived (`git push origin --delete gatedloop/preflight/<change>` and `git branch -D gatedloop/preflight/<change>`).
+
+Per task, `gates tests place <N.M>` moves that task's tests onto their real paths (over the file as it was before the change, as main last delivered it at `git merge-base HEAD <target>`, or as an earlier placement left it — any other content is a test defect), `gates run unit --task <N.M>` must fail, and the commit hooks run `gates tests check`, which refuses a placed or held test that differs from the handoff and a placement with no failing `unit` run after it (exit 75, a precondition failure, does not count). For a `characterization` task the check is reversed: the first `unit` run after placement must be **green**, and a red one there is a defect, because a characterization test never seen to pass on the tree as it was pins nothing. Only the author declares it, the declaration is locked like the tests, and authored-set review judges it. Off a change branch (a `plan/*` branch, the merge target, any branch naming no active change) `gates tests check` refuses any staged path under `.gatedloop/authored/`, naming each one: held tests are committed only on their change's branch.
 
 A test the implementer judges wrong, or placed tests that pass before anything is implemented, go back to the author with `gates tests defect <N.M> --kind setup|assertion|green --detail …`. The kind is required, and each has its own cap per task:
 
@@ -499,6 +625,28 @@ marker: it allows a task commit, and never satisfies READY under `loop.ci-at: re
 the merge's unscoped-`ci` requirement or the audit's vouching. `gates validate` fails on
 any value other than `single` or `union`, naming the key and both values.
 
+**The plan preflight is opt-in: `loop.plan-preflight`.** It decides whether the propose path runs the model part of the plan loop before a plan PR. `gates plan check` runs whatever it says, because it runs no model.
+```yaml
+loop:
+  plan-preflight: run          # shorthand for { mode: run }; default: skip
+# or
+loop:
+  plan-preflight:
+    mode: run                  # run | skip (default: skip)
+    rounds: 3                  # the full tier's round budget per loop (default 3)
+    full-at:                   # the floor's thresholds: full when any signal reaches one
+      tasks: 20                # task lines (default 20)
+      files: 12                # repository paths the plan names (default 12)
+      surfaces: 2              # surfaces hot for those paths (default 2)
+      oracles: []              # gate names whose tags make the floor full (default: none), e.g. [e2e]
+    classifier: "<command>"    # optional; {digest, dimensions} on stdin, a verdict on stdout
+    classifier-timeout: 60     # seconds (default 60)
+    classifier-input-limit: 48000   # bytes of digest JSON (default 48000)
+    dimensions:                # optional overrides of the shipped blast-radius dimensions
+      persisted-data: 0.3      # a raise threshold, or `off`
+```
+An absent key, or a partial mapping, takes every default above for what it leaves out. `gates validate` refuses: any mode other than `run` or `skip` (the values are `run`/`skip`, never `on`/`off`: PyYAML reads `on` as true while the zero-dependency parser reads the string, so one manifest would mean two things, and `on` is refused under both); an unknown key in the mapping or in `full-at`; a `rounds`, `classifier-timeout`, `classifier-input-limit` or `full-at` count that is not a positive integer (a boolean included); an empty `classifier`; `full-at.oracles` that is not a list of gate names; a `dimensions` id that `rules/plan-tier-dimensions.json` does not list, or a threshold outside its range; and `run`, in either form, with `loop.test-author: inline`, naming both keys, because a planner authoring tests against its own plan loses the cold read that makes the loop worth its usage. `gates plan check --json` reports the effective mode as `preflight`.
+
 **The oracle chosen, and why, is announced** in the run's own output (`ci[frontend]
 — hot surface 'frontend' declares an override`, or `ci[full] — nothing scoped
 narrower`), and the marker/ledger row it writes records the same `scope` value — an
@@ -560,15 +708,26 @@ gates handoff <change> [--json]                  # the planner-to-orchestrator p
 gates ledger record-ready <change>               # append the `ready` row the implementer commits before READY TO MERGE; prints the report's `gatedloop: gates {...}` block (ci, review: clean|findings|partial|none, live_check) from the ledger
 gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint, naming each tainted commit (a merge commit marked with the sync route); --ref reads the change a merge's incoming ref names
 gates lock status [--json]                       # each serialized gate's lock: free, or held by pid N (alive|dead?) for how long; flags "possibly hung"; names a merge waiting with priority
-gates tests brief <change>                       # the test author's inputs: artifacts, test and surface rules, runner, nearby test paths, fixtures
-gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger; on success, stderr names the commit gate (as `gates task start`)
+gates tests brief <change> [--preflight]         # the test author's inputs: artifacts, test and surface rules, runner, nearby test paths, fixtures
+gates tests handoff <change> [--task N.M] [--inline] [--dry-run]   # (--dry-run: every refusal against the preflight store; records nothing) record the holding area's tests in the ledger; on success, stderr names the commit gate (as `gates task start`)
 gates task start <N.M>                           # record the tree the task starts from; stderr names the commit gate: `gatedloop: commit gate: gates run ci`, or `gates run unit (loop.ci-at: ready — …)`
 gates task changed [--task N.M]                  # every path that differs from the task-start tree, untracked included
 gates tests place <N.M>                          # move one task's held tests onto their real paths
 gates tests check [--task N.M]                   # the authored-test lock the commit hooks run
 gates tests check --ref <commit> [--change <name>]   # the same lock at a commit's tree and ledger, every task; no handoff passes
 gates tests defect <N.M> --kind setup|assertion|green --detail "..."   # an authored test is wrong, or green before implementation: back to its author (3 setup, 2 assertion, 1 green per task)
-gates tests show [<change>] [--json] [--diff]    # author, each task's tests or reason, characterization, placement, defects by kind, rewrites vs base (--diff: their unified diffs)
+gates tests show [<change>] [--json] [--diff] [--preflight]   # (--preflight: the preflight store, rewrites vs HEAD, no ledger) author, each task's tests or reason, characterization, placement, defects by kind, rewrites vs base (--diff: their unified diffs)
+gates plan check <change> [--json] [--against <ref>]   # (--against: existence at <ref>, plus each named path modified, deleted or renamed since the plan's base) the plan's static findings before approval: this change's oracle-tag errors and warnings, untagged tasks under loop.task-oracle: required, rewrites: paths absent at HEAD (naming the earlier task that creates one); exit 1 on any; writes nothing
+gates plan brief <change> [--lens <id>]          # the lenses the plan's tier runs; with --lens, that lens's brief: rules path, artifacts, each named path at HEAD (blast-radius: {digest, dimensions, signals, floor} as JSON); unknown lens exits 1
+gates plan tier <change> [--json]                # the plan's tier: the six floor signals with their thresholds, the classifier layer (raise-only), the plan's Plan tier: override, the effective tier
+gates plan digest <change> [--json] [--limit N]  # the plan digest a classifier is given; --json prints its compact JSON byte for byte
+gates plan classify <change> --verdict <file> | --unavailable <cause>   # store the built-in lens's verdict (validated; refused naming every error) or that none could be had, keyed on the plan's digests
+gates plan round <change> [--tier full]          # open the next round: static checks first (no round on a finding), a classifier verdict on a light floor, the tier; exit 1 and a `stalled` row when the budget is spent
+gates plan record <change> --checker <id> [--verdict clean|findings|question] [--report <file>]   # a checker's verdict for the open round; --checker dry-run is run and recorded by the shim
+gates plan resume <change> --reason <text>       # a new loop with a fresh budget, after a human's answer
+gates plan status <change> [--json|--markdown]   # the plan loop's record and state (green, question, stalled, open, amended); --markdown is the plan PR body's block
+gates plan save <change>                         # snapshot the preflight store onto gatedloop/preflight/<change> (plumbing only; tree, index and HEAD unchanged); prints the tip and the push command
+gates plan restore <change> [--from <ref>] [--force]   # rebuild the preflight store from its snapshot branch (local, else origin/); refuses a differing store without --force; prints the kept tasks
 gates adoption status [--json]                   # the settings this plugin version asks the project to decide, still undecided
 gates adoption record <id> adopted|declined|later   # record the project's decision on an adoption item in .gatedloop/adoption.json
 ```

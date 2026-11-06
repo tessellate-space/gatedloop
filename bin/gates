@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import difflib
 import fnmatch
 import hashlib
 import importlib.util
@@ -706,6 +707,12 @@ def _errors(m: dict, root: Path) -> list[str]:
                     errs.append(f"surface '{nm}': {e}")
         if "live-check" in surf:
             _validate_gate_spec(errs, f"surface '{nm}' live-check", surf["live-check"])
+        # plan-preflight D12: the adopter's word for "this surface matters";
+        # a hot `high` surface makes a plan's floor full (D3 signal 6).
+        if "blast-radius" in surf and surf["blast-radius"] not in BLAST_RADII:
+            errs.append(f"surface '{nm}': blast-radius must be "
+                        f"{' or '.join(repr(x) for x in BLAST_RADII)} "
+                        f"(got {surf['blast-radius']!r})")
         # scale-gate-cost D1: a surface MAY override `ci`/`unit` with a
         # scoped command. Restricted to those two scopable gates, and the
         # overridden gate must itself be globally declared -- otherwise the
@@ -951,6 +958,7 @@ def _errors(m: dict, root: Path) -> list[str]:
                     f"{' or '.join(repr(x) for x in CI_SCOPE_MODES)} "
                     f"(got {loop.get('ci-scope')!r})"
                 )
+            errs.extend(_plan_preflight_errors(loop))
             # retry-budget D5: the attempt budget, integers >= 0. `bool` is an
             # `int` subclass, so `true` is refused by name.
             for key in ("attempts", "fresh-restarts"):
@@ -1015,14 +1023,188 @@ def _economics_errors(econ) -> list[str]:
     return errs
 
 
+BLAST_RADII = ("high", "normal")
 TEST_AUTHOR_MODES = ("separate", "inline")
 TASK_ORACLE_MODES = ("optional", "required")
 CI_AT_MODES = ("task", "ready")
 CI_SCOPE_MODES = ("single", "union")
 LOOP_KEYS = ("test-author", "attempts", "fresh-restarts", "token-budget", "task-oracle", "ci-at",
-             "ci-scope")
+             "ci-scope", "plan-preflight")
 DEFAULT_LOOP_ATTEMPTS = 2
 DEFAULT_LOOP_FRESH_RESTARTS = 1
+
+# plan-preflight D12: `loop.plan-preflight`, a scalar (`run` | `skip`) or a
+# mapping. `run`/`skip`, never `on`/`off`: PyYAML reads `on` as True while
+# `_mini_yaml` reads "on", so one manifest would mean two things.
+PLAN_PREFLIGHT_MODES = ("run", "skip")
+PLAN_PREFLIGHT_KEYS = ("mode", "rounds", "full-at", "classifier", "classifier-timeout",
+                       "classifier-input-limit", "dimensions")
+PLAN_FULL_AT_KEYS = ("tasks", "files", "surfaces", "oracles")
+PLAN_FULL_AT_DEFAULTS = {"tasks": 20, "files": 12, "surfaces": 2}
+PLAN_PREFLIGHT_DEFAULTS = {"rounds": 3, "classifier-timeout": 60,
+                           "classifier-input-limit": 48000}
+PLAN_TIER_DIMENSIONS_FILE = Path(__file__).resolve().parent.parent / "rules" / "plan-tier-dimensions.json"
+PLAN_TIER_DIMENSION_KINDS = ("probability", "choice", "score")
+
+
+def _plan_tier_dimensions() -> list[dict]:
+    """The shipped blast-radius dimensions (D3), from the plugin's own
+    `rules/plan-tier-dimensions.json`. A missing or malformed file fails loud,
+    as a missing built-in rule does."""
+    where = PLAN_TIER_DIMENSIONS_FILE
+    try:
+        data = json.loads(where.read_text())
+    except OSError:
+        sys.exit(f"gatedloop: the plugin's {where.name} is missing at {where} — reinstall the plugin.")
+    except ValueError as e:
+        sys.exit(f"gatedloop: the plugin's {where.name} is not JSON ({e}) — reinstall the plugin.")
+    dims = data.get("dimensions") if isinstance(data, dict) else None
+    problems: list[str] = []
+    if not isinstance(dims, list) or not dims:
+        problems.append("it holds no `dimensions` list")
+        dims = []
+    seen: set[str] = set()
+    for i, d in enumerate(dims):
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str) or not d["id"]:
+            problems.append(f"dimension #{i + 1} has no id")
+            continue
+        did, kind = d["id"], d.get("kind")
+        if did in seen:
+            problems.append(f"dimension {did} is listed twice")
+        seen.add(did)
+        if kind not in PLAN_TIER_DIMENSION_KINDS:
+            problems.append(f"dimension {did} has kind {kind!r}")
+        if not isinstance(d.get("question"), str) or not d["question"].strip():
+            problems.append(f"dimension {did} has no question")
+        if kind == "choice":
+            opts = d.get("options")
+            if not (isinstance(opts, list) and opts and d.get("raises") in opts):
+                problems.append(f"dimension {did} needs `options` and a `raises` among them")
+        elif kind in ("probability", "score"):
+            t = d.get("threshold")
+            lo, hi = (0, 1) if kind == "probability" else (1, 10)
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not lo <= t <= hi:
+                problems.append(f"dimension {did} needs a threshold from {lo} to {hi}")
+    if problems:
+        sys.exit(f"gatedloop: the plugin's {where.name} is malformed: {'; '.join(problems)} — "
+                 "reinstall the plugin.")
+    return dims
+
+
+def _is_positive_int(v) -> bool:
+    return not isinstance(v, bool) and isinstance(v, int) and v > 0
+
+
+def _is_off(v) -> bool:
+    # PyYAML reads a bare `off` as False and `_mini_yaml` as "off": both mean off.
+    return v is False or v == "off"
+
+
+def _plan_dimension_override_error(dim: dict, v) -> str | None:
+    if _is_off(v):
+        return None
+    kind = dim.get("kind")
+    if kind == "choice":
+        if v in dim.get("options", []):
+            return None
+        return f"one of {', '.join(map(repr, dim.get('options', [])))} or `off`"
+    lo, hi = (0, 1) if kind == "probability" else (1, 10)
+    if not isinstance(v, bool) and isinstance(v, (int, float)) and lo <= v <= hi:
+        return None
+    return f"a threshold from {lo} to {hi}, or `off`"
+
+
+def _plan_preflight_errors(loop: dict) -> list[str]:
+    """`gates validate`'s refusals for `loop.plan-preflight` (D12)."""
+    if "plan-preflight" not in loop:
+        return []
+    v = loop.get("plan-preflight")
+    modes = " or ".join(repr(x) for x in PLAN_PREFLIGHT_MODES)
+    errs: list[str] = []
+    if not isinstance(v, dict):
+        if v not in PLAN_PREFLIGHT_MODES:
+            return [f"loop.plan-preflight must be {modes}, or a mapping with `mode` (got {v!r})"]
+        mode = v
+    else:
+        for key in v:
+            if key not in PLAN_PREFLIGHT_KEYS:
+                errs.append(f"loop.plan-preflight has an unknown key '{key}' "
+                            f"(known: {', '.join(PLAN_PREFLIGHT_KEYS)})")
+        mode = v.get("mode", "skip")
+        if mode not in PLAN_PREFLIGHT_MODES:
+            errs.append(f"loop.plan-preflight.mode must be {modes} (got {mode!r})")
+        for key in ("rounds", "classifier-timeout", "classifier-input-limit"):
+            if key in v and not _is_positive_int(v[key]):
+                errs.append(f"loop.plan-preflight.{key} must be a positive integer (got {v[key]!r})")
+        if "classifier" in v and not (isinstance(v["classifier"], str) and v["classifier"].strip()):
+            errs.append(f"loop.plan-preflight.classifier must be a non-empty command string "
+                        f"(got {v['classifier']!r})")
+        if "full-at" in v:
+            fa = v["full-at"]
+            if not isinstance(fa, dict):
+                errs.append(f"loop.plan-preflight.full-at must be a mapping (got {fa!r})")
+            else:
+                for key in fa:
+                    if key not in PLAN_FULL_AT_KEYS:
+                        errs.append(f"loop.plan-preflight.full-at has an unknown key '{key}' "
+                                    f"(known: {', '.join(PLAN_FULL_AT_KEYS)})")
+                for key in PLAN_FULL_AT_DEFAULTS:
+                    if key in fa and not _is_positive_int(fa[key]):
+                        errs.append(f"loop.plan-preflight.full-at.{key} must be a positive "
+                                    f"integer (got {fa[key]!r})")
+                if "oracles" in fa:
+                    o = fa["oracles"]
+                    if not (isinstance(o, list) and all(isinstance(g, str) and g for g in o)):
+                        errs.append("loop.plan-preflight.full-at.oracles must be a list of gate "
+                                    f"names (got {o!r})")
+        if "dimensions" in v:
+            dv = v["dimensions"]
+            if not isinstance(dv, dict):
+                errs.append(f"loop.plan-preflight.dimensions must be a mapping (got {dv!r})")
+            else:
+                known = {d["id"]: d for d in _plan_tier_dimensions()}
+                for did, val in dv.items():
+                    if did not in known:
+                        errs.append(f"loop.plan-preflight.dimensions names an unknown dimension "
+                                    f"'{did}' (known: {', '.join(known)})")
+                        continue
+                    want = _plan_dimension_override_error(known[did], val)
+                    if want:
+                        errs.append(f"loop.plan-preflight.dimensions.{did} must be {want} "
+                                    f"(got {val!r})")
+    if mode == "run" and loop.get("test-author") == "inline":
+        errs.append("loop.plan-preflight: run needs a separate test author, but "
+                    "loop.test-author is inline — a planner authoring tests against its own "
+                    "plan loses the cold read; set loop.test-author: separate, or "
+                    "loop.plan-preflight: skip")
+    return errs
+
+
+def _plan_preflight_settings(m: dict) -> dict:
+    """The effective `loop.plan-preflight` (D12): every default filled in,
+    the scalar form read as `{mode: <it>}`. `dimensions` maps each overridden
+    id to its threshold, or to "off"."""
+    loop = m.get("loop") if isinstance(m.get("loop"), dict) else {}
+    raw = loop.get("plan-preflight")
+    raw = {"mode": raw} if not isinstance(raw, dict) else raw
+    fa = raw.get("full-at") if isinstance(raw.get("full-at"), dict) else {}
+    mode = raw.get("mode")
+    dims = raw.get("dimensions") if isinstance(raw.get("dimensions"), dict) else {}
+    return {
+        "mode": mode if mode in PLAN_PREFLIGHT_MODES else "skip",
+        "rounds": raw.get("rounds", PLAN_PREFLIGHT_DEFAULTS["rounds"]),
+        "full-at": {
+            **{k: fa.get(k, d) for k, d in PLAN_FULL_AT_DEFAULTS.items()},
+            "oracles": list(fa.get("oracles") or []),
+        },
+        "classifier": raw.get("classifier"),
+        "classifier-timeout": raw.get("classifier-timeout",
+                                      PLAN_PREFLIGHT_DEFAULTS["classifier-timeout"]),
+        "classifier-input-limit": raw.get("classifier-input-limit",
+                                          PLAN_PREFLIGHT_DEFAULTS["classifier-input-limit"]),
+        "dimensions": {k: ("off" if _is_off(v) else v) for k, v in dims.items()},
+    }
+
 
 
 def loop_budget(m: dict) -> tuple[int, int]:
@@ -3554,7 +3736,8 @@ def cmd_surfaces(m: dict, root: Path, args) -> int:
     for s in hot:
         raw_lc = s.get("live-check")
         lc = (_gate_spec(raw_lc)[0] or "—") if raw_lc else "—"
-        print(f"{s['name']}: rules={s.get('rules', [])} live-check={lc}")
+        radius = f" blast-radius={s['blast-radius']}" if "blast-radius" in s else ""
+        print(f"{s['name']}: rules={s.get('rules', [])} live-check={lc}{radius}")
     return 0
 
 
@@ -3563,21 +3746,34 @@ def cmd_surfaces(m: dict, root: Path, args) -> int:
 # listed by `gates rules` for every diff whatever surfaces are hot (D2).
 BUILTIN_RULES_FILE = Path(__file__).resolve().parent.parent / "rules" / "loop-rules.md"
 BUILTIN_RULE_IDS = (f"{NAME}.test-quality",)
+# The plan loop's lenses (plan-preflight D6): shipped beside the loop rules,
+# resolved the same way, and covered by the same fail-loud check.
+BUILTIN_LENSES_FILE = BUILTIN_RULES_FILE.parent / "plan-lenses.md"
+BUILTIN_LENS_IDS = (f"{NAME}.implementability", f"{NAME}.zero-decision",
+                    f"{NAME}.blast-radius")
+
+
+def _builtin_file_error(path: Path, ids: tuple[str, ...], what: str) -> str | None:
+    """Why a shipped rules file can't be resolved, or None. A listed id whose
+    section is absent would have a reviewer cite a check it cannot read, so
+    both a missing file and a missing `### <id>` heading fail loud."""
+    try:
+        text = path.read_text()
+    except OSError as e:
+        return f"built-in {what} file not readable at {path} ({e.strerror})"
+    missing = [r for r in ids if r not in _heading_ids(text)]
+    if missing:
+        return (f"built-in {what} id(s) {', '.join(missing)} have no '### <id>' "
+                f"section in {path}")
+    return None
 
 
 def _builtin_rules_error() -> str | None:
-    """Why the built-in rules can't be resolved, or None. A listed id whose
-    section is absent would have review cite a rule it cannot read, so both
-    a missing file and a missing `### <id>` heading fail loud."""
-    try:
-        text = BUILTIN_RULES_FILE.read_text()
-    except OSError as e:
-        return f"built-in rules file not readable at {BUILTIN_RULES_FILE} ({e.strerror})"
-    missing = [r for r in BUILTIN_RULE_IDS if r not in _heading_ids(text)]
-    if missing:
-        return (f"built-in rule-id(s) {', '.join(missing)} have no '### <id>' "
-                f"section in {BUILTIN_RULES_FILE}")
-    return None
+    return _builtin_file_error(BUILTIN_RULES_FILE, BUILTIN_RULE_IDS, "rules")
+
+
+def _builtin_lenses_error() -> str | None:
+    return _builtin_file_error(BUILTIN_LENSES_FILE, BUILTIN_LENS_IDS, "lenses")
 
 
 def _project_test_rule_ids(m: dict, root: Path) -> list[str]:
@@ -5079,6 +5275,16 @@ LEDGER_ROW_FIELDS = (
     # (USAGE_SOURCES). `None` on every other row kind. Appended per the
     # union rule.
     "tokens", "window", "messages", "source",
+    # plan-preflight D5: on `plan-round` and `plan-review` rows only, which
+    # nothing but `gates plan status` reads (record-only). `loop`/`round`
+    # place the row; `plan_sha` is the approval digest and `tasks_sha` the
+    # task lines without checkbox state; a round row adds the tier's layers
+    # (`signals`, `floor`, `classifier`, `override`, the effective `tier`); a
+    # review row adds `checker`, `report` (a store path) and `snapshot` (the
+    # local gatedloop/preflight/<change> tip, or None). `None` on every
+    # other row kind. Appended per the union rule.
+    "loop", "round", "plan_sha", "tasks_sha", "signals", "floor", "classifier", "override",
+    "tier", "checker", "report", "snapshot",
     # stability-contract D1: the row version, set by `_append_ledger_row`
     # itself on every row (as `session` is), so no caller can omit or forge
     # it. A row without the key was written before the field existed and is
@@ -6281,15 +6487,15 @@ def _file_blob(root: Path, rel: str) -> str | None:
     return _hash_blob(root, p.read_bytes())
 
 
-def _read_holding_area(root: Path, change: str) -> tuple[dict, dict, dict, list[str]]:
+def _read_holding_area(base: Path) -> tuple[dict, dict, dict, list[str]]:
     """`({task: {path: abs holding file}}, {task: reason}, {task:
-    characterization reason}, problems)` for the change's holding area as it
-    is on disk. A problem is anything the lock could not enforce: a task
+    characterization reason}, problems)` for the holding area at `base` as it
+    is on disk: the change's real holding area, or the preflight store's
+    `authored/` (plan-preflight D9). A problem is anything the lock could not enforce: a task
     holding both tests and `NO-TESTS`, a task declared both `CHARACTERIZATION`
     and `NO-TESTS`, a declaration with no tests to pin or no reason, a task
     holding nothing, or a file without the `.authored` suffix (a runner might
     discover it)."""
-    base = _authored_dir(root, change)
     tests: dict[str, dict[str, Path]] = {}
     reasons: dict[str, str] = {}
     characterization: dict[str, str] = {}
@@ -6416,13 +6622,14 @@ def _undeclared_overwrites(root: Path, change: str, tests: dict[str, dict[str, s
 
 def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
                              reasons: dict, characterization: dict,
-                             only: str | None) -> list[str]:
+                             only: str | None, drift: bool = True) -> list[str]:
     """task-oracle D3: each way the holding area contradicts a task's tag,
     and, under `loop.task-oracle: required`, the untagged tasks. Only
     contradictions: whether the tests exercise the declared gate is for the
-    red run on that gate to show."""
+    red run on that gate to show. `drift=False` (a dry run, plan-preflight
+    D9) skips only the tag comparison with the merge target."""
     oracles = _change_task_oracles(root, change)
-    problems: list[str] = _oracle_drift_problems(root, change, oracles, only)
+    problems: list[str] = _oracle_drift_problems(root, change, oracles, only) if drift else []
     untagged: list[str] = []
     for task, oracle in oracles.items():
         if only is not None and task != only:
@@ -6482,8 +6689,15 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
 def _tests_handoff(m: dict, root: Path, args) -> int:
     change = args.change
     only = getattr(args, "task", None)
-    held_tests, reasons, characterization, problems = _read_holding_area(root, change)
-    where = _authored_dir(root, change).relative_to(root).as_posix()
+    # plan-preflight D9: a dry run reads the preflight store, runs every
+    # refusal but the tag-drift comparison, and writes no row and no object.
+    dry = getattr(args, "dry_run", False)
+    area = (_preflight_store(root, change) / "authored") if dry else _authored_dir(root, change)
+    if dry:
+        print("gatedloop: dry run — the oracle tags are not compared with the merge "
+              "target's tasks.md here; a real handoff still compares them")
+    held_tests, reasons, characterization, problems = _read_holding_area(area)
+    where = area.relative_to(root).as_posix()
     if problems:
         return _tests_refuse(
             f"refusing the handoff for '{change}' — the holding area at {where}/ "
@@ -6508,7 +6722,7 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         )
 
     contradictions = _oracle_handoff_problems(m, root, change, held_tests, reasons,
-                                              characterization, only)
+                                              characterization, only, drift=not dry)
     if contradictions:
         return _tests_refuse(
             f"refusing the handoff for '{change}' — it contradicts the plan's oracle "
@@ -6537,6 +6751,9 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
                 + "."
             )
     known_base = (_authoring_state(rows) or {}).get("base", {})
+    if dry:
+        return _tests_handoff_dry(m, root, change, only, held_tests, reasons,
+                                  characterization, known_base, args)
     tests: dict[str, dict[str, str]] = {}
     base: dict[str, str | None] = {}
     for task, files in held_tests.items():
@@ -6571,6 +6788,42 @@ def _tests_handoff(m: dict, root: Path, args) -> int:
         f"{_ledger_path(root, change)}"
     )
     _print_commit_gate_line(m)
+    return 0
+
+
+def _tests_handoff_dry(m: dict, root: Path, change: str, only: str | None,
+                       held_tests: dict, reasons: dict, characterization: dict,
+                       known_base: dict, args) -> int:
+    """The tail of a clean dry run (D9): the advisories computed from
+    existence rather than hashing, the per-task digests written to the
+    store, and what a real handoff would record. No ledger row, no object."""
+    tests = {task: {path: "held" for path in files} for task, files in held_tests.items()}
+    base = {path: ("exists" if (root / path).is_file() else None)
+            for files in held_tests.values() for path in files
+            if not (only is not None and path in known_base)}
+    for task, path in _undeclared_overwrites(root, change, tests, base, known_base):
+        print(f"gatedloop: advisory: task {task} overwrites existing {path} without "
+              "declaring it (rewrites: on its oracle tag); its author could not see "
+              "that file")
+    store = _preflight_store(root, change)
+    current = _preflight_task_digests(m, root, change)
+    if only is not None:
+        digests = _preflight_read_digests(store)
+        if only in current:
+            digests[only] = current[only]
+    else:
+        digests = current
+    _preflight_write_digests(store, digests)
+    author = "inline" if getattr(args, "inline", False) else "separate"
+    n_tests = sum(len(v) for v in tests.values())
+    scope = f"task {only}" if only else f"{len(tests) + len(reasons)} task(s)"
+    print(
+        f"gatedloop: dry run clean for '{change}' — a real handoff would record the "
+        f"{author} handoff ({scope}): {n_tests} test file(s), {len(reasons)} "
+        f"behaviour-free task(s), {len(characterization)} characterization task(s). "
+        f"Nothing was recorded. Digests written to "
+        f"{(store / PREFLIGHT_DIGESTS_FILE).relative_to(root).as_posix()}."
+    )
     return 0
 
 
@@ -7297,6 +7550,26 @@ def _tests_check(m: dict, root: Path, args) -> int:
         return _tests_check_ref(root, args)
     change = _resolve_change_name(root, getattr(args, "change", None))
     if change is None:
+        # plan-preflight D8: held tests are committed only on their change's
+        # branch. A staged path under `authored/` here (a plan branch, the
+        # merge target, any branch naming no change) is refused; a staged
+        # deletion carries no held test, so it is not.
+        staged = _git(root, "diff", "--cached", "--name-only", "--diff-filter=d")
+        if staged.returncode != 0:
+            print("gatedloop: tests check could not read the git index — refusing rather "
+                  "than reporting a pass.", file=sys.stderr)
+            return 1
+        prefix = _state_rel(root, "authored") + "/"
+        held = [p for p in staged.stdout.splitlines() if p.startswith(prefix)]
+        if held:
+            print(f"gatedloop: tests check — {len(held)} held test path(s) staged with no "
+                  "change branch checked out:", file=sys.stderr)
+            for p in held:
+                print(f"  {p}", file=sys.stderr)
+            print("Held tests are committed only on their change's branch, in the authoring "
+                  "commit. Unstage them (`git restore --staged <path>`); a preflight writes "
+                  "to the ignored preflight store instead.", file=sys.stderr)
+            return 1
         print("gatedloop: tests check — no change branch checked out, nothing to check")
         return 0
     rows = _read_ledger_rows(root, change)
@@ -7510,10 +7783,108 @@ def _tests_show_diff(root: Path, change: str) -> int:
     return 0
 
 
+def _preflight_rewrite_pairs(root: Path, store_tests: dict, task: str,
+                            oracle: dict | None) -> list[tuple[str, str | None, str]]:
+    """`(path, content at HEAD or None, held content)` for each rewrite the
+    task declares and the store holds (plan-preflight D7)."""
+    out = []
+    for path in _oracle_rewrites(oracle):
+        held = store_tests.get(task, {}).get(path)
+        if held is not None:
+            out.append((path, _blob_at(root, "HEAD", path), held.read_text()))
+    return out
+
+
+def _preflight_show_doc(m: dict, root: Path, change: str) -> dict:
+    """`gates tests show`'s document built from the preflight store, with
+    no ledger read: each rewrite counted against the path at `HEAD`."""
+    held, reasons, characterization, _problems = _read_holding_area(
+        _preflight_store(root, change) / "authored")
+    oracles = _change_task_oracles(root, change)
+    tasks: dict[str, dict] = {}
+    for task in sorted(set(held) | set(reasons) | set(characterization), key=_task_sort_key):
+        rewrites = {}
+        for path, before, after in _preflight_rewrite_pairs(root, held, task, oracles.get(task)):
+            added = removed = None
+            if before is not None:
+                diff = list(difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                                 lineterm="", n=0))
+                added = sum(1 for ln in diff if ln.startswith("+") and not ln.startswith("+++"))
+                removed = sum(1 for ln in diff if ln.startswith("-") and not ln.startswith("---"))
+            rewrites[path] = {"base": "HEAD" if before is not None else None,
+                              "added": added, "removed": removed}
+        tasks[task] = {
+            "oracle": _oracle_label(oracles.get(task)),
+            "tests": sorted(held.get(task, {})),
+            "no_behaviour": reasons.get(task),
+            "characterization": characterization.get(task),
+            "placed": False,
+            "rewrites": rewrites,
+        }
+    return {
+        "change": change,
+        "mode": _test_author_mode(m),
+        "handoff": False,
+        "preflight": True,
+        "store": (_preflight_store(root, change) / "authored").relative_to(root).as_posix(),
+        "authors": [],
+        "tasks": tasks,
+    }
+
+
+def _preflight_show(m: dict, root: Path, change: str, args) -> int:
+    doc = _preflight_show_doc(m, root, change)
+    if getattr(args, "diff", False):
+        held, _r, _c, _p = _read_holding_area(_preflight_store(root, change) / "authored")
+        oracles = _change_task_oracles(root, change)
+        shown = 0
+        for task in sorted(held, key=_task_sort_key):
+            for path, before, after in _preflight_rewrite_pairs(root, held, task,
+                                                                oracles.get(task)):
+                shown += 1
+                print(f"## task {task}: rewrites {path}")
+                if before is None:
+                    print("(absent at HEAD — nothing to diff against)")
+                    continue
+                body = list(difflib.unified_diff(
+                    before.splitlines(), after.splitlines(),
+                    fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""))
+                print("\n".join(body) if body else "(identical to HEAD)")
+        if not shown:
+            print(f"change: {change}\nno task in the preflight store holds a declared rewrite")
+        return 0
+    if getattr(args, "json", False):
+        print(json.dumps(doc, sort_keys=True))
+        return 0
+    print(f"change: {change}   loop.test-author: {doc['mode']}   preflight store: {doc['store']}/")
+    if not doc["tasks"]:
+        print("nothing held in the preflight store — no preflight has authored tests yet")
+        return 0
+    print("no handoff is recorded for a preflight; these are the store's held tests")
+    for task, t in doc["tasks"].items():
+        oracle = f"oracle: {t['oracle'] or 'undeclared'}"
+        if t["no_behaviour"] is not None:
+            print(f"  {task}  {oracle}  no behaviour change — {t['no_behaviour']}")
+            continue
+        state = "held"
+        if t["characterization"] is not None:
+            state += f", characterization — {t['characterization']}"
+        print(f"  {task}  {oracle}  {state}")
+        for path in t["tests"]:
+            print(f"        {path}")
+        for path, rw in t["rewrites"].items():
+            counts = (f"+{rw['added']} -{rw['removed']} vs HEAD" if rw["added"] is not None
+                      else "absent at HEAD")
+            print(f"        rewrites {path} ({counts})")
+    return 0
+
+
 def _tests_show(m: dict, root: Path, args) -> int:
     change = args.change or _tests_change_or_refuse(root, args, "show")
     if change is None:
         return 1
+    if getattr(args, "preflight", False):
+        return _preflight_show(m, root, change, args)
     doc = _tests_show_doc(m, root, change)
     if getattr(args, "diff", False):
         return _tests_show_diff(root, change)
@@ -7949,8 +8320,140 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+# ---------- the preflight store (plan-preflight D7, D9) -------------------
+#
+# The working copy of a plan loop's authored tests: `.gatedloop/out/
+# preflight/<change>/`, ignored because `.gatedloop/out/` ignores itself, and
+# never the real holding area. `authored/` has the holding area's layout,
+# `digests.json` records the brief content each task was authored from, and
+# `reports/` keeps each round's checker reports.
+
+PREFLIGHT_DIGESTS_FILE = "digests.json"
+
+
+def _preflight_store(root: Path, change: str) -> Path:
+    return _out_log_dir(root) / "preflight" / change
+
+
+def _preflight_ensure_store(root: Path, change: str) -> Path:
+    """The store, created with `authored/` and `reports/` (and the
+    self-ignoring `.gatedloop/out/`) when absent."""
+    _ensure_out_dir(root)
+    store = _preflight_store(root, change)
+    (store / "authored").mkdir(parents=True, exist_ok=True)
+    (store / "reports").mkdir(parents=True, exist_ok=True)
+    return store
+
+
+def _preflight_change_wide(m: dict, root: Path, change: str) -> str:
+    """The digest of the brief's change-wide content: the design, every spec
+    delta, the project's test rules (ids and text), the built-in rule ids
+    and the runner. A change here re-authors every task (D7)."""
+    change_dir = root / "openspec" / "changes" / change
+    h = hashlib.sha256()
+    files = [change_dir / "design.md"]
+    if (change_dir / "specs").is_dir():
+        files += sorted((change_dir / "specs").rglob("*.md"))
+    for f in files:
+        if f.is_file():
+            h.update(f.relative_to(change_dir).as_posix().encode() + b"\n")
+            h.update(f.read_bytes() + b"\n")
+    rules_doc = (m.get("conventions") or {}).get("rules-doc")
+    sections: dict[str, str] = {}
+    if rules_doc and (root / rules_doc).is_file():
+        sections = _rule_sections_text((root / rules_doc).read_text())
+    for rid in _project_test_rule_ids(m, root):
+        h.update(f"rule {rid}\n{sections.get(rid, '')}\n".encode())
+    for rid in BUILTIN_RULE_IDS:
+        h.update(f"builtin {rid}\n".encode())
+    unit_run, unit_requires = _gate_spec((m.get("gates") or {}).get("unit"))
+    h.update(f"runner {unit_run} {unit_requires}\n".encode())
+    return h.hexdigest()
+
+
+def _preflight_task_digests(m: dict, root: Path, change: str) -> dict[str, str]:
+    """`{task: digest}` of the brief content each task is authored from: its
+    task line with its tag, its declared rewrites' copies at `HEAD`, and the
+    change-wide sections (D7)."""
+    wide = _preflight_change_wide(m, root, change)
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    out: dict[str, str] = {}
+    for tid, text, oracle in _task_lines(tasks_md):
+        h = hashlib.sha256()
+        h.update(f"{wide}\n{tid} {text} [oracle: {_oracle_label(oracle)}]\n".encode())
+        for path in _oracle_rewrites(oracle):
+            content = _blob_at(root, "HEAD", path)
+            h.update(f"rewrites {path}\n".encode())
+            h.update(b"<absent>" if content is None else content.encode())
+        out[tid] = h.hexdigest()
+    return out
+
+
+def _preflight_read_digests(store: Path) -> dict[str, str]:
+    try:
+        data = json.loads((store / PREFLIGHT_DIGESTS_FILE).read_text())
+    except (OSError, ValueError):
+        return {}
+    tasks = data.get("tasks") if isinstance(data, dict) else None
+    return {str(k): str(v) for k, v in tasks.items()} if isinstance(tasks, dict) else {}
+
+
+def _preflight_write_digests(store: Path, digests: dict[str, str]) -> None:
+    store.mkdir(parents=True, exist_ok=True)
+    (store / PREFLIGHT_DIGESTS_FILE).write_text(
+        json.dumps({"tasks": digests}, indent=2, sort_keys=True) + "\n")
+
+
+def _preflight_reuse(m: dict, root: Path, change: str) -> tuple[list[str], list[str]]:
+    """`(stale, kept)` task ids (D7): stale when its digest moved or is
+    absent from `digests.json`, or when it holds a path a stale task holds
+    (the later task's copy holds the full file); kept otherwise."""
+    store = _preflight_store(root, change)
+    current = _preflight_task_digests(m, root, change)
+    saved = _preflight_read_digests(store)
+    held, _reasons, _char, _problems = _read_holding_area(store / "authored")
+    paths = {t: set(files) for t, files in held.items()}
+    stale = {t for t in current if saved.get(t) != current[t]}
+    grew = True
+    while grew:
+        grew = False
+        taken = set().union(*(paths.get(t, set()) for t in stale)) if stale else set()
+        for t in current:
+            if t not in stale and paths.get(t, set()) & taken:
+                stale.add(t)
+                grew = True
+    order = list(current)
+    return [t for t in order if t in stale], [t for t in order if t not in stale]
+
+
+def _preflight_brief_sections(m: dict, root: Path, change: str) -> str:
+    store = _preflight_ensure_store(root, change)
+    where = (store / "authored").relative_to(root).as_posix()
+    real = _authored_dir(root, change).relative_to(root).as_posix()
+    stale, kept = _preflight_reuse(m, root, change)
+    lines = [
+        "## Preflight store",
+        f"Write this change's tests to {where}/ — in place of the holding area "
+        f"{real}/, which a preflight never touches — as <N.M>/<path>{AUTHORED_SUFFIX}, "
+        f"<N.M>/{CHARACTERIZATION_FILE} or <N.M>/{NO_TESTS_FILE}, the holding area's "
+        "layout. The store is ignored by git; `gates plan save "
+        f"{change}` snapshots it. End with `gates tests handoff {change} --dry-run`, "
+        "never a real handoff.",
+        "",
+        "## Preflight reuse",
+        f"Stale — author these: {', '.join(stale) if stale else 'none'}",
+        f"Kept from an earlier round — leave their files as they are: "
+        f"{', '.join(kept) if kept else 'none'}",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _tests_brief(m: dict, root: Path, args) -> int:
     text = _render_tests_brief(m, root, args.change)
+    if text is not None and getattr(args, "preflight", False):
+        head, _sep, rest = text.partition("\n\n")
+        text = head + "\n\n" + _preflight_brief_sections(m, root, args.change) + rest
     if text is None:
         print(
             f"gatedloop: no change '{args.change}' under openspec/changes/ — the "
@@ -7991,6 +8494,1330 @@ def cmd_tests(m: dict, root: Path, args) -> int:
     handler = handlers.get(args.tests_cmd)
     if handler is None:
         sys.exit(f"gatedloop: unknown tests subcommand '{args.tests_cmd}'")
+    return handler(m, root, args)
+
+
+# ---------- gates plan (plan-preflight) ---------------------------------------
+#
+# The plan loop's commands. `save` and `restore` (D7) carry the preflight
+# store between machines on its own branch, `gatedloop/preflight/<change>`,
+# built with git plumbing only: the working tree, the index and `HEAD` never
+# move, and no commit hook runs.
+
+PREFLIGHT_BRANCH_PREFIX = "gatedloop/preflight/"
+PLAN_ROUND_EVENT = "plan-round"
+PLAN_REVIEW_EVENT = "plan-review"
+_ZERO_OID = "0" * 40
+
+
+def _preflight_branch(change: str) -> str:
+    return PREFLIGHT_BRANCH_PREFIX + change
+
+
+def _plan_tasks_sha(root: Path, change: str) -> str | None:
+    """`tasks_sha` (D5): the task lines, tags included, without their
+    checkbox state, so ticking a box never moves it."""
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    if not tasks_md.is_file():
+        return None
+    h = hashlib.sha256()
+    for line in tasks_md.read_text().splitlines():
+        mt = _TASK_LINE_RE.match(line)
+        if mt:
+            h.update(f"{mt.group(1)} {mt.group(2).rstrip()}\n".encode())
+    return h.hexdigest()
+
+
+def _plan_loop_position(rows: list[dict]) -> tuple[int, int]:
+    """`(loop, round)` from `plan-round` rows (D4): a `resume` row starts a
+    new loop, an `open` row is a round of the current one. `(1, 0)` before
+    any round."""
+    loop, rnd = 1, 0
+    for r in rows:
+        if r.get("gate") != PLAN_ROUND_EVENT:
+            continue
+        if r.get("outcome") == "resume":
+            loop, rnd = loop + 1, 0
+        elif r.get("outcome") == "open":
+            rnd += 1
+    return loop, rnd
+
+
+def _ref_commit(root: Path, ref: str) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _preflight_snapshot_tip(root: Path, change: str) -> str | None:
+    """The local snapshot branch's tip, or None. D7 records the tip saved on
+    the next `plan-review` row; those rows arrive with `gates plan record`
+    (task 6.1), which reads it here."""
+    return _ref_commit(root, f"refs/heads/{_preflight_branch(change)}")
+
+
+def _store_files(store: Path) -> dict[str, Path]:
+    if not store.is_dir():
+        return {}
+    return {p.relative_to(store).as_posix(): p for p in sorted(store.rglob("*")) if p.is_file()}
+
+
+def _plumbing_tree(root: Path, files: dict[str, Path]) -> str:
+    """A tree object holding `files` (store-relative paths) at its root,
+    built with `hash-object -w` and `mktree` -- nothing touches the index."""
+    rels = sorted(files)
+    r = subprocess.run(["git", "hash-object", "-w", "--no-filters", "--stdin-paths"],
+                       cwd=root, input="\n".join(str(files[k]) for k in rels) + "\n",
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"gatedloop: git hash-object failed: {r.stderr.strip()}")
+    blobs = dict(zip(rels, r.stdout.split()))
+
+    def build(prefix: str) -> str:
+        entries: dict[str, str] = {}
+        subdirs: set[str] = set()
+        for rel in rels:
+            if not rel.startswith(prefix):
+                continue
+            rest = rel[len(prefix):]
+            head, sep, _tail = rest.partition("/")
+            if sep:
+                subdirs.add(head)
+            else:
+                entries[head] = f"100644 blob {blobs[rel]}\t{head}"
+        for d in subdirs:
+            entries[d] = f"040000 tree {build(prefix + d + '/')}\t{d}"
+        body = "".join(entries[k] + "\0" for k in sorted(entries))
+        t = subprocess.run(["git", "mktree", "-z"], cwd=root, input=body,
+                           capture_output=True, text=True)
+        if t.returncode != 0:
+            sys.exit(f"gatedloop: git mktree failed: {t.stderr.strip()}")
+        return t.stdout.strip()
+
+    return build("")
+
+
+def _plan_require_change(root: Path, change: str) -> None:
+    if not (root / "openspec" / "changes" / change).is_dir():
+        print(f"gatedloop: no change '{change}' under openspec/changes/.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _plan_save(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    store = _preflight_store(root, change)
+    rel_store = store.relative_to(root).as_posix() if store.is_relative_to(root) else str(store)
+    if not store.is_dir():
+        print(f"gatedloop: no preflight store at {rel_store}/ — nothing to save. "
+              f"`gates tests brief {change} --preflight` creates it.", file=sys.stderr)
+        return 1
+    files = _store_files(store)
+    if not files:
+        print(f"gatedloop: the preflight store {rel_store}/ is empty — nothing to save.",
+              file=sys.stderr)
+        return 1
+    tree = _plumbing_tree(root, files)
+    ref = f"refs/heads/{_preflight_branch(change)}"
+    old = _ref_commit(root, ref)
+    loop, rnd = _plan_loop_position(_read_ledger_rows(root, change))
+    msg = (f"gatedloop preflight snapshot: {change}\n\n"
+           f"loop {loop}, round {rnd}\n"
+           f"plan_sha: {_approval_sha_worktree(root, change)}\n"
+           f"tasks_sha: {_plan_tasks_sha(root, change)}\n")
+    cmd = ["git", "commit-tree", tree, "-F", "-"]
+    if old:
+        cmd[3:3] = ["-p", old]
+    c = subprocess.run(cmd, cwd=root, input=msg, capture_output=True, text=True)
+    if c.returncode != 0:
+        print(f"gatedloop: git commit-tree failed: {c.stderr.strip()}", file=sys.stderr)
+        return 1
+    tip = c.stdout.strip()
+    u = _git(root, "update-ref", "-m", f"gates plan save {change}", ref, tip, old or _ZERO_OID)
+    if u.returncode != 0:
+        print(f"gatedloop: {ref} moved while saving ({u.stderr.strip()}) — nothing saved; "
+              "run `gates plan save` again.", file=sys.stderr)
+        return 1
+    print(f"gatedloop: saved the preflight store ({len(files)} file(s)) to "
+          f"{_preflight_branch(change)} at {tip} (loop {loop}, round {rnd}"
+          f"{', parent ' + old[:12] if old else ', first snapshot'}).")
+    print(f"Push it with the plan branch:  git push origin {_preflight_branch(change)}")
+    return 0
+
+
+def _plan_restore(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    branch = _preflight_branch(change)
+    if args.source:
+        source = _ref_commit(root, args.source)
+        if not source:
+            print(f"gatedloop: --from {args.source} does not name a commit.", file=sys.stderr)
+            return 1
+        label = args.source
+    else:
+        source, label = None, None
+        for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+            source = _ref_commit(root, ref)
+            if source:
+                label = ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+                break
+        if not source:
+            print(f"gatedloop: no snapshot to restore — neither {branch} nor origin/{branch} "
+                  "exists. `git fetch origin` first, or pass --from <ref>.", file=sys.stderr)
+            return 1
+    ls = subprocess.run(["git", "ls-tree", "-r", "-z", source], cwd=root, capture_output=True)
+    if ls.returncode != 0:
+        print(f"gatedloop: could not read {label}'s tree.", file=sys.stderr)
+        return 1
+    snap: dict[str, bytes] = {}
+    for entry in ls.stdout.split(b"\0"):
+        if not entry:
+            continue
+        meta, _tab, path = entry.partition(b"\t")
+        _mode, kind, sha = meta.split()
+        if kind != b"blob":
+            continue
+        blob = subprocess.run(["git", "cat-file", "blob", sha.decode()], cwd=root,
+                              capture_output=True)
+        if blob.returncode != 0:
+            print(f"gatedloop: could not read {path.decode()} from {label} "
+                  f"({blob.stderr.decode(errors='replace').strip()}) — nothing was restored.",
+                  file=sys.stderr)
+            return 1
+        snap[path.decode()] = blob.stdout
+    store = _preflight_store(root, change)
+    current = _store_files(store)
+    differ = [rel for rel, p in current.items() if snap.get(rel) != p.read_bytes()]
+    if differ and not args.force:
+        print(f"gatedloop: the preflight store holds {len(differ)} file(s) that differ from "
+              f"or are absent in {label} ({source[:12]}):", file=sys.stderr)
+        for rel in differ:
+            print(f"  {rel}", file=sys.stderr)
+        print("Nothing was restored. Save them first (`gates plan save`), or pass --force "
+              "to replace the store with the snapshot.", file=sys.stderr)
+        return 1
+    if store.is_dir():
+        shutil.rmtree(store)
+    store = _preflight_ensure_store(root, change)
+    for rel, data in snap.items():
+        dest = store / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+    _stale, kept = _preflight_reuse(m, root, change)
+    print(f"gatedloop: restored {len(snap)} file(s) from {label} ({source[:12]}) into "
+          f"{store.relative_to(root).as_posix()}/.")
+    print(f"Kept from the snapshot (digests still match): {', '.join(kept) if kept else 'none'}")
+    return 0
+
+
+# `gates plan check` (D10): what the shim can check about a plan
+# deterministically, in the words the handoff and `validate` already use. It
+# writes nothing and runs no model.
+
+_PLAN_FINDING_TASK_RE = re.compile(rf"\btask ({TASK_ID_PATTERN}):")
+_PLAN_FINDING_LINE_RE = re.compile(r"the task line '([^']+)'")
+
+
+def _plan_finding(kind: str, task: str | None, path: str | None, detail: str) -> dict:
+    return {"kind": kind, "task": task, "path": path, "detail": detail}
+
+
+def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> list[dict]:
+    """Every static finding for one change's plan (D10): its oracle-tag errors
+    and warnings, its untagged tasks under `loop.task-oracle: required`, and
+    each `rewrites:` path absent at `at`."""
+    findings: list[dict] = []
+    prefix = f"change '{change}'"
+    errs, warns = _task_oracle_problems(m, root)
+    for kind, msgs in (("oracle-error", errs), ("oracle-warning", warns)):
+        for msg in msgs:
+            if not msg.startswith(prefix):
+                continue
+            mt = _PLAN_FINDING_TASK_RE.search(msg) or _PLAN_FINDING_LINE_RE.search(msg)
+            rw = re.search(r"declares rewrites: (\S+?),", msg)
+            findings.append(_plan_finding(kind, mt.group(1) if mt else None,
+                                          rw.group(1) if rw else None, msg))
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    lines = []
+    if tasks_md.is_file():
+        for line in tasks_md.read_text().splitlines():
+            mt = _TASK_LINE_RE.match(line)
+            if mt:
+                lines.append((mt.group(1), mt.group(2), *_split_oracle_tag(mt.group(2))))
+    if _task_oracle_mode(m) == "required":
+        for tid, _raw, _text, _oracle, tag in lines:
+            if tag is None:
+                findings.append(_plan_finding(
+                    "untagged", tid, None,
+                    f"task {tid} declares no oracle, and loop.task-oracle is required — "
+                    f"end its line with {ORACLE_TAG_SYNTAX}"))
+    for line in _plan_tier_lines(root, change):
+        if line["tier"] == "light" and not line["reason"]:
+            findings.append(_plan_finding(
+                "tier-lower-unreasoned", None, f"openspec/changes/{change}/{line['file']}",
+                f"{line['file']} has a `Plan tier: light` line with no reason — lowering the "
+                "tier needs one: `Plan tier: light — <reason>`, which the approver reads"))
+    for i, (tid, _raw, _text, oracle, _tag) in enumerate(lines):
+        for path in _oracle_rewrites(oracle):
+            if _blob_at(root, at, path) is not None:
+                continue
+            creator = next((e[0] for e in lines[:i] if path in _named_paths(e[1])), None)
+            detail = f"task {tid} declares rewrites: {path}, which does not exist at {at}"
+            if creator:
+                detail += (f" — task {creator} creates the file, so a rewrite of it cannot "
+                           f"be authored against {at}; drop the clause, or move the work "
+                           f"into task {creator}")
+            else:
+                detail += " — the handoff refuses a rewrite of a file absent at the base"
+            findings.append(_plan_finding("rewrite-absent", tid, path, detail))
+    return findings
+
+
+def _plan_drift_named(root: Path, change: str) -> list[str]:
+    """The paths the drift check watches (D11): backticked paths on the task
+    lines and in `design.md`, and every `rewrites:` clause, excluding the
+    change's own directory."""
+    change_dir = root / "openspec" / "changes" / change
+    own = f"openspec/changes/{change}/"
+    named: list[str] = []
+    texts: list[str] = []
+    for _tid, text, oracle in _task_lines(change_dir / "tasks.md"):
+        texts.append(text)
+        named.extend(_oracle_rewrites(oracle))
+    design = change_dir / "design.md"
+    if design.is_file():
+        texts.append(design.read_text())
+    for text in texts:
+        named.extend(_named_paths(text))
+    out: list[str] = []
+    for p in named:
+        if p not in out and not (p + "/").startswith(own) and not p.startswith(own):
+            out.append(p)
+    return out
+
+
+def _plan_drift_base(root: Path, change: str, ref: str) -> str | None:
+    """The plan's base for `--against <ref>` (D11): the latest commit in
+    `<ref>`'s history touching the change's directory when `<ref>` holds the
+    change, else `git merge-base HEAD <ref>`."""
+    rel = f"openspec/changes/{change}"
+    if _git(root, "cat-file", "-e", f"{ref}:{rel}").returncode == 0:
+        last = _git(root, "log", "-1", "--format=%H", ref, "--", rel + "/").stdout.strip()
+        if last:
+            return last
+    mb = _git(root, "merge-base", "HEAD", ref)
+    return mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else None
+
+
+def _plan_drift_findings(root: Path, change: str, ref: str, base: str) -> list[dict]:
+    """Each named path modified, deleted or renamed between the plan's base
+    and `<ref>` (D11). "Re-read this", not "this is wrong"."""
+    diff = _git(root, "diff", "--name-status", "-M", base, ref)
+    moved: list[tuple[str, str, str | None]] = []
+    for line in diff.stdout.splitlines():
+        parts = line.split("\t")
+        status = parts[0][:1]
+        if status == "M":
+            moved.append((parts[1], "modified", None))
+        elif status == "D":
+            moved.append((parts[1], "deleted", None))
+        elif status == "R" and len(parts) >= 3:
+            moved.append((parts[1], "renamed", parts[2]))
+    findings: list[dict] = []
+    for named in _plan_drift_named(root, change):
+        for path, how, new in moved:
+            if path == named or ("*" in named and fnmatch.fnmatch(path, named)):
+                findings.append(_plan_finding(
+                    "drift", None, path,
+                    f"{path} was {how}{f' to {new}' if new else ''} between the plan's base "
+                    f"{base[:12]} and {ref} — re-read it against the plan before the handoff"))
+    return findings
+
+
+def _plan_named_paths(root: Path, change: str) -> list[str]:
+    """The repository paths a plan names (D3 signal 2): `_named_paths` over
+    the proposal, the design and the task lines, excluding the change's own
+    directory."""
+    change_dir = root / "openspec" / "changes" / change
+    own = f"openspec/changes/{change}/"
+    texts = [(change_dir / n).read_text() for n in ("proposal.md", "design.md")
+             if (change_dir / n).is_file()]
+    tasks_md = change_dir / "tasks.md"
+    if tasks_md.is_file():
+        texts += [ln for ln in tasks_md.read_text().splitlines() if _TASK_LINE_RE.match(ln)]
+    out: list[str] = []
+    for text in texts:
+        for p in _named_paths(text):
+            if p not in out and not p.startswith(own) and p != own.rstrip("/"):
+                out.append(p)
+    return out
+
+
+def _plan_hot_surfaces(m: dict, root: Path, change: str) -> list[dict]:
+    """The surfaces hot for the paths the plan names (D3 signal 3, D12): the
+    one selection the tier and, later, surface-bound lenses read."""
+    return hot_surfaces(m, _plan_named_paths(root, change))
+
+
+def _blast_radius(surface: dict) -> str:
+    return surface.get("blast-radius") or "normal"
+
+
+# `gates plan tier` (D3): the floor from six deterministic signals, the
+# classifier layer (which may only raise it), then the plan's own override.
+_PLAN_TIER_LINE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\**Plan tier:\**\s*(full|light)\b\s*(?:[—–:-]+\s*(.*?))?\s*$",
+    re.IGNORECASE)
+_SPEC_EXISTING_RE = re.compile(r"^##\s+(MODIFIED|REMOVED|RENAMED)\s+Requirements\b", re.MULTILINE)
+PLAN_TIERS = ("light", "full")
+
+
+def _plan_tier_lines(root: Path, change: str) -> list[dict]:
+    """Every `Plan tier: full` / `Plan tier: light — <reason>` line in the
+    proposal and the design, in file order: `{file, tier, reason}`."""
+    change_dir = root / "openspec" / "changes" / change
+    out = []
+    for name in ("proposal.md", "design.md"):
+        p = change_dir / name
+        if not p.is_file():
+            continue
+        for line in p.read_text().splitlines():
+            mt = _PLAN_TIER_LINE_RE.match(line)
+            if mt:
+                reason = (mt.group(2) or "").strip() or None
+                out.append({"file": name, "tier": mt.group(1).lower(), "reason": reason})
+    return out
+
+
+def _plan_signals(m: dict, root: Path, change: str) -> list[dict]:
+    """The six floor signals (D3), each `{id, value, threshold, high}`."""
+    s = _plan_preflight_settings(m)
+    fa = s["full-at"]
+    change_dir = root / "openspec" / "changes" / change
+    tasks = _task_lines(change_dir / "tasks.md")
+    paths = _plan_named_paths(root, change)
+    hot = _plan_hot_surfaces(m, root, change)
+    existing = []
+    if (change_dir / "specs").is_dir():
+        for f in sorted((change_dir / "specs").rglob("*.md")):
+            for mt in _SPEC_EXISTING_RE.finditer(f.read_text()):
+                existing.append(f"{f.relative_to(change_dir).as_posix()}: {mt.group(1)}")
+    costly = fa["oracles"]
+    fired = []
+    for tid, _text, oracle in tasks:
+        if oracle is None or oracle.get("gate") is None:
+            continue
+        if oracle["gate"] in costly or (costly and _oracle_rewrites(oracle)):
+            fired.append(tid)
+    high_surfaces = [x["name"] for x in hot if _blast_radius(x) == "high"]
+    return [
+        {"id": "tasks", "value": len(tasks), "threshold": fa["tasks"],
+         "high": len(tasks) >= fa["tasks"]},
+        {"id": "files", "value": len(paths), "threshold": fa["files"],
+         "high": len(paths) >= fa["files"]},
+        {"id": "surfaces", "value": len(hot), "threshold": fa["surfaces"],
+         "high": len(hot) >= fa["surfaces"]},
+        {"id": "existing-requirements", "value": existing, "threshold": None,
+         "high": bool(existing)},
+        {"id": "costly-oracle", "value": fired, "threshold": list(costly),
+         "high": bool(fired)},
+        {"id": "blast-radius", "value": high_surfaces, "threshold": "high",
+         "high": bool(high_surfaces)},
+    ]
+
+
+def _plan_effective_dimensions(m: dict) -> list[dict]:
+    """The shipped dimensions with the manifest's overrides applied (D3):
+    an overridden threshold (or raising option) replaces the shipped one,
+    and `off` drops the dimension."""
+    over = _plan_preflight_settings(m)["dimensions"]
+    out = []
+    for d in _plan_tier_dimensions():
+        v = over.get(d["id"])
+        if v == "off":
+            continue
+        d = dict(d)
+        if v is not None:
+            d["raises" if d["kind"] == "choice" else "threshold"] = v
+        out.append(d)
+    return out
+
+
+def _plan_run_classifier(root: Path, cmd: str, stdin: bytes, timeout: int) -> tuple[str | None, dict | None]:
+    """Run the adopter's classifier command (D3): stdin in, in the repository
+    root, under `timeout` seconds, with the shim's environment passed through
+    unchanged. Its stderr goes to `.gatedloop/out/plan-classifier-<ts>.log`
+    and nowhere else. `(cause, verdict)`: a fallback cause and no verdict,
+    or no cause and the validated verdict. The shim never reads `.env` or any
+    secret, and never prints or records the environment."""
+    d = _ensure_out_dir(root)
+    ts = _now_iso().replace(":", "").replace("+00:00", "Z")
+    with (d / f"plan-classifier-{ts}.log").open("wb") as log:
+        proc = subprocess.Popen(cmd, shell=True, cwd=root, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=log, start_new_session=True)
+        try:
+            out, _err = proc.communicate(stdin, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, 9)
+            proc.kill()
+            proc.communicate()
+            return f"timeout {timeout}s", None
+    if proc.returncode != 0:
+        return f"exit {proc.returncode}", None
+    verdict, errs = _plan_tier_parse(out.decode("utf-8", errors="replace"))
+    if errs:
+        return ("invalid: not JSON" if errs == ["not JSON"] else f"invalid: {errs[0]}"), None
+    return None, verdict
+
+
+def _plan_combine(m: dict, verdict: dict) -> dict:
+    """Combine a verdict deterministically (D3): `full` when its own tier is
+    `full` or any evidence item for a known, enabled dimension meets its
+    threshold (`probability`/`score` at or above, `choice` equal to the
+    raising option), `light` otherwise. An unknown dimension is recorded and
+    ignored; a dimension turned `off` is ignored. Confidences never lower
+    anything: they are recorded as evidence."""
+    shipped = {d["id"] for d in _plan_tier_dimensions()}
+    enabled = {d["id"]: d for d in _plan_effective_dimensions(m)}
+    raised_by = "tier" if verdict.get("tier") == "full" else None
+    unknown: list[str] = []
+    for e in verdict.get("evidence") or []:
+        did, v = e.get("dimension"), e.get("value")
+        if did not in shipped:
+            if did not in unknown:
+                unknown.append(did)
+            continue
+        d = enabled.get(did)
+        if d is None or raised_by:
+            continue
+        if d["kind"] == "choice":
+            meets = v == d.get("raises")
+        else:
+            meets = _is_number(v) and v >= d["threshold"]
+        if meets:
+            raised_by = did
+    return {"combined": "full" if raised_by else "light", "raised_by": raised_by,
+            "unknown_dimensions": unknown}
+
+
+def _plan_apply_verdict(m: dict, block: dict, verdict: dict, provider: str) -> dict:
+    block.update(provider=provider, cause=None, tier=verdict["tier"],
+                 confidence=verdict.get("confidence"), reason=verdict.get("reason"),
+                 evidence=verdict.get("evidence", []), **_plan_combine(m, verdict))
+    return block
+
+
+PLAN_CLASSIFIER_FILE = "classifier.json"
+
+
+def _plan_digests(root: Path, change: str) -> dict:
+    return {"plan_sha": _approval_sha_worktree(root, change),
+            "tasks_sha": _plan_tasks_sha(root, change)}
+
+
+def _plan_stored_classifier(root: Path, change: str) -> dict | None:
+    """The built-in lens's stored verdict (or `--unavailable` cause), only
+    when it was stored for the plan's current digests (D3)."""
+    try:
+        data = json.loads((_preflight_store(root, change) / PLAN_CLASSIFIER_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or any(data.get(k) != v for k, v in
+                                         _plan_digests(root, change).items()):
+        return None
+    return data
+
+
+def _plan_classify(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    if bool(args.verdict) == bool(args.unavailable):
+        print("gatedloop: give exactly one of --verdict <file> or --unavailable <cause>.",
+              file=sys.stderr)
+        return 1
+    record = dict(_plan_digests(root, change))
+    if args.verdict:
+        try:
+            text = Path(args.verdict).read_text()
+        except OSError as e:
+            print(f"gatedloop: cannot read --verdict {args.verdict} ({e.strerror}).",
+                  file=sys.stderr)
+            return 1
+        verdict, errs = _plan_tier_parse(text)
+        if errs:
+            print(f"gatedloop: the verdict does not meet schema/plan-tier.schema.json "
+                  f"({len(errs)} error(s)) — nothing was stored:", file=sys.stderr)
+            for e in errs:
+                print(f"  {e}", file=sys.stderr)
+            return 1
+        record["verdict"] = verdict
+    else:
+        if not args.unavailable.strip():
+            print("gatedloop: --unavailable needs a cause.", file=sys.stderr)
+            return 1
+        record["unavailable"] = args.unavailable.strip()
+    store = _preflight_ensure_store(root, change)
+    (store / PLAN_CLASSIFIER_FILE).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    what = (f"the built-in verdict ({record['verdict']['tier']})" if "verdict" in record
+            else f"no verdict (unavailable: {record['unavailable']})")
+    print(f"gatedloop: stored {what} for '{change}' at "
+          f"{(store / PLAN_CLASSIFIER_FILE).relative_to(root).as_posix()}, keyed on the plan's "
+          "current digests; an amendment voids it.")
+    return 0
+
+
+def _plan_classifier_layer(m: dict, root: Path, change: str, floor: str,
+                           run: bool = True) -> dict:
+    """The classifier layer (D3), on the digest at `classifier-input-limit`:
+    a declared command's validated verdict (provider `external`), else the
+    built-in lens with the fallback cause (provider `builtin`). It may only
+    raise the tier. `run=False` (`gates plan check`, which writes nothing)
+    reports a declared command as not run."""
+    s = _plan_preflight_settings(m)
+    digest, fits = _plan_digest(m, root, change, s["classifier-input-limit"])
+    block = {"provider": "builtin", "cause": None, "tier": None, "confidence": None,
+             "reason": None, "evidence": [], "combined": None, "raised_by": None,
+             "unknown_dimensions": [], "unavailable": None,
+             "trimmed": digest["trimmed"],
+             "digest_sha": hashlib.sha256(_compact_json(digest).encode()).hexdigest()}
+    if not fits:
+        # D3: the signals, floor, paths and spec headers alone are over the
+        # limit. The most a classifier could do is raise the tier to full, so
+        # full is taken with no call and no built-in fallback.
+        block.update(provider="skipped", cause="digest over limit", combined="full")
+        return block
+    cmd = s["classifier"]
+    if cmd and not run:
+        block.update(provider="none", cause="not run by gates plan check")
+        return block
+    cause = "none-declared"
+    if cmd:
+        dims = _plan_effective_dimensions(m)
+        cause, verdict = _plan_run_classifier(root, cmd, _plan_classifier_input(digest, dims),
+                                              s["classifier-timeout"])
+        if not cause:
+            return _plan_apply_verdict(m, block, verdict, "external")
+    # The built-in lens: its verdict arrives through `gates plan classify`,
+    # used only for the plan it was stored for (D3).
+    block["cause"] = cause
+    stored = _plan_stored_classifier(root, change)
+    if stored and isinstance(stored.get("verdict"), dict):
+        _plan_apply_verdict(m, block, stored["verdict"], "builtin")
+        block["cause"] = cause
+    elif stored and stored.get("unavailable"):
+        block["unavailable"] = stored["unavailable"]
+    return block
+
+
+def _plan_tier_doc(m: dict, root: Path, change: str, raise_flag: bool = False,
+                   run_classifier: bool = True) -> dict:
+    """`{floor, signals, classifier, override: {source, reason}, tier}`: the
+    floor, max'd with the classifier's verdict, then the plan's line (a
+    reasoned `light` lowers, `full` raises), then `--tier full`."""
+    signals = _plan_signals(m, root, change)
+    floor = "full" if any(x["high"] for x in signals) else "light"
+    classifier = _plan_classifier_layer(m, root, change, floor, run=run_classifier)
+    tier = "full" if "full" in (floor, classifier.get("combined")) else "light"
+    override = {"source": None, "reason": None}
+    lines = _plan_tier_lines(root, change)
+    if any(x["tier"] == "full" for x in lines):
+        override = {"source": "raised-plan", "reason": None}
+        tier = "full"
+    else:
+        lowered = next((x for x in lines if x["tier"] == "light" and x["reason"]), None)
+        if lowered:
+            override = {"source": "lowered-plan", "reason": lowered["reason"]}
+            tier = "light"
+    if raise_flag:
+        override = {"source": "raised-flag", "reason": None}
+        tier = "full"
+    return {"floor": floor, "signals": signals, "classifier": classifier,
+            "override": override, "tier": tier}
+
+
+def _plan_tier(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    doc = _plan_tier_doc(m, root, change)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+        return 0
+    print(f"plan tier: {change}")
+    for x in doc["signals"]:
+        v = x["value"]
+        shown = (", ".join(v) if v else "none") if isinstance(v, list) else v
+        at = ("" if x["threshold"] in (None, "high") else
+              f" (full at {x['threshold']})" if not isinstance(x["threshold"], list) else
+              f" (costly gates: {', '.join(x['threshold']) or 'none declared'})")
+        print(f"  {x['id']}: {shown}{at} — {'HIGH' if x['high'] else 'low'}")
+    print(f"floor: {doc['floor']}")
+    c = doc["classifier"]
+    print(f"classifier: {c['provider']}" + (f", cause: {c['cause']}" if c.get("cause") else "")
+          + (f", verdict: {c['tier']}" if c.get("tier") else "")
+          + (f", combined: {c['combined']}" if c.get("combined") else "")
+          + (f" (raised by {c['raised_by']})" if c.get("raised_by") else ""))
+    if c.get("unavailable"):
+        print(f"  no verdict could be had ({c['unavailable']}): the tier is the floor")
+    if c.get("unknown_dimensions"):
+        print(f"  ignored unknown dimension(s): {', '.join(c['unknown_dimensions'])}")
+    if c.get("trimmed"):
+        print("  digest trimmed to fit classifier-input-limit: "
+              + ", ".join(f"{t['section']} -{t['lost']}" for t in c["trimmed"]))
+    o = doc["override"]
+    print(f"override: {o['source'] or 'none'}" + (f" — {o['reason']}" if o["reason"] else ""))
+    print(f"tier: {doc['tier']}")
+    return 0
+
+
+# The plan-tier verdict's contract (D3): `schema/plan-tier.schema.json`,
+# checked here with the stdlib. A contract test runs one fixture set through
+# both, so the schema and this validator cannot drift apart.
+PLAN_TIER_SCHEMA_FILE = Path(__file__).resolve().parent.parent / "schema" / "plan-tier.schema.json"
+_PLAN_TIER_KEYS = ("tier", "confidence", "evidence", "reason")
+_PLAN_EVIDENCE_KEYS = ("dimension", "value", "confidence")
+
+
+def _is_number(v) -> bool:
+    return not isinstance(v, bool) and isinstance(v, (int, float))
+
+
+def _confidence_error(where: str, v) -> str | None:
+    if v is None or (_is_number(v) and 0 <= v <= 1):
+        return None
+    return f"{where} must be a number from 0 to 1, or null (got {v!r})"
+
+
+def _plan_tier_errors(obj) -> list[str]:
+    """Every way `obj` (parsed JSON) breaks the verdict contract; empty when
+    it holds."""
+    if not isinstance(obj, dict):
+        return [f"the verdict must be a JSON object (got {type(obj).__name__})"]
+    errs: list[str] = []
+    for key in obj:
+        if key not in _PLAN_TIER_KEYS:
+            errs.append(f"unknown key '{key}' (known: {', '.join(_PLAN_TIER_KEYS)})")
+    for key in ("tier", "confidence", "evidence"):
+        if key not in obj:
+            errs.append(f"'{key}' is required")
+    if "tier" in obj and obj["tier"] not in PLAN_TIERS:
+        errs.append(f"tier must be 'light' or 'full' (got {obj['tier']!r})")
+    if "confidence" in obj:
+        e = _confidence_error("confidence", obj["confidence"])
+        if e:
+            errs.append(e)
+    if "evidence" in obj:
+        ev = obj["evidence"]
+        if not isinstance(ev, list):
+            errs.append(f"evidence must be a list (got {ev!r})")
+            ev = []
+        for i, item in enumerate(ev):
+            where = f"evidence[{i}]"
+            if not isinstance(item, dict):
+                errs.append(f"{where} must be an object (got {item!r})")
+                continue
+            for key in item:
+                if key not in _PLAN_EVIDENCE_KEYS:
+                    errs.append(f"{where} has an unknown key '{key}'")
+            d = item.get("dimension")
+            if not (isinstance(d, str) and d):
+                errs.append(f"{where}.dimension is required, a non-empty string")
+            if "value" not in item:
+                errs.append(f"{where}.value is required")
+            elif not (_is_number(item["value"]) or isinstance(item["value"], (bool, str))):
+                errs.append(f"{where}.value must be a number, boolean or string "
+                            f"(got {item['value']!r})")
+            if "confidence" in item:
+                e = _confidence_error(f"{where}.confidence", item["confidence"])
+                if e:
+                    errs.append(e)
+    if "reason" in obj and obj["reason"] is not None and not isinstance(obj["reason"], str):
+        errs.append(f"reason must be a string or null (got {obj['reason']!r})")
+    return errs
+
+
+def _plan_tier_parse(text: str) -> tuple[dict | None, list[str]]:
+    """`(verdict, errors)` from a classifier's raw output: `not JSON`, or the
+    validator's errors."""
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None, ["not JSON"]
+    errs = _plan_tier_errors(obj)
+    return (obj if not errs else None), errs
+
+
+# The plan digest (D3): a bounded, deterministic summary of the plan that is
+# all an external classifier receives. Priority order, top first; a trim
+# removes from the bottom.
+_SPEC_SECTION_RE = re.compile(r"^##\s+(ADDED|MODIFIED|REMOVED|RENAMED)\s+Requirements\b")
+_REQUIREMENT_RE = re.compile(r"^###\s+Requirement:\s*(.+?)\s*$")
+_DECISION_RE = re.compile(r"^###\s+(D\d+\..*?)\s*$")
+PLAN_DIGEST_TRIM_ORDER = ("decisions", "what_changes", "tasks")
+
+
+def _plan_spec_deltas(root: Path, change: str) -> list[dict]:
+    """Each spec delta's `## <OP> Requirements` sections with their
+    requirement titles: `{file, section, requirements}`."""
+    change_dir = root / "openspec" / "changes" / change
+    out: list[dict] = []
+    if not (change_dir / "specs").is_dir():
+        return out
+    for f in sorted((change_dir / "specs").rglob("*.md")):
+        current = None
+        for line in f.read_text().splitlines():
+            ms = _SPEC_SECTION_RE.match(line)
+            if ms:
+                current = {"file": f.relative_to(change_dir).as_posix(),
+                           "section": ms.group(1), "requirements": []}
+                out.append(current)
+                continue
+            if line.startswith("## "):
+                current = None
+                continue
+            mr = _REQUIREMENT_RE.match(line)
+            if mr and current is not None:
+                current["requirements"].append(mr.group(1))
+    return out
+
+
+def _plan_what_changes(root: Path, change: str) -> list[str]:
+    """The proposal's "What Changes" bullets, first lines only."""
+    p = root / "openspec" / "changes" / change / "proposal.md"
+    if not p.is_file():
+        return []
+    out, inside = [], False
+    for line in p.read_text().splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip().lower() == "what changes"
+            continue
+        if inside and re.match(r"^[-*]\s+", line):
+            out.append(re.sub(r"^[-*]\s+", "", line).strip())
+    return out
+
+
+def _plan_decisions(root: Path, change: str) -> list[str]:
+    p = root / "openspec" / "changes" / change / "design.md"
+    if not p.is_file():
+        return []
+    return [mt.group(1) for mt in map(_DECISION_RE.match, p.read_text().splitlines()) if mt]
+
+
+def _plan_digest_full(m: dict, root: Path, change: str) -> dict:
+    signals = _plan_signals(m, root, change)
+    floor = "full" if any(x["high"] for x in signals) else "light"
+    paths = []
+    for p in _plan_named_paths(root, change):
+        hot = hot_surfaces(m, [p])
+        paths.append({"path": p, "surfaces": [x["name"] for x in hot],
+                      "blast_radius": "high" if any(_blast_radius(x) == "high" for x in hot)
+                      else "normal"})
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    return {
+        "change": change,
+        "floor": floor,
+        "signals": signals,
+        "paths": paths,
+        "spec_deltas": _plan_spec_deltas(root, change),
+        "tasks": [f"{tid} {text.strip()}" for tid, text, _o in _task_lines(tasks_md)],
+        "what_changes": _plan_what_changes(root, change),
+        "decisions": _plan_decisions(root, change),
+        "trimmed": [],
+    }
+
+
+def _compact_json(obj) -> str:
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+
+
+def _plan_digest(m: dict, root: Path, change: str, limit: int | None = None) -> tuple[dict, bool]:
+    """`(digest, fits)`: the digest at `limit` bytes of compact UTF-8 JSON
+    (none when `limit` is None). Over the limit, entries go from the bottom
+    of the priority list -- decisions, then "What Changes", then tasks, each
+    from its last entry up -- and `trimmed` records each section and how
+    many entries it lost. `fits` is False only when nothing trimmable is
+    left and it is still over (D3: the tier is then full, with no call)."""
+    d = _plan_digest_full(m, root, change)
+    if limit is None:
+        return d, True
+    lost: dict[str, int] = {}
+
+    def over() -> bool:
+        return len(_compact_json(d).encode()) > limit
+
+    for section in PLAN_DIGEST_TRIM_ORDER:
+        while over() and d[section]:
+            d[section].pop()
+            lost[section] = lost.get(section, 0) + 1
+            d["trimmed"] = [{"section": s, "lost": n} for s, n in lost.items()]
+    return d, not over()
+
+
+def _plan_digest_cmd(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    if args.limit is not None and args.limit <= 0:
+        print("gatedloop: --limit must be a positive number of bytes.", file=sys.stderr)
+        return 1
+    d, fits = _plan_digest(m, root, change, args.limit)
+    if args.json:
+        sys.stdout.write(_compact_json(d) + "\n")
+        return 0
+    print(f"plan digest: {change}   floor: {d['floor']}")
+    print("signals: " + ", ".join(f"{x['id']}={'HIGH' if x['high'] else 'low'}"
+                                  for x in d["signals"]))
+    sections = (
+        ("paths", [f"{x['path']} [{', '.join(x['surfaces']) or 'no surface'}; "
+                   f"blast-radius {x['blast_radius']}]" for x in d["paths"]]),
+        ("spec deltas", [f"{x['file']} {x['section']}: {'; '.join(x['requirements']) or '—'}"
+                         for x in d["spec_deltas"]]),
+        ("tasks", d["tasks"]),
+        ("what changes", d["what_changes"]),
+        ("decisions", d["decisions"]),
+    )
+    for title, items in sections:
+        print(f"{title}:" + ("" if items else " none"))
+        for it in items:
+            print(f"  {it}")
+    if d["trimmed"]:
+        print("trimmed: " + ", ".join(f"{t['section']} -{t['lost']}" for t in d["trimmed"]))
+    if not fits:
+        print("over the limit: the classifier is skipped and the tier is full")
+    print(f"size: {len(_compact_json(d).encode())} bytes of compact JSON"
+          + (f" (limit {args.limit})" if args.limit else ""))
+    return 0
+
+
+def _plan_classifier_input(digest: dict, dimensions: list[dict]) -> bytes:
+    """The bytes an external classifier gets on stdin: `{digest,
+    dimensions}`, with the digest exactly as `gates plan digest --json
+    --limit <limit>` prints it (its trailing newline aside)."""
+    return ('{"digest":' + _compact_json(digest) + ',"dimensions":'
+            + _compact_json(dimensions) + "}").encode()
+
+
+def _plan_preflight_mode(m: dict) -> str:
+    """The effective `loop.plan-preflight` mode, `run` or `skip` (D12)."""
+    return _plan_preflight_settings(m)["mode"]
+
+
+def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None,
+                    base: str | None = None) -> dict:
+    findings = _plan_check_findings(m, root, change, against or "HEAD")
+    if against and base:
+        findings += _plan_drift_findings(root, change, against, base)
+    return {
+        "change": change,
+        "preflight": _plan_preflight_mode(m),
+        "tier": _plan_tier_doc(m, root, change, run_classifier=False),
+        "against": against,
+        "findings": findings,
+    }
+
+
+def _plan_check(m: dict, root: Path, args) -> int:
+    change = args.change
+    if not (root / "openspec" / "changes" / change).is_dir():
+        print(f"gatedloop: no change '{change}' under openspec/changes/ — nothing to check.",
+              file=sys.stderr)
+        return 1
+    against = getattr(args, "against", None)
+    base = None
+    if against:
+        if not _ref_commit(root, against):
+            print(f"gatedloop: --against {against} does not name a commit.", file=sys.stderr)
+            return 1
+        base = _plan_drift_base(root, change, against)
+        if base is None:
+            print(f"gatedloop: no base for the plan against {against} — {against} does not hold "
+                  f"the change and shares no history with HEAD.", file=sys.stderr)
+            return 1
+    doc = _plan_check_doc(m, root, change, against, base)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+        return 1 if doc["findings"] else 0
+    for f in doc["findings"]:
+        where = " ".join(x for x in (f"task {f['task']}" if f["task"] else None,
+                                     f["path"]) if x)
+        print(f"{f['kind']}: {where + ': ' if where else ''}{f['detail']}")
+    if doc["findings"]:
+        print(f"gatedloop: plan check — {len(doc['findings'])} finding(s) in '{change}'. "
+              "Amend the plan; a round opens only on a plan with none.", file=sys.stderr)
+        return 1
+    print(f"gatedloop: plan check — '{change}' is clean.")
+    return 0
+
+
+# The plan loop's rounds (D4, D5). Rows are record-only: `plan-round` and
+# `plan-review`, in the change's own ledger, on any branch. Nothing in
+# approval, handoff, merge, check-implement or stats reads them.
+PLAN_LIGHT_CHECKERS = ("plan-check", "lens:gatedloop.implementability")
+PLAN_FULL_CHECKERS = ("plan-check", "lens:gatedloop.implementability",
+                      "lens:gatedloop.zero-decision", "test-author", "dry-run",
+                      "authored-review")
+PLAN_SHIM_CHECKERS = ("plan-check", "dry-run")
+PLAN_VERDICTS = ("clean", "findings", "question")
+
+
+def _plan_checkers(tier: str) -> tuple[str, ...]:
+    return PLAN_FULL_CHECKERS if tier == "full" else PLAN_LIGHT_CHECKERS
+
+
+def _plan_rows(root: Path, change: str) -> list[dict]:
+    return [r for r in _read_ledger_rows(root, change)
+            if r.get("gate") in (PLAN_ROUND_EVENT, PLAN_REVIEW_EVENT)]
+
+
+def _plan_open_round(rows: list[dict]) -> dict | None:
+    """The round that is open: the last `plan-round` row, when its outcome is
+    `open` (a later `stalled` or `resume` row closes it)."""
+    rounds = [r for r in rows if r.get("gate") == PLAN_ROUND_EVENT]
+    return rounds[-1] if rounds and rounds[-1].get("outcome") == "open" else None
+
+
+def _plan_row(root: Path, change: str, event: str, **fields) -> dict:
+    row = {"ts": _now_iso(), "gate": event, "exit": None, "duration_ms": None,
+           "change": change, "task": None, **fields}
+    _append_ledger_row(root, row)
+    return row
+
+
+def _plan_round(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    findings = _plan_check_findings(m, root, change)
+    if findings:
+        for f in findings:
+            print(f"{f['kind']}: {f['detail']}")
+        print(f"gatedloop: plan round — {len(findings)} static finding(s); no round was opened "
+              "and none is counted. Amend the plan and run `gates plan round` again.",
+              file=sys.stderr)
+        return 1
+    rows = _plan_rows(root, change)
+    loop, rnd = _plan_loop_position(rows)
+    in_loop = _plan_current_loop_rows(rows)
+    if any(r.get("gate") == PLAN_REVIEW_EVENT and r.get("verdict") == "question" for r in in_loop):
+        print(f"gatedloop: loop {loop} stopped on a question — no round opens until a human "
+              f"answers it and `gates plan resume {change} --reason <text>` records that.",
+              file=sys.stderr)
+        return 1
+    tier = _plan_tier_doc(m, root, change, raise_flag=(args.tier == "full"))
+    c = tier["classifier"]
+    has_verdict = (c.get("tier") is not None or c.get("unavailable")
+                   or c.get("provider") == "skipped")
+    if tier["floor"] == "light" and not has_verdict:
+        print(f"gatedloop: the floor is light, and no classifier verdict exists for the plan's "
+              f"current digests (classifier: {c.get('provider')}, cause: {c.get('cause')}). "
+              "Run the plan-review agent with `--lens gatedloop.blast-radius` and pass its "
+              f"JSON to `gates plan classify {change} --verdict <file>`, or record "
+              f"`gates plan classify {change} --unavailable <cause>`.", file=sys.stderr)
+        return 1
+    budget = _plan_preflight_settings(m)["rounds"] if tier["tier"] == "full" else 1
+    digests = _plan_digests(root, change)
+    common = {"loop": loop, "plan_sha": digests["plan_sha"], "tasks_sha": digests["tasks_sha"],
+              "signals": tier["signals"], "floor": tier["floor"], "classifier": c,
+              "override": tier["override"], "tier": tier["tier"]}
+    if rnd >= budget:
+        _plan_row(root, change, PLAN_ROUND_EVENT, round=rnd, outcome="stalled", exit=1, **common)
+        print(f"gatedloop: loop {loop} stalled — its {budget}-round budget ({tier['tier']} tier) "
+              f"is spent. A human decides: amend, then `gates plan resume {change} --reason "
+              "<text>` for a fresh budget.", file=sys.stderr)
+        return 1
+    _plan_row(root, change, PLAN_ROUND_EVENT, round=rnd + 1, outcome="open", exit=0, **common)
+    _plan_row(root, change, PLAN_REVIEW_EVENT, loop=loop, round=rnd + 1,
+              plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"],
+              checker="plan-check", verdict="clean", exit=0,
+              snapshot=_preflight_snapshot_tip(root, change))
+    over = tier["override"]["source"]
+    print(f"gatedloop: plan round {rnd + 1} of {budget} opened (loop {loop}) — tier "
+          f"{tier['tier']} (floor {tier['floor']}"
+          f"{', ' + over if over else ''}).")
+    print("checkers: " + ", ".join(_plan_checkers(tier["tier"]))
+          + "   (plan-check recorded clean)")
+    return 0
+
+
+def _plan_current_loop_rows(rows: list[dict]) -> list[dict]:
+    """The rows since the last `resume` (the current loop's)."""
+    last = max((i for i, r in enumerate(rows) if r.get("gate") == PLAN_ROUND_EVENT
+                and r.get("outcome") == "resume"), default=-1)
+    return rows[last + 1:]
+
+
+def _plan_record(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    rows = _plan_rows(root, change)
+    rnd = _plan_open_round(rows)
+    if rnd is None:
+        print(f"gatedloop: no plan round is open for '{change}' — `gates plan round {change}` "
+              "opens one.", file=sys.stderr)
+        return 1
+    digests = _plan_digests(root, change)
+    if (rnd.get("plan_sha"), rnd.get("tasks_sha")) != (digests["plan_sha"], digests["tasks_sha"]):
+        print(f"gatedloop: the plan changed since round {rnd.get('round')} opened — an amendment "
+              "means a new round: `gates plan round` again. Nothing was recorded.",
+              file=sys.stderr)
+        return 1
+    checker = args.checker
+    allowed = _plan_checkers(rnd.get("tier") or "light")
+    if checker not in allowed:
+        print(f"gatedloop: checker '{checker}' is not one the round's {rnd.get('tier')} tier runs "
+              f"(it runs: {', '.join(allowed)}).", file=sys.stderr)
+        return 1
+    if checker == "plan-check":
+        print("gatedloop: plan-check is recorded by `gates plan round` from its own run.",
+              file=sys.stderr)
+        return 1
+    report_text = None
+    if checker == "dry-run":
+        if args.verdict:
+            print("gatedloop: the shim records the dry-run checker from its own run — drop "
+                  "--verdict.", file=sys.stderr)
+            return 1
+        run = subprocess.run([sys.executable, str(Path(__file__).resolve()), "tests", "handoff",
+                              change, "--dry-run"], cwd=root, capture_output=True, text=True)
+        sys.stdout.write(run.stdout)
+        sys.stderr.write(run.stderr)
+        verdict, exit_code = ("clean" if run.returncode == 0 else "findings"), run.returncode
+        report_text = run.stdout + run.stderr
+    else:
+        if not args.verdict:
+            print(f"gatedloop: --verdict clean|findings|question is required for '{checker}'.",
+                  file=sys.stderr)
+            return 1
+        verdict, exit_code = args.verdict, None
+    store = _preflight_ensure_store(root, change)
+    report = None
+    name = f"{rnd.get('loop')}.{rnd.get('round')}-{checker.replace(':', '-')}.md"
+    if args.report:
+        try:
+            report_text = Path(args.report).read_text()
+        except OSError as e:
+            print(f"gatedloop: cannot read --report {args.report} ({e.strerror}).", file=sys.stderr)
+            return 1
+    if report_text is not None:
+        (store / "reports" / name).write_text(report_text)
+        report = (store / "reports" / name).relative_to(root).as_posix()
+    _plan_row(root, change, PLAN_REVIEW_EVENT, loop=rnd.get("loop"), round=rnd.get("round"),
+              plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"], checker=checker,
+              verdict=verdict, exit=exit_code, report=report,
+              snapshot=_preflight_snapshot_tip(root, change))
+    print(f"gatedloop: recorded {checker}: {verdict} for loop {rnd.get('loop')}, round "
+          f"{rnd.get('round')}" + (f" (report: {report})" if report else "") + ".")
+    return 0 if checker != "dry-run" else exit_code
+
+
+def _plan_resume(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    reason = (args.reason or "").strip()
+    if not reason:
+        print("gatedloop: gates plan resume needs a --reason: what the human decided.",
+              file=sys.stderr)
+        return 1
+    loop, _rnd = _plan_loop_position(_plan_rows(root, change))
+    digests = _plan_digests(root, change)
+    _plan_row(root, change, PLAN_ROUND_EVENT, loop=loop + 1, round=0, outcome="resume",
+              detail=reason, plan_sha=digests["plan_sha"], tasks_sha=digests["tasks_sha"])
+    print(f"gatedloop: loop {loop + 1} starts with a fresh round budget ({reason}).")
+    return 0
+
+
+def _plan_status_doc(m: dict, root: Path, change: str) -> dict:
+    """The plan loop's record, folded from its rows (D4): each loop and
+    round, the tier's layers, each checker's latest verdict and report,
+    every resume, and the current loop's state."""
+    rows = _plan_rows(root, change)
+    loops: list[dict] = []
+    cur = {"loop": 1, "resume": None, "rounds": [], "stalled": False}
+    loops.append(cur)
+    for r in rows:
+        if r.get("gate") == PLAN_ROUND_EVENT:
+            if r.get("outcome") == "resume":
+                cur = {"loop": r.get("loop"), "resume": r.get("detail"), "rounds": [],
+                       "stalled": False}
+                loops.append(cur)
+            elif r.get("outcome") == "stalled":
+                cur["stalled"] = True
+            elif r.get("outcome") == "open":
+                cur["rounds"].append({
+                    "round": r.get("round"), "plan_sha": r.get("plan_sha"),
+                    "tasks_sha": r.get("tasks_sha"), "floor": r.get("floor"),
+                    "classifier": r.get("classifier"), "override": r.get("override"),
+                    "tier": r.get("tier"), "checkers": {}})
+        elif r.get("gate") == PLAN_REVIEW_EVENT and cur["rounds"]:
+            rnd = cur["rounds"][-1]
+            if r.get("round") == rnd["round"]:
+                rnd["checkers"][r.get("checker")] = {"verdict": r.get("verdict"),
+                                                     "report": r.get("report"),
+                                                     "snapshot": r.get("snapshot")}
+    last = loops[-1]
+    green_round = None
+    for lp in loops:
+        for rnd in lp["rounds"]:
+            if all((rnd["checkers"].get(c) or {}).get("verdict") == "clean"
+                   for c in _plan_checkers(rnd.get("tier") or "light")):
+                green_round = rnd
+    latest = last["rounds"][-1] if last["rounds"] else None
+    verdicts = ({c: (latest["checkers"].get(c) or {}).get("verdict")
+                 for c in _plan_checkers(latest.get("tier") or "light")} if latest else {})
+    if any(c.get("verdict") == "question" for rnd in last["rounds"]
+           for c in rnd["checkers"].values()):
+        state = "question"
+    elif latest and all(v == "clean" for v in verdicts.values()):
+        state = "green"
+    elif last["stalled"]:
+        state = "stalled"
+    elif latest and latest.get("tier") == "light" and "findings" in verdicts.values():
+        state = "amended"
+    else:
+        state = "open"
+    digests = _plan_digests(root, change)
+    moved = bool(green_round) and (green_round["plan_sha"], green_round["tasks_sha"]) != (
+        digests["plan_sha"], digests["tasks_sha"])
+    return {"change": change, "state": state, "loops": loops,
+            "digests": digests, "green_round_moved": moved,
+            "snapshot": {"branch": _preflight_branch(change),
+                         "tip": _preflight_snapshot_tip(root, change)}}
+
+
+def _short(sha) -> str:
+    return sha[:12] if isinstance(sha, str) else "—"
+
+
+def _plan_status_lines(doc: dict, markdown: bool) -> list[str]:
+    b = "- " if markdown else "  "
+    out = []
+    if markdown:
+        out.append(f"### Plan preflight: `{doc['change']}` — **{doc['state']}**")
+        out.append("")
+    else:
+        out.append(f"plan loop: {doc['change']}   state: {doc['state']}")
+    for lp in doc["loops"]:
+        head = f"loop {lp['loop']}" + (f" (resumed: {lp['resume']})" if lp["resume"] else "")
+        if lp["stalled"]:
+            head += " — stalled"
+        out.append(("**" + head + "**") if markdown else head)
+        for rnd in lp["rounds"]:
+            c = rnd.get("classifier") or {}
+            o = rnd.get("override") or {}
+            layers = (f"floor {rnd.get('floor')}, classifier {c.get('provider')}"
+                      + (f" ({c.get('cause')})" if c.get("cause") else "")
+                      + (f" → {c.get('combined')}" if c.get("combined") else "")
+                      + (f", {o.get('source')}" if o.get("source") else "")
+                      + (f" — {o.get('reason')}" if o.get("reason") else "")
+                      + f", tier {rnd.get('tier')}")
+            out.append(f"{b}round {rnd['round']} — plan {_short(rnd.get('plan_sha'))}, tasks "
+                       f"{_short(rnd.get('tasks_sha'))} — {layers}")
+            for checker in _plan_checkers(rnd.get("tier") or "light"):
+                v = rnd["checkers"].get(checker)
+                verdict = v["verdict"] if v else "not run"
+                report = f" ({v['report']})" if v and v.get("report") else ""
+                out.append(("  - " if markdown else "      ") + f"{checker}: {verdict}{report}")
+    if doc["green_round_moved"]:
+        out.append("The plan's digests have moved since its last green round: that round "
+                   "checked other content.")
+    snap = doc["snapshot"]
+    out.append(f"Preflight snapshot: `{snap['branch']}` at {_short(snap['tip'])}" if markdown
+               else f"preflight snapshot: {snap['branch']} at {_short(snap['tip'])}")
+    return out
+
+
+def _plan_status(m: dict, root: Path, args) -> int:
+    change = args.change
+    _plan_require_change(root, change)
+    doc = _plan_status_doc(m, root, change)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        print("\n".join(_plan_status_lines(doc, markdown=args.markdown)))
+    return 0
+
+
+def _plan_brief_tier(m: dict, root: Path, change: str) -> str:
+    """The tier whose lenses the brief lists: the open round's, which
+    `gates plan round` computed with the classifier run; before a round, the
+    tier computed without running a declared classifier (a brief costs no
+    call)."""
+    open_round = _plan_open_round(_plan_rows(root, change))
+    if open_round and open_round.get("tier") in PLAN_TIERS:
+        return open_round["tier"]
+    return _plan_tier_doc(m, root, change, run_classifier=False)["tier"]
+
+
+def _plan_artifacts(root: Path, change: str) -> list[str]:
+    change_dir = root / "openspec" / "changes" / change
+    out = [f"openspec/changes/{change}/{n}" for n in ("proposal.md", "design.md", "tasks.md")
+           if (change_dir / n).is_file()]
+    if (change_dir / "specs").is_dir():
+        out += [f.relative_to(root).as_posix()
+                for f in sorted((change_dir / "specs").rglob("*.md"))]
+    return out
+
+
+def _plan_brief(m: dict, root: Path, args) -> int:
+    """`gates plan brief <change> [--lens <id>]` (D6): the lenses the tier
+    runs, or one lens's brief for the plan-review agent."""
+    change = args.change
+    _plan_require_change(root, change)
+    err = _builtin_lenses_error()
+    if err:
+        print(f"gatedloop: {err} — the plugin install is incomplete; reinstall it",
+              file=sys.stderr)
+        return 1
+    if args.lens is None:
+        tier = _plan_brief_tier(m, root, change)
+        print(f"plan brief: {change} — tier {tier}")
+        print("Lenses this tier runs (one plan-review run each):")
+        for c in _plan_checkers(tier):
+            if c.startswith("lens:"):
+                print(f"  - {c[len('lens:'):]}")
+        print(f"\nResolve lens ids against: {BUILTIN_LENSES_FILE}")
+        print(f"Brief one lens: gates plan brief {change} --lens <id>")
+        return 0
+    if args.lens not in BUILTIN_LENS_IDS:
+        print(f"gatedloop: unknown lens '{args.lens}' — the lenses are "
+              f"{', '.join(BUILTIN_LENS_IDS)}.", file=sys.stderr)
+        return 1
+    print(f"plan brief: {change}")
+    print(f"lens: {args.lens}")
+    print(f"Resolve against: {BUILTIN_LENSES_FILE}")
+    print("\nThe plan's artifacts:")
+    for a in _plan_artifacts(root, change):
+        print(f"  {a}")
+    named = list(_plan_named_paths(root, change))
+    named += [p for p in _plan_drift_named(root, change) if p not in named]
+    print("\nPaths the plan names (read only these, and only what a check needs):")
+    for p in named:
+        print(f"  {p} — {'exists' if _exists_at(root, 'HEAD', p) else 'absent'} at HEAD")
+    if not named:
+        print("  (none)")
+    if args.lens == f"{NAME}.blast-radius":
+        digest, _fits = _plan_digest(m, root, change)
+        print("\nAnswer every dimension; return only the schema/plan-tier.schema.json object.")
+        print(json.dumps({"digest": digest, "dimensions": _plan_effective_dimensions(m),
+                          "signals": digest["signals"], "floor": digest["floor"]}, indent=2))
+    return 0
+
+
+def cmd_plan(m: dict, root: Path, args) -> int:
+    handlers = {
+        "brief": _plan_brief,
+        "check": _plan_check,
+        "tier": _plan_tier,
+        "digest": _plan_digest_cmd,
+        "classify": _plan_classify,
+        "round": _plan_round,
+        "record": _plan_record,
+        "resume": _plan_resume,
+        "status": _plan_status,
+        "save": _plan_save,
+        "restore": _plan_restore,
+    }
+    handler = handlers.get(args.plan_cmd)
+    if handler is None:
+        sys.exit(f"gatedloop: unknown plan subcommand '{args.plan_cmd}'")
     return handler(m, root, args)
 
 
@@ -8340,6 +10167,8 @@ NON_GATE_EVENTS = frozenset({
     "attempt-note", "restart",
     # token-ledger D1: what the session spent on a task, never a gate run.
     USAGE_EVENT,
+    # plan-preflight D5: the plan loop's record-only rows, never a gate run.
+    "plan-round", "plan-review",
 })
 
 DEFAULT_IDLE_GAP_MINUTES = 30
@@ -8388,6 +10217,9 @@ def stats_from_rows(rows: list[dict], idle_gap_ms: int) -> dict:
     # time -- never inside it, so the time figures are byte-identical with or
     # without them (a stop flush would otherwise lengthen an interval).
     rows = [r for r in rows if r.get("gate") != USAGE_EVENT]
+    # plan-preflight D5: plan-loop rows are planning before approval and
+    # record-only, so the stats are byte-identical with or without them.
+    rows = [r for r in rows if r.get("gate") not in ("plan-round", "plan-review")]
     usable: list[tuple] = []
     rows_without_ts = 0
     for r in rows:
@@ -11779,6 +13611,24 @@ def _out_log_dir(root: Path) -> Path:
     return _state_dir(root) / "out"
 
 
+def _ensure_out_dir(root: Path) -> Path:
+    """`.gatedloop/out/`, created with its self-ignoring `.gitignore` when
+    absent. Self-ignoring, so a `git add -A` in ANY adopter repo can never
+    stage a captured log (or the preflight store, plan-preflight D7) into the
+    tree the `ci` marker hashes: the marker's ledger-blind normalization is
+    exactly `.gatedloop/runs/**` (fix-marker-mechanics D1, deliberately not
+    `.gatedloop/**`), so an out-file that reached the index would stale the
+    very marker its run just earned -- the #10 class of defect. Nested
+    `.gitignore` with `*` is the standard cache-directory idiom; it ignores
+    itself too."""
+    d = _out_log_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    ignore = d / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n")
+    return d
+
+
 def _rotate_out_logs(root: Path, gate: str, keep: int = _OUT_LOG_KEEP) -> None:
     """Keep only the last `keep` captured logs per gate -- small, in-shim
     rotation (design Risks: "output files accumulate")."""
@@ -11798,18 +13648,7 @@ def _run_gate_captured(cmd: str, root: Path, gate: str, scope: str, verbose: boo
         return subprocess.run(cmd, shell=True, cwd=root).returncode
 
     started = time.monotonic()
-    d = _out_log_dir(root)
-    d.mkdir(parents=True, exist_ok=True)
-    # Self-ignoring, so a `git add -A` in ANY adopter repo can never stage a
-    # captured log into the tree the `ci` marker hashes: the marker's
-    # ledger-blind normalization is exactly `.gatedloop/runs/**` (fix-marker-
-    # mechanics D1, deliberately not `.gatedloop/**`), so an out-log that
-    # reached the index would stale the very marker its run just earned --
-    # the #10 class of defect. Nested `.gitignore` with `*` is the standard
-    # cache-directory idiom; it ignores itself too.
-    ignore = d / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n")
+    d = _ensure_out_dir(root)
     ts = _now_iso().replace(":", "").replace("+00:00", "Z")
     log_path = d / f"{gate}-{ts}.log"
     with log_path.open("w") as f:
@@ -14206,6 +16045,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_th.add_argument("change")
     sp_th.add_argument("--task", help="re-record one task only; supersedes that task's earlier entry")
     sp_th.add_argument("--inline", action="store_true", help="the implementer authored these itself (loop.test-author: inline)")
+    sp_th.add_argument("--dry-run", dest="dry_run", action="store_true",
+                       help="run every refusal against the preflight store (all but the tag-drift comparison); record no row and write no git object")
     sp_th.set_defaults(fn=cmd_tests)
     sp_tp = tests_sub.add_parser("place", help="move one task's held tests onto their real paths (a `tests-placed` row)")
     sp_tp.add_argument("task", help="task id (e.g. 1.2)")
@@ -14227,10 +16068,68 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tw.add_argument("change", nargs="?", help="change name (default: current branch)")
     sp_tw.add_argument("--json", action="store_true", help="one machine-readable JSON document")
     sp_tw.add_argument("--diff", action="store_true", help="print each declared rewrite's unified diff against its base (test-rewrites)")
+    sp_tw.add_argument("--preflight", action="store_true",
+                       help="report the preflight store (.gatedloop/out/preflight/<change>/) instead of the ledger; rewrites against HEAD")
     sp_tw.set_defaults(fn=cmd_tests)
     sp_tb = tests_sub.add_parser("brief", help="print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures")
     sp_tb.add_argument("change")
+    sp_tb.add_argument("--preflight", action="store_true",
+                       help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
+
+    sp = sub.add_parser("plan", help="the plan preflight: check a plan, its tier and digest, its rounds and their record, and the preflight store")
+    plan_sub = sp.add_subparsers(dest="plan_cmd", required=True)
+    sp_pb = plan_sub.add_parser("brief", help="the lenses the plan's tier runs; with --lens, that lens's brief for the plan-review agent: its rules path, the plan's artifacts, each named path at HEAD (blast-radius: the digest, dimensions, signals and floor as JSON)")
+    sp_pb.add_argument("change")
+    sp_pb.add_argument("--lens", metavar="ID", help="one lens: " + ", ".join(BUILTIN_LENS_IDS))
+    sp_pb.set_defaults(fn=cmd_plan)
+    sp_pc = plan_sub.add_parser("check", help="the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing")
+    sp_pc.add_argument("change")
+    sp_pc.add_argument("--json", action="store_true", help="one JSON document: {change, preflight, tier, against, findings}")
+    sp_pc.add_argument("--against", metavar="REF", help="check existence at REF and report each path the plan names that moved between the plan's base and REF")
+    sp_pc.set_defaults(fn=cmd_plan)
+    sp_pt = plan_sub.add_parser("tier", help="the plan's tier: the six floor signals, the classifier layer (raise-only) and the plan's override")
+    sp_pt.add_argument("change")
+    sp_pt.add_argument("--json", action="store_true", help="one JSON document: {floor, signals, classifier, override, tier}")
+    sp_pt.set_defaults(fn=cmd_plan)
+    sp_pd = plan_sub.add_parser("digest", help="the plan digest: exactly what an external classifier is given (signals, paths, spec delta headers, task lines, What Changes, decisions)")
+    sp_pd.add_argument("change")
+    sp_pd.add_argument("--json", action="store_true", help="the compact JSON a classifier receives as `digest`")
+    sp_pd.add_argument("--limit", type=int, metavar="BYTES", help="build it at this many bytes of compact JSON (default: no limit)")
+    sp_pd.set_defaults(fn=cmd_plan)
+    sp_pk = plan_sub.add_parser("classify", help="store the built-in gatedloop.blast-radius lens's verdict (validated against schema/plan-tier.schema.json), or that none could be had")
+    sp_pk.add_argument("change")
+    sp_pk.add_argument("--verdict", metavar="FILE", help="the lens's JSON verdict")
+    sp_pk.add_argument("--unavailable", metavar="CAUSE", help="record that no verdict could be had; the tier is then the floor")
+    sp_pk.set_defaults(fn=cmd_plan)
+    sp_pn = plan_sub.add_parser("round", help="open the next plan round: static checks first (no round on a finding), then the tier; exit 1 when the budget is spent (a `stalled` row)")
+    sp_pn.add_argument("change")
+    sp_pn.add_argument("--tier", choices=("full",), help="raise this round's tier to full (recorded as raised-flag)")
+    sp_pn.set_defaults(fn=cmd_plan)
+    sp_pe = plan_sub.add_parser("record", help="record a checker's verdict for the open round (a `plan-review` row); the dry run is run and recorded by the shim")
+    sp_pe.add_argument("change")
+    sp_pe.add_argument("--checker", required=True, help="lens:<id>, test-author, dry-run or authored-review")
+    sp_pe.add_argument("--verdict", choices=PLAN_VERDICTS, help="clean, findings or question (not for dry-run)")
+    sp_pe.add_argument("--report", metavar="FILE", help="the checker's report, copied to the preflight store's reports/")
+    sp_pe.set_defaults(fn=cmd_plan)
+    sp_pu = plan_sub.add_parser("resume", help="start a new plan loop with a fresh round budget, after a human's answer (a `plan-round` resume row)")
+    sp_pu.add_argument("change")
+    sp_pu.add_argument("--reason", required=True, help="what the human decided")
+    sp_pu.set_defaults(fn=cmd_plan)
+    sp_pz = plan_sub.add_parser("status", help="the plan loop's record from its rows: each loop and round, the tier's layers, each checker's verdict, every resume, the state")
+    sp_pz.add_argument("change")
+    fmt = sp_pz.add_mutually_exclusive_group()
+    fmt.add_argument("--json", action="store_true", help="one JSON document")
+    fmt.add_argument("--markdown", action="store_true", help="a block for the plan PR's body")
+    sp_pz.set_defaults(fn=cmd_plan)
+    sp_ps = plan_sub.add_parser("save", help="snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)")
+    sp_ps.add_argument("change")
+    sp_ps.set_defaults(fn=cmd_plan)
+    sp_pr = plan_sub.add_parser("restore", help="rebuild the preflight store from its snapshot branch (local, else origin/)")
+    sp_pr.add_argument("change")
+    sp_pr.add_argument("--from", dest="source", help="restore this ref instead of the snapshot branch")
+    sp_pr.add_argument("--force", action="store_true", help="replace a store that differs from the snapshot")
+    sp_pr.set_defaults(fn=cmd_plan)
 
     sp = sub.add_parser("integration", help="print the declared integration process (mode + requireApproval)")
     sp.set_defaults(fn=cmd_integration)

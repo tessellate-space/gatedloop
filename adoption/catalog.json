@@ -240,6 +240,20 @@
       "detector": {"kind": "manifest-key", "key": "loop.ci-scope"},
       "applies_when": {"kind": "surface-key", "key": "gates.ci"},
       "action": {"kind": "manifest-key", "key": "loop.ci-scope"}
+    },
+    {
+      "id": "plan-preflight",
+      "since": "0.12.0",
+      "what": "`loop.plan-preflight` decides whether the propose path judges a plan with models before its PR asks for approval: plan review through the tier's lenses (on Opus), and on the full tier the test author in preflight mode, its dry run and the authored-set review, each verdict recorded on the exact plan content and shown to the approver. `gates plan check` runs whatever it says, because it runs no model. `run` needs `loop.test-author: separate`.",
+      "question": "Should the propose path run the plan loop before each plan asks for approval? Its cost is Claude usage, per tier: light is one plan-review run per plan, plus the classifier; full is, per round, one plan-review run per lens, one test-author run (only the stale tasks after the first round) and one review run, for up to the round budget (`rounds`, default 3). Plan review runs on Opus, so each of its runs draws more usage than a Sonnet run of the same length. On a Claude subscription these runs draw on included usage; only a run on an API key is billed per token. Declaring an external classifier (`loop.plan-preflight.classifier`) sends the plan digest (file paths, requirement titles, task lines and decision headings) to that classifier's provider, and each call is billed to your own API key with it.",
+      "options": [
+        {"answer": "declined", "label": "Leave `loop.plan-preflight` unset: the default, `skip`, applies, and only `gates plan check` runs (Recommended)"},
+        {"answer": "adopted", "value": "run", "label": "Run the plan loop: `plan-preflight: run` (needs `loop.test-author: separate`)"},
+        {"answer": "adopted", "value": "skip", "label": "Set `plan-preflight: skip` explicitly: only `gates plan check`, which runs no model"}
+      ],
+      "detector": {"kind": "manifest-key", "key": "loop.plan-preflight"},
+      "applies_when": null,
+      "action": {"kind": "manifest-key", "key": "loop.plan-preflight"}
     }
   ]
 }

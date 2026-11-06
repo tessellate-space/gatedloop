@@ -337,39 +337,78 @@ becomes a recorded pattern in `gates stats --outcomes`.
 
 ---
 
-## Pair with an upstream design reviewer (elephant-goldfish-model)
+## Judging a plan before approval (was: pair with an upstream design reviewer)
 
-**What.** Document, and make cheap, running Google's
-[elephant-goldfish-model](https://github.com/google/elephant-goldfish-model) (EGM)
-upstream of gatedloop. EGM drafts a design with a deep-context agent and stress-tests
-it with fresh-context reviewers before code. gatedloop starts where EGM stops: at the
-approved plan. Three pieces, cheapest first:
+**What this entry was.** It proposed pairing gatedloop with an upstream design reviewer
+(Google's elephant-goldfish-model): a SETUP section pointing at that tool before
+`/gatedloop:propose`, record-only plan-review evidence beside the approval, and the
+loop's `weak-spec` and `oracle-conflict` halts fed back into design review. It held
+that judging a design was "not ours", and waited for someone to run the two together.
 
-1. **A pairing section in SETUP.md:** run `/egm:egm-review` on the change's `design.md`
-   before `/gatedloop:propose` opens the plan PR, and link its findings in the PR body.
-2. **Plan-review evidence beside the approval:** `gates approval` records that a
-   plan review ran, and on which content, the way `review-provenance` records a
-   convention review. It records and never blocks, for the same reason review never
-   blocks a commit: the verdict is an LLM judgement.
-3. **The loop's outcomes as review input:** `weak-spec` and `oracle-conflict` halts are
-   evidence that a plan left a decision to the implementer, which is what EGM's
-   implementation-readiness reviewer (its "Zero-Decision Rule") exists to catch.
-   `gates stats --outcomes` per change, handed to the next design review, closes that
-   loop from the other side.
+**The revised boundary.** Judging a plan before it is approved is now ours, because it
+moves the planning phase from `act` to `close` (the rejection test's single question).
+Until then gatedloop closed implementation, and planning ended at "a human read it".
+The evidence is #168, from tessellate-space under 0.11.1: of 24 plan PRs merged on
+2026-11-05 and 2026-11-06, 20 were amendments made after approval, because of handoff
+refusals, failed test-quality reviews, plans wrong about the code, a task order that
+deadlocked, and plans that drifted while they waited for handoff. Authoring a plan
+stays OpenSpec's: the loop judges a plan and authors none of it.
 
-**Against the rejection test.** Piece 1 gets a team running faster: ours, as a doc.
-Piece 2 makes a stated practice checkable: ours, if it stays record-only. Authoring or
-judging the design is EGM's, and OpenSpec's: not ours, and nothing here does it. No
-shipped prompt may name EGM (`stack-agnostic-prompts` spirit). The pairing lives in
-docs, and piece 2 must accept any plan reviewer.
+**What shipped.** `plan-preflight` ships the loop (`gates plan check` always, and under
+`loop.plan-preflight: run` rounds of plan review, a preflight test author, its dry run
+and the authored-set review, at a tier the shim computes), the `plan-review` agent and
+its lenses (`rules/plan-lenses.md`), and the record: `plan-round` and `plan-review`
+rows on the plan's own content, committed with the plan and rendered into the PR body
+by `gates plan status --markdown`. That covers the old pieces 1 and 2, in the plugin
+rather than beside it. No shipped prompt names any external reviewer, and none needs
+to: the lenses are ids plus rules, and a team that prefers another reviewer can run it
+alongside without the plugin knowing.
 
-**Why not now.** EGM writes `design_draft.md` and `docs/designs/`, while OpenSpec
-writes `openspec/changes/<name>/design.md`. Nobody has yet run the two together on one
-change, so the hand-off is guesswork. One maintainer has run gatedloop's loop so far.
+**What remains a candidate: halts as plan-review input.**
 
-**Promote when.** An adopter, or this repo, has run EGM's review on an OpenSpec design
-for a few changes and the hand-off has settled. Piece 3 waits for enough `weak-spec`
-halts in `gates stats --outcomes` to show a pattern.
+*What.* Feed the `weak-spec` and `oracle-conflict` halts that `gates stats --outcomes`
+counts per change back into plan review, for example as a lens input naming the kinds
+of gap this project's past plans left.
+
+*Against the rejection test.* Authors nothing and names no stack command; it makes the
+loop's own evidence act on the next plan, which keeps planning at `close`.
+
+*Why not now.* The loop has not run on enough plans to show which halts it already
+prevents, and a lens input built from halts the loop already catches would add usage
+and no signal.
+
+*Promote when* `gates stats --outcomes` across a few releases shows `weak-spec` or
+`oracle-conflict` halts on plans whose loop ended green: a gap the lenses miss, with a
+pattern a lens input could name.
+
+---
+
+## A preflight red run
+
+**What.** In the plan loop, after a clean dry run, place the preflight store's held
+tests in a scratch worktree at the plan's base and run each task's oracle gate there,
+so a red-first task whose tests already pass is caught by a gate's exit code before
+approval, rather than by a reader's judgement.
+
+**Why it is a good fit.** It is the complete form of the check `plan-preflight` D10 (c)
+bounds: today a green-first task without `characterization` is caught only by the
+zero-decision lens judging the tag and by the preflight author returning `weak-spec`.
+Both are judgements; the run would be an oracle.
+
+**Against the rejection test.** Authors nothing, and names no stack command: it calls
+the task's declared oracle gate through `gates run`. It makes a stated guarantee (the
+red run after placement) checkable earlier.
+
+**Why not now.** D10 (c)'s cost argument: it costs a gate run per task per round, which
+can dwarf the rest of the loop; it needs an oracle gate that can be scoped to one
+task's tests, which not every adopter's `unit` is; and it can misjudge a test that only
+an earlier task's implementation would turn red, so a "pass at the base" is not always
+a wrong tag. The red run after placement still catches such a task later, after
+approval.
+
+**Promote when** field data shows `green` defects (tests that passed on placement) on
+tasks whose plan loop ended green often enough to cost more than the runs would, and
+the oracle gates of those projects can be scoped per task.
 
 ---
 
@@ -434,6 +473,13 @@ task. `rewrites:` answers a different problem, content the author cannot see, an
 deletion has none to author. Promote if adopters report that review alone lets
 unjustified deletions through; the clause can be added without changing the grammar
 (`test-rewrites` design D1).
+
+**Field evidence (#168, unpromoted).** Tessellate-space asked for `gates plan check` to
+refuse a `rewrites:` path that a task deletes. The plan has no way to declare a
+deletion, so the check cannot be mechanical, and `plan-preflight` D10 (a) made it
+implementability check 3, judged by plan review. The report is evidence that a plan
+naming its deletions would be checkable, and a request for it; it is not yet
+the reported pattern of unjustified deletions this entry waits for.
 
 ---
 

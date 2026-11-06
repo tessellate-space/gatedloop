@@ -1,0 +1,36 @@
+{
+  "description": "The blast-radius dimensions a plan-tier classifier answers (plan-preflight design D3). Each is a narrow typed question; the shim combines the answers, and a verdict may only raise the tier. Overridable per project under loop.plan-preflight.dimensions.",
+  "dimensions": [
+    {
+      "id": "security-path",
+      "kind": "probability",
+      "question": "How likely is it that this plan changes an authentication, authorization or security path?",
+      "threshold": 0.5
+    },
+    {
+      "id": "persisted-data",
+      "kind": "probability",
+      "question": "How likely is it that this plan changes persisted data or its format?",
+      "threshold": 0.5
+    },
+    {
+      "id": "public-interface",
+      "kind": "probability",
+      "question": "How likely is it that this plan changes an interface other code or other systems call or read?",
+      "threshold": 0.5
+    },
+    {
+      "id": "irreversible",
+      "kind": "probability",
+      "question": "How likely is it that this plan performs or enables an operation that cannot be undone?",
+      "threshold": 0.5
+    },
+    {
+      "id": "overall-tier",
+      "kind": "choice",
+      "question": "Taken as a whole, does this plan need the light review (one read of the plan against the code) or the full one (every lens, a preflight test author and its review)?",
+      "options": ["light", "full"],
+      "raises": "full"
+    }
+  ]
+}

@@ -2711,6 +2711,723 @@
   "help_in_parent": "move this project onto the gatedloop names: state directory, change metadata, hook markers; prints the edits it does not make",
   "prog": "gates migrate-name"
  },
+ "plan": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_SubParsersAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "plan_cmd",
+    "help": null,
+    "metavar": null,
+    "nargs": "A...",
+    "option_strings": [],
+    "required": null,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan preflight: check a plan, its tier and digest, its rounds and their record, and the preflight store",
+  "prog": "gates plan"
+ },
+ "plan brief": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "lens",
+    "help": "one lens: gatedloop.implementability, gatedloop.zero-decision, gatedloop.blast-radius",
+    "metavar": "ID",
+    "nargs": null,
+    "option_strings": [
+     "--lens"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the lenses the plan's tier runs; with --lens, that lens's brief for the plan-review agent: its rules path, the plan's artifacts, each named path at HEAD (blast-radius: the digest, dimensions, signals and floor as JSON)",
+  "prog": "gates plan brief"
+ },
+ "plan check": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one JSON document: {change, preflight, tier, against, findings}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "against",
+    "help": "check existence at REF and report each path the plan names that moved between the plan's base and REF",
+    "metavar": "REF",
+    "nargs": null,
+    "option_strings": [
+     "--against"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan's static findings: this change's oracle-tag problems, untagged tasks under a required oracle, rewrites absent at the base; writes nothing",
+  "prog": "gates plan check"
+ },
+ "plan classify": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "verdict",
+    "help": "the lens's JSON verdict",
+    "metavar": "FILE",
+    "nargs": null,
+    "option_strings": [
+     "--verdict"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "unavailable",
+    "help": "record that no verdict could be had; the tier is then the floor",
+    "metavar": "CAUSE",
+    "nargs": null,
+    "option_strings": [
+     "--unavailable"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "store the built-in gatedloop.blast-radius lens's verdict (validated against schema/plan-tier.schema.json), or that none could be had",
+  "prog": "gates plan classify"
+ },
+ "plan digest": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "the compact JSON a classifier receives as `digest`",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "limit",
+    "help": "build it at this many bytes of compact JSON (default: no limit)",
+    "metavar": "BYTES",
+    "nargs": null,
+    "option_strings": [
+     "--limit"
+    ],
+    "required": false,
+    "type": "int"
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan digest: exactly what an external classifier is given (signals, paths, spec delta headers, task lines, What Changes, decisions)",
+  "prog": "gates plan digest"
+ },
+ "plan record": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "checker",
+    "help": "lens:<id>, test-author, dry-run or authored-review",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--checker"
+    ],
+    "required": true,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "clean",
+     "findings",
+     "question"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "verdict",
+    "help": "clean, findings or question (not for dry-run)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--verdict"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "report",
+    "help": "the checker's report, copied to the preflight store's reports/",
+    "metavar": "FILE",
+    "nargs": null,
+    "option_strings": [
+     "--report"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "record a checker's verdict for the open round (a `plan-review` row); the dry run is run and recorded by the shim",
+  "prog": "gates plan record"
+ },
+ "plan restore": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "source",
+    "help": "restore this ref instead of the snapshot branch",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--from"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "force",
+    "help": "replace a store that differs from the snapshot",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--force"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "rebuild the preflight store from its snapshot branch (local, else origin/)",
+  "prog": "gates plan restore"
+ },
+ "plan resume": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "reason",
+    "help": "what the human decided",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--reason"
+    ],
+    "required": true,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "start a new plan loop with a fresh round budget, after a human's answer (a `plan-round` resume row)",
+  "prog": "gates plan resume"
+ },
+ "plan round": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": [
+     "full"
+    ],
+    "const": null,
+    "default": null,
+    "dest": "tier",
+    "help": "raise this round's tier to full (recorded as raised-flag)",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--tier"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "open the next plan round: static checks first (no round on a finding), then the tier; exit 1 when the budget is spent (a `stalled` row)",
+  "prog": "gates plan round"
+ },
+ "plan save": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "snapshot the preflight store onto gatedloop/preflight/<change> (git plumbing; the tree, index and HEAD never move)",
+  "prog": "gates plan save"
+ },
+ "plan status": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one JSON document",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "markdown",
+    "help": "a block for the plan PR's body",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--markdown"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan loop's record from its rows: each loop and round, the tier's layers, each checker's verdict, every resume, the state",
+  "prog": "gates plan status"
+ },
+ "plan tier": {
+  "args": [
+   {
+    "action": "_HelpAction",
+    "choices": null,
+    "const": null,
+    "default": "==SUPPRESS==",
+    "dest": "help",
+    "help": "show this help message and exit",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "-h",
+     "--help"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreAction",
+    "choices": null,
+    "const": null,
+    "default": null,
+    "dest": "change",
+    "help": null,
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [],
+    "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "one JSON document: {floor, signals, classifier, override, tier}",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
+    "type": null
+   }
+  ],
+  "description": null,
+  "epilog": null,
+  "formatter_class": "HelpFormatter",
+  "help_in_parent": "the plan's tier: the six floor signals, the classifier layer (raise-only) and the plan's override",
+  "prog": "gates plan tier"
+ },
  "record-merged": {
   "args": [
    {
@@ -3767,6 +4484,21 @@
     "option_strings": [],
     "required": null,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "preflight",
+    "help": "write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--preflight"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,
@@ -3992,6 +4724,21 @@
     ],
     "required": false,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "dry_run",
+    "help": "run every refusal against the preflight store (all but the tag-drift comparison); record no row and write no git object",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--dry-run"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,
@@ -4110,6 +4857,21 @@
     "nargs": 0,
     "option_strings": [
      "--diff"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "preflight",
+    "help": "report the preflight store (.gatedloop/out/preflight/<change>/) instead of the ledger; rewrites against HEAD",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--preflight"
     ],
     "required": false,
     "type": null

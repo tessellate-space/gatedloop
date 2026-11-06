@@ -55,6 +55,18 @@
   "window",
   "messages",
   "source",
+  "loop",
+  "round",
+  "plan_sha",
+  "tasks_sha",
+  "signals",
+  "floor",
+  "classifier",
+  "override",
+  "tier",
+  "checker",
+  "report",
+  "snapshot",
   "v"
  ],
  "ledger_row_version": 1,
@@ -518,6 +530,115 @@
    "positionals": [],
    "visibility": "public"
   },
+  "plan": {
+   "options": [],
+   "positionals": [],
+   "visibility": "public"
+  },
+  "plan brief": {
+   "options": [
+    "--lens"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan check": {
+   "options": [
+    "--against",
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan classify": {
+   "options": [
+    "--unavailable",
+    "--verdict"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan digest": {
+   "options": [
+    "--json",
+    "--limit"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan record": {
+   "options": [
+    "--checker",
+    "--report",
+    "--verdict"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan restore": {
+   "options": [
+    "--force",
+    "--from"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan resume": {
+   "options": [
+    "--reason"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan round": {
+   "options": [
+    "--tier"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan save": {
+   "options": [],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan status": {
+   "options": [
+    "--json",
+    "--markdown"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
+  "plan tier": {
+   "options": [
+    "--json"
+   ],
+   "positionals": [
+    "change"
+   ],
+   "visibility": "public"
+  },
   "record-merged": {
    "options": [],
    "positionals": [
@@ -655,7 +776,9 @@
    "visibility": "public"
   },
   "tests brief": {
-   "options": [],
+   "options": [
+    "--preflight"
+   ],
    "positionals": [
     "change"
    ],
@@ -683,6 +806,7 @@
   },
   "tests handoff": {
    "options": [
+    "--dry-run",
     "--inline",
     "--task"
    ],
@@ -703,7 +827,8 @@
   "tests show": {
    "options": [
     "--diff",
-    "--json"
+    "--json",
+    "--preflight"
    ],
    "positionals": [
     "change"

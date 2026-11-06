@@ -64,6 +64,8 @@ LEDGER_FIELDS = {
     "characterization", "kind",
     # token-ledger design D1: usage rows only.
     "tokens", "window", "messages", "source",
+    # plan-preflight D5: plan-round / plan-review fields.
+    "loop", "round", "plan_sha", "tasks_sha", "signals", "floor", "classifier", "override", "tier", "checker", "report", "snapshot",
     "v",
 }
 
