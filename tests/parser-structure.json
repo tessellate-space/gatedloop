@@ -3767,6 +3767,21 @@
     "option_strings": [],
     "required": null,
     "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "preflight",
+    "help": "write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--preflight"
+    ],
+    "required": false,
+    "type": null
    }
   ],
   "description": null,

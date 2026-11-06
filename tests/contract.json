@@ -655,7 +655,9 @@
    "visibility": "public"
   },
   "tests brief": {
-   "options": [],
+   "options": [
+    "--preflight"
+   ],
    "positionals": [
     "change"
    ],

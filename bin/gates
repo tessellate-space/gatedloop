@@ -6281,15 +6281,15 @@ def _file_blob(root: Path, rel: str) -> str | None:
     return _hash_blob(root, p.read_bytes())
 
 
-def _read_holding_area(root: Path, change: str) -> tuple[dict, dict, dict, list[str]]:
+def _read_holding_area(base: Path) -> tuple[dict, dict, dict, list[str]]:
     """`({task: {path: abs holding file}}, {task: reason}, {task:
-    characterization reason}, problems)` for the change's holding area as it
-    is on disk. A problem is anything the lock could not enforce: a task
+    characterization reason}, problems)` for the holding area at `base` as it
+    is on disk: the change's real holding area, or the preflight store's
+    `authored/` (plan-preflight D9). A problem is anything the lock could not enforce: a task
     holding both tests and `NO-TESTS`, a task declared both `CHARACTERIZATION`
     and `NO-TESTS`, a declaration with no tests to pin or no reason, a task
     holding nothing, or a file without the `.authored` suffix (a runner might
     discover it)."""
-    base = _authored_dir(root, change)
     tests: dict[str, dict[str, Path]] = {}
     reasons: dict[str, str] = {}
     characterization: dict[str, str] = {}
@@ -6482,7 +6482,7 @@ def _oracle_handoff_problems(m: dict, root: Path, change: str, held_tests: dict,
 def _tests_handoff(m: dict, root: Path, args) -> int:
     change = args.change
     only = getattr(args, "task", None)
-    held_tests, reasons, characterization, problems = _read_holding_area(root, change)
+    held_tests, reasons, characterization, problems = _read_holding_area(_authored_dir(root, change))
     where = _authored_dir(root, change).relative_to(root).as_posix()
     if problems:
         return _tests_refuse(
@@ -7949,8 +7949,140 @@ def _render_tests_brief(m: dict, root: Path, change: str) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+# ---------- the preflight store (plan-preflight D7, D9) -------------------
+#
+# The working copy of a plan loop's authored tests: `.gatedloop/out/
+# preflight/<change>/`, ignored because `.gatedloop/out/` ignores itself, and
+# never the real holding area. `authored/` has the holding area's layout,
+# `digests.json` records the brief content each task was authored from, and
+# `reports/` keeps each round's checker reports.
+
+PREFLIGHT_DIGESTS_FILE = "digests.json"
+
+
+def _preflight_store(root: Path, change: str) -> Path:
+    return _out_log_dir(root) / "preflight" / change
+
+
+def _preflight_ensure_store(root: Path, change: str) -> Path:
+    """The store, created with `authored/` and `reports/` (and the
+    self-ignoring `.gatedloop/out/`) when absent."""
+    _ensure_out_dir(root)
+    store = _preflight_store(root, change)
+    (store / "authored").mkdir(parents=True, exist_ok=True)
+    (store / "reports").mkdir(parents=True, exist_ok=True)
+    return store
+
+
+def _preflight_change_wide(m: dict, root: Path, change: str) -> str:
+    """The digest of the brief's change-wide content: the design, every spec
+    delta, the project's test rules (ids and text), the built-in rule ids
+    and the runner. A change here re-authors every task (D7)."""
+    change_dir = root / "openspec" / "changes" / change
+    h = hashlib.sha256()
+    files = [change_dir / "design.md"]
+    if (change_dir / "specs").is_dir():
+        files += sorted((change_dir / "specs").rglob("*.md"))
+    for f in files:
+        if f.is_file():
+            h.update(f.relative_to(change_dir).as_posix().encode() + b"\n")
+            h.update(f.read_bytes() + b"\n")
+    rules_doc = (m.get("conventions") or {}).get("rules-doc")
+    sections: dict[str, str] = {}
+    if rules_doc and (root / rules_doc).is_file():
+        sections = _rule_sections_text((root / rules_doc).read_text())
+    for rid in _project_test_rule_ids(m, root):
+        h.update(f"rule {rid}\n{sections.get(rid, '')}\n".encode())
+    for rid in BUILTIN_RULE_IDS:
+        h.update(f"builtin {rid}\n".encode())
+    unit_run, unit_requires = _gate_spec((m.get("gates") or {}).get("unit"))
+    h.update(f"runner {unit_run} {unit_requires}\n".encode())
+    return h.hexdigest()
+
+
+def _preflight_task_digests(m: dict, root: Path, change: str) -> dict[str, str]:
+    """`{task: digest}` of the brief content each task is authored from: its
+    task line with its tag, its declared rewrites' copies at `HEAD`, and the
+    change-wide sections (D7)."""
+    wide = _preflight_change_wide(m, root, change)
+    tasks_md = root / "openspec" / "changes" / change / "tasks.md"
+    out: dict[str, str] = {}
+    for tid, text, oracle in _task_lines(tasks_md):
+        h = hashlib.sha256()
+        h.update(f"{wide}\n{tid} {text} [oracle: {_oracle_label(oracle)}]\n".encode())
+        for path in _oracle_rewrites(oracle):
+            content = _blob_at(root, "HEAD", path)
+            h.update(f"rewrites {path}\n".encode())
+            h.update(b"<absent>" if content is None else content.encode())
+        out[tid] = h.hexdigest()
+    return out
+
+
+def _preflight_read_digests(store: Path) -> dict[str, str]:
+    try:
+        data = json.loads((store / PREFLIGHT_DIGESTS_FILE).read_text())
+    except (OSError, ValueError):
+        return {}
+    tasks = data.get("tasks") if isinstance(data, dict) else None
+    return {str(k): str(v) for k, v in tasks.items()} if isinstance(tasks, dict) else {}
+
+
+def _preflight_write_digests(store: Path, digests: dict[str, str]) -> None:
+    store.mkdir(parents=True, exist_ok=True)
+    (store / PREFLIGHT_DIGESTS_FILE).write_text(
+        json.dumps({"tasks": digests}, indent=2, sort_keys=True) + "\n")
+
+
+def _preflight_reuse(m: dict, root: Path, change: str) -> tuple[list[str], list[str]]:
+    """`(stale, kept)` task ids (D7): stale when its digest moved or is
+    absent from `digests.json`, or when it holds a path a stale task holds
+    (the later task's copy holds the full file); kept otherwise."""
+    store = _preflight_store(root, change)
+    current = _preflight_task_digests(m, root, change)
+    saved = _preflight_read_digests(store)
+    held, _reasons, _char, _problems = _read_holding_area(store / "authored")
+    paths = {t: set(files) for t, files in held.items()}
+    stale = {t for t in current if saved.get(t) != current[t]}
+    grew = True
+    while grew:
+        grew = False
+        taken = set().union(*(paths.get(t, set()) for t in stale)) if stale else set()
+        for t in current:
+            if t not in stale and paths.get(t, set()) & taken:
+                stale.add(t)
+                grew = True
+    order = list(current)
+    return [t for t in order if t in stale], [t for t in order if t not in stale]
+
+
+def _preflight_brief_sections(m: dict, root: Path, change: str) -> str:
+    store = _preflight_ensure_store(root, change)
+    where = (store / "authored").relative_to(root).as_posix()
+    real = _authored_dir(root, change).relative_to(root).as_posix()
+    stale, kept = _preflight_reuse(m, root, change)
+    lines = [
+        "## Preflight store",
+        f"Write this change's tests to {where}/ — in place of the holding area "
+        f"{real}/, which a preflight never touches — as <N.M>/<path>{AUTHORED_SUFFIX}, "
+        f"<N.M>/{CHARACTERIZATION_FILE} or <N.M>/{NO_TESTS_FILE}, the holding area's "
+        "layout. The store is ignored by git; `gates plan save "
+        f"{change}` snapshots it. End with `gates tests handoff {change} --dry-run`, "
+        "never a real handoff.",
+        "",
+        "## Preflight reuse",
+        f"Stale — author these: {', '.join(stale) if stale else 'none'}",
+        f"Kept from an earlier round — leave their files as they are: "
+        f"{', '.join(kept) if kept else 'none'}",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _tests_brief(m: dict, root: Path, args) -> int:
     text = _render_tests_brief(m, root, args.change)
+    if text is not None and getattr(args, "preflight", False):
+        head, _sep, rest = text.partition("\n\n")
+        text = head + "\n\n" + _preflight_brief_sections(m, root, args.change) + rest
     if text is None:
         print(
             f"gatedloop: no change '{args.change}' under openspec/changes/ — the "
@@ -11779,6 +11911,24 @@ def _out_log_dir(root: Path) -> Path:
     return _state_dir(root) / "out"
 
 
+def _ensure_out_dir(root: Path) -> Path:
+    """`.gatedloop/out/`, created with its self-ignoring `.gitignore` when
+    absent. Self-ignoring, so a `git add -A` in ANY adopter repo can never
+    stage a captured log (or the preflight store, plan-preflight D7) into the
+    tree the `ci` marker hashes: the marker's ledger-blind normalization is
+    exactly `.gatedloop/runs/**` (fix-marker-mechanics D1, deliberately not
+    `.gatedloop/**`), so an out-file that reached the index would stale the
+    very marker its run just earned -- the #10 class of defect. Nested
+    `.gitignore` with `*` is the standard cache-directory idiom; it ignores
+    itself too."""
+    d = _out_log_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    ignore = d / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n")
+    return d
+
+
 def _rotate_out_logs(root: Path, gate: str, keep: int = _OUT_LOG_KEEP) -> None:
     """Keep only the last `keep` captured logs per gate -- small, in-shim
     rotation (design Risks: "output files accumulate")."""
@@ -11798,18 +11948,7 @@ def _run_gate_captured(cmd: str, root: Path, gate: str, scope: str, verbose: boo
         return subprocess.run(cmd, shell=True, cwd=root).returncode
 
     started = time.monotonic()
-    d = _out_log_dir(root)
-    d.mkdir(parents=True, exist_ok=True)
-    # Self-ignoring, so a `git add -A` in ANY adopter repo can never stage a
-    # captured log into the tree the `ci` marker hashes: the marker's
-    # ledger-blind normalization is exactly `.gatedloop/runs/**` (fix-marker-
-    # mechanics D1, deliberately not `.gatedloop/**`), so an out-log that
-    # reached the index would stale the very marker its run just earned --
-    # the #10 class of defect. Nested `.gitignore` with `*` is the standard
-    # cache-directory idiom; it ignores itself too.
-    ignore = d / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n")
+    d = _ensure_out_dir(root)
     ts = _now_iso().replace(":", "").replace("+00:00", "Z")
     log_path = d / f"{gate}-{ts}.log"
     with log_path.open("w") as f:
@@ -14230,6 +14369,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_tw.set_defaults(fn=cmd_tests)
     sp_tb = tests_sub.add_parser("brief", help="print the test author's brief: artifacts, test and surface rules, runner (never run), nearby test paths, shared fixtures")
     sp_tb.add_argument("change")
+    sp_tb.add_argument("--preflight", action="store_true",
+                       help="write to the preflight store (.gatedloop/out/preflight/<change>/) and list the tasks an earlier round already authored")
     sp_tb.set_defaults(fn=cmd_tests)
 
     sp = sub.add_parser("integration", help="print the declared integration process (mode + requireApproval)")
