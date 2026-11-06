@@ -434,3 +434,25 @@ task. `rewrites:` answers a different problem, content the author cannot see, an
 deletion has none to author. Promote if adopters report that review alone lets
 unjustified deletions through; the clause can be added without changing the grammar
 (`test-rewrites` design D1).
+
+---
+
+## A code-enforced budget for the READY `ci` under `loop.ci-at: ready`
+
+**What.** Count the red unscoped `ci` runs a change records once every task is checked,
+and refuse a further `gates run ci` past a declared cap, as the per-task budget refuses
+`unit` and `ci` for a task today.
+
+**Why it is a good fit.** Under `ready` the full `ci` moves to READY. A red there gets
+"at most 2 focused fixes, then HALT `stalled`", the same stopping rule `verify` and
+`live-check` have, and that rule lives only in the prompt. The ledger already holds
+every row it would count.
+
+**Against the rejection test.** Authors nothing, names no stack command, and makes a
+stated guarantee (the stopping rule) enforceable.
+
+**Why not now.** `ci-at` D5 kept the READY `ci` change-level on purpose: it records no
+task (`budget-ticked-task` D1), so it is nobody's attempt, and a change-level budget is
+a new kind of counter with its own restart story. `verify` and `live-check` have run
+under the prompt-level rule without a field report of a runaway loop. Promote when one
+shows a READY `ci` retried past the rule.
