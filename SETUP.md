@@ -543,7 +543,9 @@ gates ledger record-ready <change>               # append the `ready` row the im
 gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint, naming each tainted commit (a merge commit marked with the sync route); --ref reads the change a merge's incoming ref names
 gates lock status [--json]                       # each serialized gate's lock: free, or held by pid N (alive|dead?) for how long; flags "possibly hung"; names a merge waiting with priority
 gates tests brief <change>                       # the test author's inputs: artifacts, test and surface rules, runner, nearby test paths, fixtures
-gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger
+gates tests handoff <change> [--task N.M] [--inline]   # record the holding area's tests in the ledger; on success, stderr names the commit gate (as `gates task start`)
+gates task start <N.M>                           # record the tree the task starts from; stderr names the commit gate: `gatedloop: commit gate: gates run ci`, or `gates run unit (loop.ci-at: ready — …)`
+gates task changed [--task N.M]                  # every path that differs from the task-start tree, untracked included
 gates tests place <N.M>                          # move one task's held tests onto their real paths
 gates tests check [--task N.M]                   # the authored-test lock the commit hooks run
 gates tests check --ref <commit> [--change <name>]   # the same lock at a commit's tree and ledger, every task; no handoff passes
@@ -1289,10 +1291,18 @@ Layer 2 is **opt-in** — `gates hook install` (offered by `/gatedloop:gates-ini
 wires a git `pre-commit` hook that runs the same `gates discipline check-commit` as layer
 1 at the layer where the commit object is created, regardless of how it was phrased, so a
 ledger-only or planning-only commit is allowed at its grade on every path and anything
-else needs the `ci` marker. With `--verdict-file <path>`, `check-commit` also writes one
+else needs the `ci` marker (or, under `loop.ci-at: ready` on a branch naming an active
+change, a `unit` marker). With `--verdict-file <path>`, `check-commit` also writes one
 token to that path on success, naming the grade that allowed the commit (`ledger`,
-`planning` or `marker`); its exit status and printed text are unchanged, so a caller
-branches on the token rather than on the wording. The same install adds a git `pre-push` hook: a push that
+`planning`, `marker`, or `unit` for a commit allowed on a `unit` marker under
+`loop.ci-at: ready`); its exit status and printed text are unchanged, so a caller
+branches on the token rather than on the wording. A `unit` commit's allow line reads
+`gatedloop: 'unit' marker matches — <tree> (scope: <s>) — loop.ci-at: ready; the full
+ci runs before READY and at the merge`, and both hooks print it; both run the
+authored-test lock after it, as for `marker`. A denial ends with a gate-neutral remedy,
+"run the gate named above, then stage exactly what it tested and commit again"; under
+`ready` on a change branch the check itself names `gates run unit` (and that a green
+`gates run ci` also satisfies it). The same install adds a git `pre-push` hook: a push that
 updates the merge target is denied unless `gates discipline check-push <sha>
 --remote-ref <ref>` finds the pushed commit proven — a `merge` ledger row records it
 (what `gates merge` writes before its one push), or the merge gate's incoming-tree

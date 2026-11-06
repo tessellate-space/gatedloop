@@ -86,6 +86,19 @@ wall with one clearly-marked door that is then reported."
   `ci` marker compare). A planning diff that also carries ledger rows stays
   planning-grade (merge-pull-request D3): the ledger is invisible to every marker, so it
   neither earns nor costs the discount.
+  **What each layer requires under each `loop.ci-at` mode** (`ci-at` D2, D3): under
+  `task` (the default) both layers need the `ci` marker for a code commit. Under `ready`,
+  on a branch naming an active change, both also accept a `unit` marker for the staged
+  tree: `check-commit` writes the verdict token `unit`, both hooks print its allow line
+  (`… — loop.ci-at: ready; the full ci runs before READY and at the merge`) and run the
+  authored-test lock after it exactly as for `marker`. Off a change branch (`main`,
+  `plan/*`, the detached HEAD `gates merge` commits on) both layers need the `ci` marker
+  in either mode. Neither hook reads the manifest; the selection is the shim's. Each
+  denial ends with a gate-neutral remedy, "run the gate named above, then stage exactly
+  what it tested and commit again", because the check's own lines name the gate: `gates
+  run ci`, or under `ready` `gates run unit`. A git-layer copy installed before 0.12.0
+  already treats `unit` like `marker` and echoes the check's lines; refreshing it
+  (`git-hook-refresh`) brings the gate-neutral denial.
   The same install adds a git `pre-push` hook (`git-layer-enforcement` D3): a push that
   updates the merge target is denied unless `gates discipline check-push` finds the
   pushed commit proven — a `merge` ledger row records it (or records a commit it
@@ -143,7 +156,7 @@ layers, and only the first is tied to Claude Code:
 
 | Guarantee | Tool hook (Claude Code) | Git layer (any host, agent session) | Forge (branch protection, statuses) |
 |---|---|---|---|
-| A commit only on a green `ci` for its tree | `PreToolUse` on `git commit` | `pre-commit`: `discipline check-commit` | `gatedloop/ci` required |
+| A commit only on a green `ci` for its tree (under `loop.ci-at: ready`, a task commit on a change branch on a green `unit` for its tree) | `PreToolUse` on `git commit` | `pre-commit`: `discipline check-commit` | `gatedloop/ci` required |
 | Authored tests stay locked, and run red first | `PreToolUse` on `git commit` | `pre-commit`: `tests check` | `gatedloop/tests` required |
 | A merge into the target only on a proven head | merge gate (`gate-merge.sh`) | not gated: a raw `git merge` is caught at the push instead (`pre-merge-commit` misses fast-forwards) | required statuses on the PR head |
 | A push of the target only of a proven commit | none | `pre-push`: `discipline check-push` | branch protection on the target |
