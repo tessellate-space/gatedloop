@@ -35,8 +35,10 @@ End with one verdict line: `clean` when there is no finding, `findings` when eve
 
 ## Classifying (`gatedloop.blast-radius`)
 
-Run through `gatedloop.blast-radius`, you report no findings. The brief ends with one JSON object, `{digest, dimensions, signals, floor}`: the plan digest with no limit, the effective dimensions, the floor's signals and the floor. You may read the plan's artifacts in full; read nothing else. Weigh what the lens's checks list, answer every dimension with a value of its kind and a confidence, give an overall `tier` and `confidence` and a one-line `reason`, and return ONLY the `schema/plan-tier.schema.json` object — no prose, no code fence, nothing before or after it:
+Run through `gatedloop.blast-radius`, you report no findings. The brief ends with one JSON object, `{digest, dimensions, signals, floor}`: the plan digest with no limit, the effective dimensions, the floor's signals and the floor. You may read the plan's artifacts in full; read nothing else. Weigh what the lens's checks list, answer every dimension with a value of its kind and a confidence, give an overall `tier` and `confidence` and a one-line `reason`, and return ONLY the `${CLAUDE_PLUGIN_ROOT}/schema/plan-tier.schema.json` object — no prose, no code fence, nothing before or after it:
 
-{"tier": "light", "confidence": 0.8, "evidence": [{"dimension": "<id>", "value": 0.1, "confidence": 0.9}], "reason": "<one line>"}
+{"tier": "<light|full>", "confidence": <0 to 1>, "evidence": [{"dimension": "<id>", "value": <a value of the dimension's kind>, "confidence": <0 to 1>}], "reason": "<one line>"}
+
+That line shows the shape only. Every value in it is a placeholder, not a default to copy.
 
 You classify; you do not decide the tier. The shim combines your answers with the floor, and they may only raise it, so answer each dimension as it is, never toward an outcome.
