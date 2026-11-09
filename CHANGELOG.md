@@ -9,6 +9,37 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.12.0 — 2026-11-06
+
+Planning gets a loop of its own: a plan can be checked, reviewed and test-authored before anyone approves it. Two opt-in keys also cut the cost of `ci` per task. Everything new is off unless you turn it on.
+
+**A plan is checked before approval**
+
+- **plan-preflight** (#174). Refs #168.
+  - **`gates plan check <change>`** runs in every propose path, whatever the manifest says, and costs nothing. It reports what the handoff would refuse after approval: oracle-tag problems, untagged tasks under `loop.task-oracle: required`, and `rewrites:` paths absent at the base. With `--against <ref>` it also reports each path the plan names that moved since the plan's base; the planner runs that before `gates handoff`.
+  - **The plan loop**, opt-in with `loop.plan-preflight: run` (default `skip`; it needs `loop.test-author: separate`). One round is `gates plan round`, plan review through each lens, the test author in preflight mode, `gates tests handoff --dry-run` and the authored-set review. The loop ends green, on a question only a human can answer, or stalled once its round budget (default 3) is spent. The planner opens the plan PR as a draft unless the loop ended green.
+  - **Tiers by blast radius.** `gates plan tier` computes a light or full floor in code from six signals: 20 or more tasks, 12 or more named files, 2 or more hot surfaces, a modified, removed or renamed requirement, a hot surface marked `blast-radius: high`, and an oracle gate you list in `full-at.oracles`. A classifier may only raise the tier. A `Plan tier: light — <reason>` line in the plan is the only way down.
+  - **The classifier slot.** Without one, the built-in `gatedloop.blast-radius` lens answers. You may bind your own command with `loop.plan-preflight.classifier`: it reads `{digest, dimensions}` on stdin and prints typed answers validated against `schema/plan-tier.schema.json`. The shim builds the bounded digest (`gates plan digest`), never reads `.env`, and ships no vendor client. Declaring a classifier sends the plan digest to its provider.
+  - **A new agent, `plan-review`** (Opus, read-only), judges a plan through one lens per run: `gatedloop.implementability` and `gatedloop.zero-decision`, shipped in `rules/plan-lenses.md`. Every finding cites `<lens-id> #<n>`.
+  - **The preflight store** is the ignored `.gatedloop/out/preflight/<change>/`. A later round re-authors only the tasks whose inputs changed. `gates plan save` snapshots the store to its own branch, `gatedloop/preflight/<change>`, pushed with the plan branch, and `gates plan restore` rebuilds it on another machine. The plan PR carries no held test.
+  - **A record, never a gate.** `plan-round` and `plan-review` rows go in the change's ledger, and `gates plan status --markdown` renders them for the PR body. Approval, handoff and merge never read them. `gates stats` leaves them out.
+  - **Held tests are never committed off a change branch.** `gates tests check` refuses a staged path under `.gatedloop/authored/` when the branch names no active change.
+  - **Not yet:** the preflight's tests are not the handed-off ones, so the test author runs again after approval, and the snapshot branch is deleted by hand once the change is archived. A later change, `approved-tests`, closes both.
+
+**`ci` costs less per task**
+
+- **ci-at** (#170). Fixes #162.
+  - **`loop.ci-at: ready`** gates each task commit on a green `unit` for its staged tree, plus the convention review, and runs the full `ci` once before READY, where `gates ledger record-ready` refuses without an unscoped green `ci` on the head, and again at the merge. A commit on the merge target, a `plan/*` branch or a detached merge head still needs `ci`. It requires a declared global `unit` gate. Default `task`, which is today's behaviour.
+  - **`loop.ci-scope: union`** runs the hot surfaces' own `ci` overrides instead of the global `ci` when every hot surface declares one. An unmatched path still runs the full gate. Default `single`.
+  - **The commit hook says when it allows a commit on a `unit` marker**, naming the mode. A `ci`-marker commit stays silent, as before.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Run `/gatedloop:upgrade`.** It offers three new settings, each of which you may leave unset: `loop.ci-at`, `loop.ci-scope` and `loop.plan-preflight`.
+3. **If you set `loop.ci-at: ready`, re-run `gates hook install`** when you use the copied git hook, so the git layer accepts a `unit` marker too. A composed install (a hook manager) picks it up with the plugin version.
+4. **If you run an interim plan preflight of your own** (tessellate-space's #134, for example), switch to the shipped loop.
+
 ## 0.11.1 — 2026-11-04
 
 A plan can now name the existing tests a task rewrites, the commit hook stops leaving the ledger dirty, two loop false-positives are gone, and OpenSpec 1.16 is supported.
