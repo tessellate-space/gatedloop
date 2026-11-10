@@ -7012,7 +7012,8 @@ class _Completion:
     """D2's two positions, computed once per evaluation: `tick_at[task]`, the
     walk index of the commit that checked the task, and `row_at[i]`, the walk
     index of the first commit carrying ledger row i. Index 0 is the
-    merge-base, so a task checked there was not completed on this branch."""
+    first walked commit's first parent (on a lane never synced, the
+    merge-base), so a task checked there was not completed on this branch."""
 
     def __init__(self, tick_at: dict[str, int], row_at: list[int], checked_at_ref: set[str]):
         self.tick_at, self.row_at, self.checked_at_ref = tick_at, row_at, checked_at_ref
@@ -7029,8 +7030,9 @@ class _Completion:
 
 
 def _task_completion(root: Path, change: str, ref: str) -> _Completion:
-    """Walk the change branch's first-parent commits from its merge-base with
-    the merge target up to `ref`, reading two blobs per commit: the ledger's
+    """Walk the change branch's first-parent commits after its merge-base
+    with the merge target up to `ref`, seeded with the first one's own first
+    parent (lane-unstick D1), reading two blobs per commit: the ledger's
     row count and the checked task ids. Raises `_LedgerRewritten`, naming the
     commit, where the ledger shrinks."""
     sha = _rev(root, ref)
@@ -7046,8 +7048,15 @@ def _task_completion(root: Path, change: str, ref: str) -> _Completion:
                 ["git", "rev-list", "--first-parent", "--reverse", f"{base.stdout.strip()}..{sha}"],
                 cwd=root, capture_output=True, text=True,
             )
-            if walk.returncode == 0:
-                commits = [base.stdout.strip()] + walk.stdout.split()
+            walked = walk.stdout.split() if walk.returncode == 0 else []
+            if walked:
+                # lane-unstick D1: seed with the first walked commit's own
+                # first parent, never the merge-base. After a sync merge the
+                # merge-base is a target commit, whose ledger is the target's
+                # copy; comparing the lane's rows with it reads rows the
+                # target appended since the fork as the lane losing them.
+                seed = _git(root, "rev-parse", "--verify", "--quiet", f"{walked[0]}^1").stdout.strip()
+                commits = [seed or base.stdout.strip()] + walked
     ledger_rel = f"{LEDGER_PREFIXES[0]}/{change}.jsonl"
     tasks_rel = f"openspec/changes/{change}/tasks.md"
     tick_at: dict[str, int] = {}

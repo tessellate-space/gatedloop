@@ -2,7 +2,7 @@
 
 ## 1. The completion walk (D1, #178)
 
-- [ ] 1.1 In `_task_completion`, start the walk at the first walked commit's first parent instead of the merge-base, keeping `[ref]` when the walk is empty. Verify with tests in `tests/test_task_completion_order.py` on real repositories: a lane forked at main, then main appends `approval-local` rows to the change's ledger, then the lane merges main (union-resolving the ledger), records a halt naming a task, and stages that task's `[x]`. `gates tests check` passes, and so does `gates tests check --ref HEAD` after the commit. The existing shrink test still refuses, naming the commit, and so does a new test where the shrink is on the lane after a sync merge [oracle: unit]
+- [x] 1.1 In `_task_completion`, start the walk at the first walked commit's first parent instead of the merge-base, keeping `[ref]` when the walk is empty. Verify with tests in `tests/test_task_completion_order.py` on real repositories: a lane forked at main, then main appends `approval-local` rows to the change's ledger, then the lane merges main (union-resolving the ledger), records a halt naming a task, and stages that task's `[x]`. `gates tests check` passes, and so does `gates tests check --ref HEAD` after the commit. The existing shrink test still refuses, naming the commit, and so does a new test where the shrink is on the lane after a sync merge [oracle: unit]
 
 ## 2. The restart's clean tree (D2, D3, #173)
 
