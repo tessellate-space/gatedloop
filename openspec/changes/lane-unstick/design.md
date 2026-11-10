@@ -16,9 +16,13 @@ Row indices stay positional. Only a `halt` or `test-defect` row's commit index i
 
 *Rejected:* dropping the shrink refusal. It guards a real case, a rewritten lane ledger. Also rejected: comparing each commit with every parent. A sync merge's second parent is the target's line, which is the mistake being fixed.
 
-### D2. Every active placement is clean for a restart
+### D2. Every placement a restart can resume is clean
 
-`_restart_dirt` exempts the placed paths and holding-file removals of every task in `_active_placements`, not only the restarted task's. A path placed by any task and holding anything but its placed blob is `edited`, and the refusal names the path and its task. A batch placed together can restart either task, and a sibling's placed test is still protected from edits.
+`_restart_dirt` exempts the placed paths and holding-file removals of every task whose latest placement is either active or voided only by a `halt`. A placement voided by a `test-defect` is excluded, because those tests go back to the author. The halted task matters most here. Its own halt voids its placement (unblock-authored-lock D3), and a stalled halt is what a restart follows, so an exemption limited to active placements would refuse the very task being restarted. A path from either set that holds anything but its placed blob is `edited`, and the refusal names the path and its task.
+
+A restart does not re-activate the placement. The fresh agent runs `gates tests place <task>` as usual. That command already accepts a path holding its placed blob once the holding file is gone ("already placed by an earlier, uncommitted run"), records a new `tests-placed` row, and needs a new red run. So the lock's record stays one placement, then red, then green. A batch placed together can restart either task, and a sibling's placed test is still protected from edits.
+
+*Rejected:* letting a `restart` row reinstate the voided placement. It saves one `place` call, but it adds a second way for a placement to become active.
 
 ### D3. Bookkeeping rows are clean for a restart
 
