@@ -10,7 +10,7 @@ Two 0.11.1 defects strand an adopter's lane with no sanctioned way out. Both are
 ## What Changes
 
 - The completion walk starts at the first walked commit's own first parent, not at the merge-base snapshot. It compares the lane's ledger only with the lane's own earlier copies. A real shrink on the lane is still refused, naming the commit.
-- `gates attempt restart` treats every active placement of the change, at exactly its placed content, as clean, along with its holding-file removals, whichever task it belongs to. A placed test of any task that differs from its placed content is refused, and the refusal names the path and its task.
+- `gates attempt restart` treats every placement of the change that is active or voided only by a halt, at exactly its placed content, as clean, along with its holding-file removals, whichever task it belongs to. A placed test of any task that differs from its placed content is refused, and the refusal names the path and its task.
 - `gates attempt restart` treats an uncommitted append to the change's ledger as clean when the append holds only bookkeeping rows (`usage`, `restart`, `halt`). The refusal for real dirt no longer says to discard work. It names what is dirty and says to commit or set aside work that is not a placed test.
 - Ships as 0.12.1.
 
