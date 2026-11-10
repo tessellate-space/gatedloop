@@ -9,6 +9,13 @@ throwaway git repo; the ledger is seeded with the rows a loop would have
 written and committed, so the tree is clean at the task boundary the way the
 halt discipline leaves it.
 
+Bookkeeping rows (change `lane-unstick`, design D3; issue #173): an
+uncommitted `restart` or `halt` row counted as dirt, so each restart needed
+its own ledger-grade commit first, and the refusal said to "discard" work.
+The regressions: a restart after an uncommitted restart or halt row
+refused; an uncommitted non-bookkeeping row accepted; and a refusal that
+does not name the dirty path or still says to discard.
+
 Run with:  python3 -m unittest discover -s tests
 """
 
@@ -150,6 +157,57 @@ class TestAttemptRestart(unittest.TestCase):
             r = _run(root, "attempt", "restart", "1.2")
             self.assertEqual(r.returncode, 1)
             self.assertEqual(_restarts(root), [])
+
+
+class TestRestartBookkeepingRows(unittest.TestCase):
+    def test_a_restart_after_an_uncommitted_restart_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _seed_and_commit(root, USED)
+            first = _run(root, "attempt", "restart", "1.1")
+            self.assertEqual(first.returncode, 0, first.stderr)
+
+            r = _run(root, "attempt", "restart", "1.2")
+
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(len(_restarts(root, "1.2")), 1)
+
+    def test_a_restart_after_an_uncommitted_halt_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _seed_and_commit(root, USED)
+            h = _run(root, "halt", "record", "stalled", "--task", "1.2", "--detail", "budget used")
+            self.assertEqual(h.returncode, 0, h.stderr)
+
+            r = _run(root, "attempt", "restart", "1.2")
+
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(len(_restarts(root)), 1)
+
+    def test_an_uncommitted_non_bookkeeping_row_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _seed_and_commit(root, USED)
+            with _ledger(root).open("a") as f:
+                f.write(json.dumps({"gate": "unit", "task": "1.2", "exit": 1, "change": CHANGE,
+                                    "ts": "2026-10-01T00:00:00+00:00"}) + "\n")
+
+            r = _run(root, "attempt", "restart", "1.2")
+
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertEqual(_restarts(root), [])
+
+    def test_the_refusal_names_the_path_and_never_says_discard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _seed_and_commit(root, USED)
+            (root / "half-done.py").write_text("x = 1\n")
+
+            r = _run(root, "attempt", "restart", "1.2")
+
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn("half-done.py", r.stderr)
+            self.assertNotIn("discard", r.stderr)
 
 
 class TestStalledHaltRestartAvailable(unittest.TestCase):
