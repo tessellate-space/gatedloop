@@ -10011,10 +10011,9 @@ def recorded_usage(rows: list[dict]) -> int:
     return sum(usage_total(r.get("tokens")) for r in rows if r.get("gate") == USAGE_EVENT)
 
 
-def _usage_only_append(root: Path, rel: str) -> bool:
+def _append_only_of(root: Path, rel: str, gates: frozenset) -> bool:
     """Whether the working copy of ledger file `rel` differs from HEAD only
-    by appended `usage` rows -- what a commit-hook or stop flush leaves. Such
-    a tree is still at a task boundary: no task's work is in it."""
+    by appended rows whose `gate` is one of `gates`."""
     if not _is_ledger_path(rel):
         return False
     head = _git(root, "show", f"HEAD:{rel}")
@@ -10033,9 +10032,16 @@ def _usage_only_append(root: Path, rel: str) -> bool:
             obj = json.loads(line)
         except ValueError:
             return False
-        if not isinstance(obj, dict) or obj.get("gate") != USAGE_EVENT:
+        if not isinstance(obj, dict) or obj.get("gate") not in gates:
             return False
     return True
+
+
+def _usage_only_append(root: Path, rel: str) -> bool:
+    """Whether the working copy of ledger file `rel` differs from HEAD only
+    by appended `usage` rows -- what a commit-hook or stop flush leaves. Such
+    a tree is still at a task boundary: no task's work is in it."""
+    return _append_only_of(root, rel, frozenset({USAGE_EVENT}))
 
 
 def _dirt_beyond_usage(root: Path, porcelain: str) -> list[str]:
@@ -10044,6 +10050,19 @@ def _dirt_beyond_usage(root: Path, porcelain: str) -> list[str]:
     return [ln for ln in porcelain.splitlines()
             if ln.strip() and not (ln[:2] in (" M", "M ", "MM")
                                    and _usage_only_append(root, ln[3:]))]
+
+
+def _dirt_beyond_bookkeeping(root: Path, change: str, porcelain: str) -> list[str]:
+    """lane-unstick D3, for `gates attempt restart` only: the `git status
+    --porcelain` lines left once a usage-only append to any ledger
+    (`_usage_only_append`) and an append of only `usage`, `restart` and
+    `halt` rows to the change's own ledger are dropped. The `Stop` hook's
+    boundary keeps `_dirt_beyond_usage`."""
+    own = f"{LEDGER_PREFIXES[0]}/{change}.jsonl"
+    bookkeeping = frozenset({USAGE_EVENT, RESTART_EVENT, HALT_EVENT})
+    return [ln for ln in _dirt_beyond_usage(root, porcelain)
+            if not (ln[:2] in (" M", "M ", "MM") and ln[3:] == own
+                    and _append_only_of(root, own, bookkeeping))]
 
 
 def cmd_usage(m: dict, root: Path, args) -> int:
@@ -14692,11 +14711,12 @@ def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: s
         print(f"gatedloop: could not read the working tree ({status.stderr.strip()}); "
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
-    # token-ledger D1: a usage-only ledger append (a stop flush) is not work;
+    # token-ledger D1, lane-unstick D3: a usage-only ledger append (a stop
+    # flush), or uncommitted usage, restart and halt rows, are not work;
     # unblock-authored-lock D7, lane-unstick D2: nor are any resumable
     # placement's tests at their placed content.
     dirty, edited = _restart_dirt(root, change, rows,
-                                  _dirt_beyond_usage(root, status.stdout))
+                                  _dirt_beyond_bookkeeping(root, change, status.stdout))
     if edited:
         named = ", ".join(f"{path} (task {owner})" for path, owner in edited)
         print(
@@ -14711,8 +14731,9 @@ def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: s
         shown = ", ".join(dirty[:5]) + (" ..." if len(dirty) > 5 else "")
         print(
             f"gatedloop: refusing to restart task {task}: the working tree is not clean "
-            f"({shown}). A restart begins at the task's last commit: commit the halt row "
-            "and discard the halted run's partial work first. Nothing was written.",
+            f"({shown}). A restart begins at the task's last commit: commit the change's "
+            "ledger on its own (a ledger-grade commit), and set aside any other "
+            "uncommitted work that is not a placed test. Nothing was written.",
             file=sys.stderr,
         )
         return 1
