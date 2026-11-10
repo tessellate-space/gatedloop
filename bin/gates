@@ -14627,33 +14627,53 @@ def cmd_attempt(m: dict, root: Path, args) -> int:
     sys.exit(f"gatedloop: unknown attempt subcommand '{args.attempt_cmd}'")
 
 
-def _restart_dirt(root: Path, change: str, rows: list[dict], task: str,
-                  lines: list[str]) -> tuple[list[str], list[str]]:
-    """unblock-authored-lock D7: `(dirty, edited)` from `git status
-    --porcelain --no-renames` lines, minus what the task's placement made:
-    each of its placed paths holding exactly its placed blob (in the worktree,
-    and in the index when staged) and each removal of its holding files.
-    `edited` names a placed path holding anything else."""
-    try:
-        active = _active_placements(rows, _lock_completion(root, change, rows, "HEAD"))
-    except _LedgerRewritten:
-        active = _active_placements(rows)
-    placed = active[task][1] if task in active else {}
-    holding = _state_rel(root, "authored", change, task) + "/"
+def _restart_placements(rows: list[dict]) -> dict[str, dict]:
+    """lane-unstick D2: `{task: {path: blob}}` for every task whose latest
+    placement a restart can resume -- one still active, or one voided only
+    by a `halt` (the halt a restart follows voids the halted task's own
+    placement, unblock-authored-lock D3). A `test-defect` voids it for good:
+    those tests go back to their author. Only the restart reads this; it
+    re-activates nothing, so the restarted task still places again."""
+    latest: dict[str, dict] = {}
+    for r in rows:
+        gate, task = r.get("gate"), r.get("task")
+        if not task:
+            continue
+        if gate == TESTS_PLACED_EVENT:
+            latest[task] = dict((r.get("tests") or {}).get(task) or {})
+        elif gate == TEST_DEFECT_EVENT:
+            latest.pop(task, None)
+    return latest
+
+
+def _restart_dirt(root: Path, change: str, rows: list[dict],
+                  lines: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """unblock-authored-lock D7, lane-unstick D2: `(dirty, edited)` from
+    `git status --porcelain --no-renames` lines, minus what any resumable
+    placement of the change made (`_restart_placements`): each placed path
+    holding exactly a placed blob (in the worktree, and in the index when
+    staged) and each removal of those tasks' holding files. `edited` names
+    a placed path holding anything else, with the task that placed it."""
+    placements = _restart_placements(rows)
+    placed: dict[str, list[tuple[str, str]]] = {}
+    for t, paths in placements.items():
+        for path, blob in paths.items():
+            placed.setdefault(path, []).append((t, blob))
+    holdings = [_state_rel(root, "authored", change, t) + "/" for t in placements]
     staged = _staged_blobs(root) or {}
     dirty: list[str] = []
-    edited: list[str] = []
+    edited: list[tuple[str, str]] = []
     for ln in lines:
         code, path = ln[:2], ln[3:]
         if path in placed:
-            blob = placed[path]
             in_index = staged.get(path)
             head = _git(root, "rev-parse", "--verify", "--quiet", f"HEAD:{path}").stdout.strip() or None
-            if _file_blob(root, path) == blob and in_index in (blob, head):
+            now = _file_blob(root, path)
+            if any(now == blob and in_index in (blob, head) for _t, blob in placed[path]):
                 continue
-            edited.append(path)
+            edited.append((path, placed[path][-1][0]))
             continue
-        if path.startswith(holding) and "D" in code and not (root / path).exists():
+        if any(path.startswith(h) for h in holdings) and "D" in code and not (root / path).exists():
             continue
         dirty.append(path)
     return dirty, edited
@@ -14673,14 +14693,15 @@ def _attempt_restart(m: dict, root: Path, change: str, rows: list[dict], task: s
               "refusing to restart. Nothing was written.", file=sys.stderr)
         return 1
     # token-ledger D1: a usage-only ledger append (a stop flush) is not work;
-    # unblock-authored-lock D7: nor are the task's placed tests at their
-    # placed content.
-    dirty, edited = _restart_dirt(root, change, rows, task,
+    # unblock-authored-lock D7, lane-unstick D2: nor are any resumable
+    # placement's tests at their placed content.
+    dirty, edited = _restart_dirt(root, change, rows,
                                   _dirt_beyond_usage(root, status.stdout))
     if edited:
+        named = ", ".join(f"{path} (task {owner})" for path, owner in edited)
         print(
-            f"gatedloop: refusing to restart task {task}: its placed test(s) "
-            f"{', '.join(edited)} differ from their placed content. A placed test "
+            f"gatedloop: refusing to restart task {task}: placed test(s) "
+            f"{named} differ from their placed content. A placed test "
             "changes only through its author (`gates tests defect`); restore it. "
             "Nothing was written.",
             file=sys.stderr,
