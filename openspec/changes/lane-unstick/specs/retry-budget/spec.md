@@ -4,8 +4,8 @@
 
 `gates attempt restart <task>` SHALL refuse unless the working tree is clean at the
 task's last commit, and SHALL refuse once the task's restarts number
-`loop.fresh-restarts`. Every active placement of the change SHALL count as clean while each placed test holds
-exactly its placed content, whichever task it belongs to, and so SHALL the removal of
+`loop.fresh-restarts`. Every placement of the change that is active, or voided only by a `halt`, SHALL count as
+clean while each placed test holds exactly its placed content, whichever task it belongs to, and so SHALL the removal of
 its holding files. An uncommitted append to the change's ledger made only of `usage`,
 `restart` and `halt` rows SHALL count as clean. Otherwise it
 SHALL record a `restart` row, after which the failed-attempt count starts again from
@@ -47,6 +47,19 @@ new agent context.
   their placed content, and 8.2 halted `stalled`
 - **THEN** `gates attempt restart 8.2` records the `restart` row, and so does `gates
   attempt restart 8.1`
+
+#### Scenario: The restarted task places its tests again
+
+- **WHEN** task 8.2 was restarted with its halt-voided placement still at its placed
+  content
+- **THEN** `gates tests place 8.2` records a new placement without its holding files, and
+  8.2 needs a red `unit` run after it
+
+#### Scenario: A defect-voided placement is not clean
+
+- **WHEN** a `test-defect` row voided task 8.1's placement and its placed test is still in
+  the tree
+- **THEN** `gates attempt restart 8.2` refuses, naming that path
 
 #### Scenario: A sibling's placed test edited
 
