@@ -545,7 +545,10 @@ ledger alone:
   exit 1, runs nothing and writes no row. The caller's `--attempt` is a label, so
   passing a smaller one buys nothing.
 - **One fresh restart, never self-granted.** `gates attempt restart` refuses on a
-  dirty tree and past `loop.fresh-restarts` (default 1). The `stalled` halt row
+  dirty tree and past `loop.fresh-restarts` (default 1). Every active or
+  halt-voided placement of the change at its placed content counts as clean,
+  whichever task placed it, and so do uncommitted `usage`, `restart` and `halt`
+  rows; a placed test edited after placement is refused, naming its task. The `stalled` halt row
   carries `restart_available`, computed by the shim, so a dispatcher decides from a
   fact rather than from the implementer's report.
 - **Memory between attempts.** `gates attempt note` records four bounded one-line
