@@ -12,7 +12,7 @@ The repository SHALL hold `tests/contract.json`, a snapshot of the public surfac
 - exit codes;
 - status contexts;
 - manifest keys;
-- the `handoff` and `stats` document keys;
+- the `handoff`, `stats` and `approval check --json` document keys;
 - ledger fields.
 
 Each subcommand SHALL be marked `public` or `internal`. It is `internal` only when it is listed, with a reason, as invoked solely by bundled hooks or prompts.
@@ -25,7 +25,7 @@ Each subcommand SHALL be marked `public` or `internal`. It is `internal` only wh
 #### Scenario: The snapshot names every listed surface
 
 - **WHEN** `tests/contract.json` is generated
-- **THEN** it holds the reserved exit codes, every `gatedloop/<gate>` context, the top-level keys of `schema/gates.schema.json`, the top-level keys of `gates handoff --json` and `gates stats --json`, the ledger row fields and the row version
+- **THEN** it holds the reserved exit codes, every `gatedloop/<gate>` context, the top-level keys of `schema/gates.schema.json`, the top-level keys of `gates handoff --json`, `gates stats --json` and `gates approval check --json`, the ledger row fields and the row version
 
 ### Requirement: ci fails when the code and the snapshot disagree
 
