@@ -638,18 +638,33 @@
     "const": null,
     "default": null,
     "dest": "change",
-    "help": null,
+    "help": "exactly one without --json; zero or more with it",
     "metavar": null,
-    "nargs": null,
+    "nargs": "*",
     "option_strings": [],
     "required": null,
+    "type": null
+   },
+   {
+    "action": "_StoreTrueAction",
+    "choices": null,
+    "const": true,
+    "default": false,
+    "dest": "json",
+    "help": "print one JSON document: the policy, the target, a fingerprint of the inputs and one result per change",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--json"
+    ],
+    "required": false,
     "type": null
    }
   ],
   "description": null,
   "epilog": null,
   "formatter_class": "HelpFormatter",
-  "help_in_parent": "exit 0 if <change> is merged AND approved, else 1",
+  "help_in_parent": "exit 0 if <change> is merged AND approved, else 1; with --json, any number of changes (none: every active one) as one document",
   "prog": "gates approval check"
  },
  "approval migrate": {

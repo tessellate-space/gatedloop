@@ -11214,11 +11214,12 @@ class _BatchPlanReader:
     ls-tree -r <ref> -- openspec/changes/` and one `git cat-file --batch`
     for every blob those changes need (batch-approval-check D2), so the
     number of git calls does not depend on how many changes are named.
-    Every answer is the one `_RefPlanReader` gives for the same change."""
+    Every answer is the one `_RefPlanReader` gives for the same change.
+    `changes` of `None` reads every change each ref lists."""
 
-    def __init__(self, root: Path, changes):
+    def __init__(self, root: Path, changes=None):
         self.root = root
-        self.changes = list(dict.fromkeys(changes))
+        self.changes = None if changes is None else list(dict.fromkeys(changes))
         self._refs: dict = {}
 
     def _paths_for(self, change: str, listed) -> list[str]:
@@ -11247,7 +11248,10 @@ class _BatchPlanReader:
             if sep and len(fields) == 3:
                 paths[path] = fields[2]
         wanted = []
-        for change in self.changes:
+        changes = self.changes
+        if changes is None:
+            changes = self._names(paths)
+        for change in changes:
             prefix = f"openspec/changes/{change}/"
             for path in self._paths_for(change, paths):
                 rel = path[len(prefix):]
@@ -11268,18 +11272,20 @@ class _BatchPlanReader:
         self._refs[ref] = (paths, blobs)
         return self._refs[ref]
 
-    def change_names(self, ref: str) -> list[str]:
-        """Every change under `openspec/changes/` at `ref`, except
-        `archive/`, in name order."""
-        loaded = self._load(ref)
-        if loaded is None:
-            return []
+    @staticmethod
+    def _names(paths) -> list[str]:
         names = set()
-        for path in loaded[0]:
+        for path in paths:
             parts = path.split("/")
             if len(parts) > 3 and parts[2] != "archive":
                 names.add(parts[2])
         return sorted(names)
+
+    def change_names(self, ref: str) -> list[str]:
+        """Every change under `openspec/changes/` at `ref`, except
+        `archive/`, in name order."""
+        loaded = self._load(ref)
+        return [] if loaded is None else self._names(loaded[0])
 
     def present(self, change: str, ref: str) -> bool:
         loaded = self._load(ref)
@@ -11416,6 +11422,54 @@ def _approval_verdict(ctx: _ApprovalContext, change: str, reader) -> tuple:
     return True, ref, f"change '{change}' is merged to '{ref}' and approved by {approved_by}{advisory}", meta
 
 
+APPROVAL_CHECK_DOC_VERSION = "1"
+
+
+def _rev_commit(root: Path, ref: str) -> str | None:
+    out = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        cwd=root, capture_output=True, text=True,
+    )
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
+def _approval_fingerprint(ctx: _ApprovalContext) -> str:
+    """batch-approval-check D4: the SHA-256 of every input a verdict reads --
+    the document version, the policy, the target and its commit and, under
+    `self`, the local counterpart and its commit (`-` when there is none).
+    Each verdict reads only blobs at those commits, so a cache keyed on this
+    is correct by construction."""
+    fields = [APPROVAL_CHECK_DOC_VERSION, ctx.policy,
+              ctx.target or "-", (ctx.target and _rev_commit(ctx.root, ctx.target)) or "-"]
+    if ctx.policy == "self":
+        if ctx.local:
+            fields += [ctx.local, _rev_commit(ctx.root, ctx.local) or "-"]
+        else:
+            fields.append("-")
+    return hashlib.sha256("\n".join(fields).encode()).hexdigest()
+
+
+def _approval_check_document(root: Path, m: dict, names: list[str]) -> dict:
+    """batch-approval-check D3: one verdict per change, in the order named,
+    or every non-archived change on the target in name order when none is."""
+    ctx = _approval_context(root, m)
+    reader = _BatchPlanReader(root, names or None)
+    if not names:
+        names = reader.change_names(ctx.target) if ctx.target is not None else []
+    results = []
+    for change in names:
+        ok, ref, reason, meta = _approval_verdict(ctx, change, reader)
+        approved_by, approved_at, approved_sha = meta
+        results.append({
+            "change": change, "ok": ok, "ref": ref,
+            "unpushed": bool(ok and ctx.local and ref == ctx.local),
+            "approved_by": approved_by, "approved_at": approved_at,
+            "approved_sha": approved_sha, "reason": reason,
+        })
+    return {"policy": ctx.policy, "target": ctx.target,
+            "fingerprint": _approval_fingerprint(ctx), "results": results}
+
+
 def _approval_check(root: Path, change: str, m: dict | None = None) -> tuple[bool, str]:
     ok, _ref, reason = _approval_check_at(root, change, m)
     return ok, reason
@@ -11488,7 +11542,19 @@ def cmd_approval(m: dict, root: Path, args) -> int:
         return 0
 
     if args.approval_cmd == "check":
-        ok, reason = _approval_check(root, args.change, m)
+        if args.json:
+            doc = _approval_check_document(root, m, list(args.change))
+            print(json.dumps(doc, indent=2))
+            ok = doc["target"] is not None and all(r["ok"] for r in doc["results"])
+            return 0 if ok else 1
+        if len(args.change) != 1:
+            print(
+                f"gatedloop: `gates approval check` takes exactly one change, got "
+                f"{len(args.change)} — pass `--json` to check zero or more changes at once",
+                file=sys.stderr,
+            )
+            return 2
+        ok, reason = _approval_check(root, args.change[0], m)
         print(f"gatedloop: {reason}", file=sys.stderr if not ok else sys.stdout)
         return 0 if ok else 1
 
@@ -16466,8 +16532,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_sha = ap_sub.add_parser("sha", help="print the plan-artifact content hash for a change")
     sp_sha.add_argument("change")
     sp_sha.set_defaults(fn=cmd_approval)
-    sp_chk = ap_sub.add_parser("check", help="exit 0 if <change> is merged AND approved, else 1")
-    sp_chk.add_argument("change")
+    sp_chk = ap_sub.add_parser("check", help="exit 0 if <change> is merged AND approved, else 1; with --json, any number of changes (none: every active one) as one document")
+    sp_chk.add_argument("change", nargs="*", help="exactly one without --json; zero or more with it")
+    sp_chk.add_argument("--json", action="store_true", help="print one JSON document: the policy, the target, a fingerprint of the inputs and one result per change")
     sp_chk.set_defaults(fn=cmd_approval)
     sp_mig = ap_sub.add_parser("migrate", help="rename the earlier approved_by/at/sha keys to x-gatedloop-approved-* in each active change's .openspec.yaml (or <change>'s)")
     sp_mig.add_argument("change", nargs="?")
