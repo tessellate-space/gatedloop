@@ -29,7 +29,7 @@ mostly one host: Claude Code, locally and on the web.
 | The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13 on OpenSpec 1.14.3, plus one Ubuntu, Python 3.13 leg on OpenSpec 1.16.0; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
 | A task's `rewrites:` clause (`gates tests show --diff`) | not yet | new in 0.11.1; covered by the `unittest` suite only, no real change has declared one |
 | `loop.ci-at: ready` and `loop.ci-scope: union` | not yet | new in 0.12.0; covered by the `unittest` suite only, no real change has run under either |
-| The plan loop (`loop.plan-preflight`, `gates plan …`, the `plan-review` agent) | not yet | new in 0.12.0; the shim side is covered by the `unittest` suite, including an end-to-end fixture loop, and the prompts have not run a real plan; tessellate-space's interim preflight is what it replaces |
+| The plan loop (`loop.plan-preflight`, `gates plan …`, the `plan-review` agent) | not yet | new in 0.12.0; the shim side is covered by the `unittest` suite, including an end-to-end fixture loop, and the prompts have not run a real plan; it replaces the interim preflights adopters ran by hand |
 | The READY report's gate block (`gates ledger record-ready`) | lightly | this repository's own changes since `loop-hardening` |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 

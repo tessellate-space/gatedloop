@@ -69,7 +69,7 @@ The maintainer's direction, recorded here: the preflight is not an advisory chec
 
 gatedloop builds this loop and its plan-review agent itself. It does not pair with, depend on, or name any external design-review tool. A shipped prompt naming one would bind adopters to a tool choice, in the spirit of `stack-agnostic-prompts`.
 
-This deliberately revises the boundary recorded in `docs/candidates.md` ("Pair with an upstream design reviewer"), which held that judging a design is not ours. Under the single question of the rejection test, judging a plan before approval moves the planning phase from `act` (a human reads it) to `close` (a verdict the loop reads back). The evidence is tessellate's 20 of 24 plan PRs amended after approval. The boundary that stays: authoring an artifact is still not ours. The loop never writes a plan. It returns findings, and the planner amends through its own authoring flow. The candidates entry is rewritten to say so (task 8.2).
+This deliberately revises the boundary recorded in `docs/candidates.md` ("Pair with an upstream design reviewer"), which held that judging a design is not ours. Under the single question of the rejection test, judging a plan before approval moves the planning phase from `act` (a human reads it) to `close` (a verdict the loop reads back). The evidence is an adopter's plan PRs, most of them amended after approval. The boundary that stays: authoring an artifact is still not ours. The loop never writes a plan. It returns findings, and the planner amends through its own authoring flow. The candidates entry is rewritten to say so (task 8.2).
 
 ### D2. Names: `gates plan …`, `gates tests handoff --dry-run`, and the `--preflight` flags
 
@@ -99,35 +99,13 @@ A middle tier (for example, full without the test author) was considered and rej
 
 **Reach is left out.** Counting how many modules import a named file would need each language's import syntax. That is a stack fact, so by the rejection test it is not the shim's. A project that wants reach can bind it through the classifier slot below.
 
-**Calibration (recorded 2026-11-06).** The maintainer judged a task floor of 8 too low, and the field data agrees:
+**Calibration (recorded 2026-11-06).** The maintainer judged a task floor of 8 too low, and the field data agrees. In gatedloop's 67 archived changes the median is 10 tasks and the p90 27, and 64 % have 8 or more. An adopter's project has a similar shape, with a median of 8, a p90 of 20, and over half at 8 or more. A floor of 8 would have sent most changes to `full`.
 
-| | gatedloop (67 archived changes) | tessellate-space (266 changes) |
-|---|---|---|
-| median tasks | 10 | 8 |
-| p75 | 17 | 13 |
-| p90 | 27 | 20 |
-| share at 8 or more tasks | 64 % | 55 % |
+Task count also barely predicts which plans fail. In the adopter's history, the amendment-after-approval rate did not rise with task count, and the smallest plans (1–3 tasks) were amended most often. Their failures came from end-to-end and test mechanics, not from size. So task count is demoted to a size backstop at roughly the p90 (20).
 
-A floor of 8 would have sent most changes to `full`. Task count also barely predicts which plans fail. tessellate-space's amendment-after-approval rate by task count (from `amend <change>` commit subjects, which undercount the history before November):
+Three oracle signals were then tested on the adopter's changes whose tasks carried oracle tags at approval, a small sample. Read naively, none separates amended plans from the rest: "any gate other than `unit`" fired on most of both groups. Counting only plans that were implemented, "`rewrites:` or the project's end-to-end gate" fired about twice as often on amended plans as on clean ones, though it caught only half of them, including the costliest. That is suggestive at a tiny n, not proof. So "any non-unit gate" is rejected as a default, because it would send most plans to `full` without separating them. The end-to-end form ships as signal 5, **opt-in and empty by default**: an adopter declares its costly gates, and the round rows (D5) record every signal so a later change can calibrate it on real outcomes.
 
-| tasks | 1–3 | 4–7 | 8–11 | 12–15 | 16–23 | 24+ |
-|---|---|---|---|---|---|---|
-| changes | 30 | 91 | 65 | 33 | 26 | 21 |
-| amended | 20 % | 5 % | 13 % | 6 % | 15 % | 14 % |
-
-The smallest plans are amended most often, and their failures were end-to-end and test mechanics (`staged-edits-are-visible`: 4 tasks, 3 amendments), not size. So task count is demoted to a size backstop at roughly the p90 (20).
-
-Three oracle signals were then tested on the 33 tessellate-space changes whose tasks carried oracle tags at approval (the other 233 predate tags and are excluded; 17 of the 33 were amended):
-
-| signal | amended, fired | not amended, fired |
-|---|---|---|
-| any gate other than `unit` | 11/17 (65 %) | 9/16 (56 %) |
-| `rewrites:` alone | 3/17 | 5/16 |
-| `rewrites:` or the project's `e2e` gate | 10/17 (59 %) | 9/16 (56 %) |
-
-Read naively, none separates. But 7 of the 9 "not amended" hits for the last signal are plans never implemented, so "not amended" there means "not yet tested". Counting only implemented plans (n = 23), it fired on 7 of 14 amended plans (50 %) and on 2 of 9 that ran clean (22 %): about twice as often on amended plans, though it catches only half of them. The amended ones it caught include the costliest (`staged-edits-are-visible` and `workbench-modes-and-outline`, three amendments each). That is suggestive at a tiny n, not proof. So "any non-unit gate" is rejected as a default (it would send about 61 % of plans to `full` for no separation), and the end-to-end form ships as signal 5, **opt-in and empty by default**: an adopter declares its costly gates, and the round rows (D5) record every signal so a later change can calibrate it on real outcomes.
-
-**Why these defaults.** Twelve named files, or two surfaces, is where a plan's claims about the code span parts of the tree that the planner did not write together. Changing an existing requirement means existing tests pin the old behaviour, so the plan needs `rewrites:` clauses and `characterization` tags: that is the family of handoff refusals in the field report. Blast radius is the adopter's own word for "important", so the shim does not guess it. A one-surface, additive change of up to nineteen tasks, with no costly oracle the adopter declared, gets a light floor, and its likeliest defect, a wrong claim about the code (#114 to #127), is the implementability lens's job. The thresholds are not calibrated on field data. That is why they are overridable, and why every round records its signals, so a later change can calibrate them from the rows.
+**Why these defaults.** Twelve named files, or two surfaces, is where a plan's claims about the code span parts of the tree that the planner did not write together. Changing an existing requirement means existing tests pin the old behaviour, so the plan needs `rewrites:` clauses and `characterization` tags: that is the family of handoff refusals in the field report. Blast radius is the adopter's own word for "important", so the shim does not guess it. A one-surface, additive change of up to nineteen tasks, with no costly oracle the adopter declared, gets a light floor, and its likeliest defect, a wrong claim about the code (the commonest amendment in the field report), is the implementability lens's job. The thresholds are not calibrated on field data. That is why they are overridable, and why every round records its signals, so a later change can calibrate them from the rows.
 
 **Layer 2: a classifier, which may only raise the tier.** A cheap judgement reads the plan digest and answers a set of narrow blast-radius questions. The shim combines the answers into `light` or `full`. It catches what no count sees: a two-task change to a data format other systems read, say. **The effective tier is max(floor, classifier).** The classifier can raise the tier and can never lower it, so whatever the classifier does, or fails to do, can only cost usage and never safety. That includes a fallback, a crash or a missing verdict.
 
@@ -231,7 +209,7 @@ It never edits anything, and never runs any other command. It aims for under 15 
 **Lenses** live in `rules/plan-lenses.md`, shaped like `rules/loop-rules.md`: one `### <lens-id>` section per lens, with `Applies to: plan`, a `Rule:` line and numbered checks. The ids are prefixed `gatedloop.`, so they cannot collide with an adopter's ids. The file resolves from the plugin (a `BUILTIN_LENSES_FILE` beside `BUILTIN_RULES_FILE`), and the same fail-loud check covers it.
 
 - `gatedloop.implementability`, "the plan is right about the code":
-  1. every path, rule id, command, gate name and configuration key the plan names exists at the base, or is created by an earlier task, and says what the plan assumes it says (the tessellate case of grepping for a generated line that the generator never writes); and every task that changes code names the files it changes;
+  1. every path, rule id, command, gate name and configuration key the plan names exists at the base, or is created by an earlier task, and says what the plan assumes it says (for example, a plan that greps for a generated line the generator never writes); and every task that changes code names the files it changes;
   2. task order is executable: no task's work or oracle needs an artifact that only a later task creates;
   3. a task that deletes or renames a file is not followed by a task, or preceded by a `rewrites:` clause, that still needs it;
   4. every interface a task's tests would target is stated by the design or exists at the base.
@@ -291,14 +269,14 @@ It prints the undeclared-overwrite advisory lines. It skips only `_oracle_drift_
 
 These reuse the parser and the messages that the handoff and `validate` already print, so the planner sees now the words it would otherwise see after approval. The issue's three asks, bounded:
 - **(a) A `rewrites:` path that a task deletes.** Not mechanically checkable: the plan has no way to declare a deletion (test-rewrites D1), and detecting one from prose is a heuristic, not a fail-loud check. It is now implementability check 3, judged by a reader of the plan. The `removes:` candidate gets this report as evidence, unpromoted.
-- **(b) A task whose oracle needs an artifact a later task creates.** Semantic in general: tessellate's #133 names no path the shim could pair. The mechanical part is the rewrite case above. The rest is implementability check 2, and the preflight author's `blocked: weak-spec` naming both tasks.
+- **(b) A task whose oracle needs an artifact a later task creates.** Semantic in general: such a plan need name no path the shim could pair. The mechanical part is the rewrite case above. The rest is implementability check 2, and the preflight author's `blocked: weak-spec` naming both tasks.
 - **(c) A green-first task without `characterization`.** Statically, a tag is red-first unless it says otherwise. The dry run refuses an author's `CHARACTERIZATION` on a red-first tag. Zero-decision check 3 judges the tag, and preflight mode tells the author to return `weak-spec` when a red-first task's tests can only pass. The complete check (place the held tests in a scratch worktree and run each oracle gate at the base) is rejected for now. It costs a gate run per task per round, needs a scopable oracle gate, and can misjudge a test that an earlier task's implementation would turn red. It goes to `docs/candidates.md` with a promotion condition.
 
 The honest limit stays: the test author reads public interfaces, never bodies, so a plan that misreads an implementation detail is caught by the author only where the interface shows it. The implementability lens closes part of that gap, because it may read the bodies of the files the plan names. It does not close all of it.
 
 ### D11. `--against <ref>` is in scope, because it is cheap (kept)
 
-Drift needs nothing new. `_named_paths` already extracts backticked repository paths, and `git diff --name-status <base> <ref>` does the rest. The plan's base is the latest commit in `<ref>`'s history that touches `openspec/changes/<change>/`, when `<ref>` holds the change (the approved plan's merge), and `git merge-base HEAD <ref>` otherwise (a plan branch). With `--against`, existence checks run at `<ref>`, because the change branch is cut from it. A drift finding means "re-read this", not "this is wrong". The planner reads the moved files against the plan, sends the handoff when the plan still holds, and otherwise reports and sends nothing. Tessellate's "drifted while queued" category (#111 #119 #129 #131) is exactly a named file moving underneath an approved plan.
+Drift needs nothing new. `_named_paths` already extracts backticked repository paths, and `git diff --name-status <base> <ref>` does the rest. The plan's base is the latest commit in `<ref>`'s history that touches `openspec/changes/<change>/`, when `<ref>` holds the change (the approved plan's merge), and `git merge-base HEAD <ref>` otherwise (a plan branch). With `--against`, existence checks run at `<ref>`, because the change branch is cut from it. A drift finding means "re-read this", not "this is wrong". The planner reads the moved files against the plan, sends the handoff when the plan still holds, and otherwise reports and sends nothing. The field report's "drifted while queued" category is exactly a named file moving underneath an approved plan.
 
 ### D12. `loop.plan-preflight`: `run | skip`, scalar or mapping, default `skip`; `gates plan check` always runs
 

@@ -2,7 +2,7 @@
 
 ## Why
 
-The test author is the first agent that reads a plan against the real code, and it runs only after the plan is approved. Every gap it finds then costs a halted lane, a plan amendment and a second approval. #168 reports this from tessellate-space under 0.11.1: of 24 plan PRs merged on 2026-11-05 and 2026-11-06, 20 were amendments made after approval. The causes were handoff refusals and failed test-quality reviews, plans that were wrong about the code, a task order that deadlocked, and plans that drifted while they waited to be handed off. Nothing in the propose path checks a plan before a person approves it. The shim already refuses most of the specific defects, but only at handoff, after approval.
+The test author is the first agent that reads a plan against the real code, and it runs only after the plan is approved. Every gap it finds then costs a halted lane, a plan amendment and a second approval. #168 reports this from an adopter under 0.11.1: most of its plan PRs over two days were amendments made after approval. The causes were handoff refusals and failed test-quality reviews, plans that were wrong about the code, a task order that deadlocked, and plans that drifted while they waited to be handed off. Nothing in the propose path checks a plan before a person approves it. The shim already refuses most of the specific defects, but only at handoff, after approval.
 
 A one-shot advisory check whose output is thrown away would move some of these findings earlier. It would not stop the planner from asking for approval on a plan that still fails them. So this change gives planning a loop of its own that ends in a verdict, as implementation already has.
 
@@ -29,7 +29,7 @@ A one-shot advisory check whose output is thrown away would move some of these f
 - **Does it make a stated guarantee enforceable?** Yes. "An approved plan is one the loop can implement" becomes something checked before approval, with a recorded verdict, instead of something discovered at handoff.
 - **Does it get a team running faster?** Yes. It removes the amend-and-re-approve round trip that 20 of 24 field plans paid.
 
-**This deliberately revises an earlier boundary.** `docs/candidates.md` recorded that judging a design is "not ours". It is ours now, for the reason the single question gives: the loop moves the planning phase from `act` to `close`. Until now gatedloop closed implementation, and planning ended at "a human read it". The evidence is tessellate's 20 of 24 plans amended after approval. Authoring stays out: the loop never writes a plan, it returns findings to the planner.
+**This deliberately revises an earlier boundary.** `docs/candidates.md` recorded that judging a design is "not ours". It is ours now, for the reason the single question gives: the loop moves the planning phase from `act` to `close`. Until now gatedloop closed implementation, and planning ended at "a human read it". The evidence is an adopter's plans, most of them amended after approval. Authoring stays out: the loop never writes a plan, it returns findings to the planner.
 
 ## Capabilities
 
