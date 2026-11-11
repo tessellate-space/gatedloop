@@ -2,12 +2,12 @@
 
 ## Why
 
-A console that shows whether each change is approved has to call `gates approval check <change>` once per change. tessellate's delivery console makes about 54 such calls per page load, at 0.33–0.42 s each, which is about 17.5 s of a 38 s load (#182). Almost all of that cost repeats across calls rather than varying per change:
+A console that shows whether each change is approved has to call `gates approval check <change>` once per change. An adopter reported that, with a few dozen approved changes, these calls take a large share of a page load (#182). Almost all of that cost repeats across calls rather than varying per change:
 
 - an interpreter start for each call;
 - about 17 git calls per check. They resolve the same merge target and the same local counterpart. `_approval_sha_ref` also runs one `git show` per plan file.
 
-To work around this, the console runs 8 checks at a time and caches the results under a key it has to guess. That copies gatedloop's invalidation logic outside gatedloop, and a wrong guess shows a stale approval as valid.
+The workaround is to run checks in parallel and cache the results under a key the caller has to guess. That copies gatedloop's invalidation logic outside gatedloop, and a wrong guess shows a stale approval as valid.
 
 Rejection test: this makes an existing guarantee, that the plan is approved on the target, cheap enough to check where a team looks at it. It authors no artifact and names no stack command.
 
