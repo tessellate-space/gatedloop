@@ -9,6 +9,17 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.12.1 — 2026-11-11
+
+Two fixes for lanes that got stuck with no sanctioned way out, short of a hand edit to the ledger or the locked area, or a history rewrite. Both defects date from 0.11.1. Nothing new to configure.
+
+- **lane-unstick** (#183). Fixes #178, #173.
+  - **`gates tests check` no longer reports lost ledger rows that were never lost** (#178). The completion walk compared the lane's ledger with the target's copy. That copy gains `approval-local` rows each time an amended plan is attested on `main`. After the lane synced past such an attestation, any task with a `halt` or `test-defect` row was refused once its `[x]` was staged, and the merge's `tests check --ref` was refused the same way. The walk now reads the lane's own first-parent line. A ledger that really shrinks on the lane is still refused, naming the commit.
+  - **`gates attempt restart` works for tasks placed together** (#173). Every placement of the change that is active, or voided only by a `halt`, now counts as clean while its tests hold their placed content, whichever task it belongs to. That includes the halted task's own placement. The restarted agent places those tests again with `gates tests place` as usual, and a new red run follows. A placed test edited after placement is still refused, and the refusal now names its task. A placement voided by a `test-defect` still counts as dirt.
+  - **Uncommitted bookkeeping rows no longer block a restart.** An append to the change's ledger made only of `usage`, `restart` and `halt` rows counts as clean, so restarts in a row need no ledger commit between them. The refusal for real dirt names the paths and no longer says to discard work.
+
+**Upgrading:** update the plugin and start a new session. A lane that is stuck on either refusal goes through once it runs 0.12.1. Nothing needs undoing by hand.
+
 ## 0.12.0 — 2026-11-06
 
 Planning gets a loop of its own: a plan can be checked, reviewed and test-authored before anyone approves it. Two opt-in keys also cut the cost of `ci` per task. Everything new is off unless you turn it on.
