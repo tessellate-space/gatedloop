@@ -119,8 +119,10 @@ oldest first, across restarts.
 
 `gates attempt restart <task>` SHALL refuse unless the working tree is clean at the
 task's last commit, and SHALL refuse once the task's restarts number
-`loop.fresh-restarts`. A task's placed tests SHALL count as clean while each holds
-exactly its placed content, and so SHALL the removal of their holding files. Otherwise it
+`loop.fresh-restarts`. Every placement of the change that is active, or voided only by a `halt`, SHALL count as
+clean while each placed test holds exactly its placed content, whichever task it belongs to, and so SHALL the removal of
+its holding files. An uncommitted append to the change's ledger made only of `usage`,
+`restart` and `halt` rows SHALL count as clean. Otherwise it
 SHALL record a `restart` row, after which the failed-attempt count starts again from
 zero. The implementer SHALL NOT restart itself; restarting is the dispatcher's act, in a
 new agent context.
@@ -152,7 +154,47 @@ new agent context.
 #### Scenario: A placed test edited after placement
 
 - **WHEN** one of task 1.2's placed tests differs from its placed content
-- **THEN** `gates attempt restart 1.2` refuses, naming the path, and records nothing
+- **THEN** `gates attempt restart 1.2` refuses, naming the path and its task, and records nothing
+
+#### Scenario: Two tasks placed together
+
+- **WHEN** tasks 8.1 and 8.2 were placed in one tree, both placements are uncommitted at
+  their placed content, and 8.2 halted `stalled`
+- **THEN** `gates attempt restart 8.2` records the `restart` row, and so does `gates
+  attempt restart 8.1`
+
+#### Scenario: The restarted task places its tests again
+
+- **WHEN** task 8.2 was restarted with its halt-voided placement still at its placed
+  content
+- **THEN** `gates tests place 8.2` records a new placement without its holding files, and
+  8.2 needs a red `unit` run after it
+
+#### Scenario: A defect-voided placement is not clean
+
+- **WHEN** a `test-defect` row voided task 8.1's placement and its placed test is still in
+  the tree
+- **THEN** `gates attempt restart 8.2` refuses, naming that path
+
+#### Scenario: A sibling's placed test edited
+
+- **WHEN** tasks 8.1 and 8.2 were placed together and one of 8.1's placed tests differs
+  from its placed content
+- **THEN** `gates attempt restart 8.2` refuses, naming the path and task 8.1, and records
+  nothing
+
+#### Scenario: Uncommitted bookkeeping rows
+
+- **WHEN** the only difference from the last commit is an append to the change's ledger
+  of `halt`, `restart` and `usage` rows
+- **THEN** `gates attempt restart` treats the tree as clean and records the `restart` row
+
+#### Scenario: A dirty tree's refusal
+
+- **WHEN** a restart refuses on uncommitted work other than placed tests and bookkeeping
+  rows
+- **THEN** the message names the paths and does not tell the agent to discard placed
+  tests
 
 ### Requirement: The budget is declared in the manifest
 
