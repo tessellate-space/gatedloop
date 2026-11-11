@@ -1,1 +1,0 @@
-Docs only: SETUP.md's command reference and docs/stability.md's list of covered documents; no behaviour changes, and `scripts/release docs` checks the reference.

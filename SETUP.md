@@ -705,6 +705,8 @@ gates marker check-remote <gate> <sha>           # exit 0 only if the latest `ga
 gates record-merged <sha>                        # for a forge squash commit: record the change's merge row (under acceptance: self, its accept row first), archive it, one local commit; never pushes (a plan/<change> PR under self: attest it from the merge)
 gates approval attest <change> --merged <pr>     # under approval.plan: self, the plan PR's merge is the approval (merger, merge time; sha over the merge commit)
 gates handoff <change> [--json]                  # the planner-to-orchestrator payload, printed only when the plan is approved on the merge target; reads only
+gates approval check <change>                    # exit 0 if the plan is on the merge target (or, under self, its local counterpart) and still matches its approval; else 1 with the reason
+gates approval check --json [<change> ...]       # the same verdict for each named change (none: every active change on the target, by name) as one document: policy, target, fingerprint, results; exit 0 only when every result passes
 gates ledger record-ready <change>               # append the `ready` row the implementer commits before READY TO MERGE; prints the report's `gatedloop: gates {...}` block (ci, review: clean|findings|partial|none, live_check) from the ledger
 gates taint check [--change <name>] [--ref <ref>]  # exit 1 on an unresolved taint, naming each tainted commit (a merge commit marked with the sync route); --ref reads the change a merge's incoming ref names
 gates lock status [--json]                       # each serialized gate's lock: free, or held by pid N (alive|dead?) for how long; flags "possibly hung"; names a merge waiting with priority
@@ -857,6 +859,34 @@ resolves to `origin/main`) is accepted too, with a loud advisory that it isn't o
 origin yet — see [`docs/worktree-lanes.md`](./docs/worktree-lanes.md) for the full
 acceptance map, including `check-archive`'s parallel (and policy-independent)
 local-counterpart acceptance.
+
+**Many changes in one call — `gates approval check --json [<change> ...]`.** A
+console that shows whether each change is approved runs one command, not one per
+change. It resolves the merge target and the policy once, reads every plan file it
+needs in one batched git read, and prints one document:
+
+```json
+{"policy": "self", "target": "origin/main", "fingerprint": "<sha256 hex>",
+ "results": [{"change": "add-auth", "ok": true, "ref": "origin/main", "unpushed": false,
+              "approved_by": "...", "approved_at": "...", "approved_sha": "...",
+              "reason": "change 'add-auth' is merged to 'origin/main' and approved by ..."}]}
+```
+
+Each result has the `ok` and `reason` that `gates approval check <change>` gives that
+change alone. `results` keeps the order of the names given; with no names it holds
+every change under `openspec/changes/` except `archive/`, in name order. A refused
+change has `ok: false` and `ref: null`, with whatever `approved_*` values its
+`.openspec.yaml` holds on the ref consulted, or `null`; `unpushed` is `true` where the local counterpart
+answered. With no resolvable target, every result is refused with that reason. The
+command exits 0 only when every result passes, and 1 otherwise; an empty
+`openspec/changes/` gives `results: []` and exit 0.
+
+The `fingerprint` is the cache key. It is a SHA-256 over the document version and
+every input a verdict reads: the policy, the target and its commit, and under `self`
+the local counterpart and its commit. Cache the whole document under it and recompute the fingerprint to know when
+to refresh; it costs a few `rev-parse` calls, so there is no `--since`. Without
+`--json`, the command takes exactly one change, as before, and otherwise exits 2,
+naming `--json`.
 
 **The solo procedure — `gates approval attest <change> --local`.** Under a declared
 `self` policy, this writer computes `approved_sha` with the exact same content-hash
