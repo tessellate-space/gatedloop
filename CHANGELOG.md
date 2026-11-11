@@ -49,7 +49,7 @@ Planning gets a loop of its own: a plan can be checked, reviewed and test-author
 1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
 2. **Run `/gatedloop:upgrade`.** It offers three new settings, each of which you may leave unset: `loop.ci-at`, `loop.ci-scope` and `loop.plan-preflight`.
 3. **If you set `loop.ci-at: ready`, re-run `gates hook install`** when you use the copied git hook, so the git layer accepts a `unit` marker too. A composed install (a hook manager) picks it up with the plugin version.
-4. **If you run an interim plan preflight of your own** (tessellate-space's #134, for example), switch to the shipped loop.
+4. **If you run an interim plan preflight of your own**, switch to the shipped loop.
 
 ## 0.11.1 — 2026-11-04
 

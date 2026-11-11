@@ -4,8 +4,8 @@
 
 The commit hooks require a green `ci` marker for every task commit, and most diffs that
 are not confined to one scoped surface pay the full `ci` for it. A field report (#162,
-tessellate-space, gatedloop 0.11.0) counted 667 `ci` runs in two weeks: about 48 h,
-42 h of it at full scope. About 70 % of those runs came from per-task commits made
+an adopter on gatedloop 0.11.0) counted hundreds of `ci` runs in two weeks, most of
+the time at full scope. Most of those runs came from per-task commits made
 before the change was READY. No red `ci` in that window caught a defect that one full
 `ci` at READY would have missed and that the task's `unit` run had not already caught.
 `ci` is serialized machine-wide, so every per-task full run blocks every other lane.

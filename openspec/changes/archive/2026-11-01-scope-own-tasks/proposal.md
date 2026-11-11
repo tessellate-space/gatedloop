@@ -6,7 +6,7 @@ err-full-scoping (0.10.0) made an unmatched changed path select the global gate.
 - with `openspec/**` in a surface of its own, as SETUP.md advises, the tick makes a second hot surface, and the gate errs full again;
 - with `openspec/**` in a code surface, that surface turns hot for every other surface's tasks.
 
-So SETUP's remedy cannot work. In tessellate-space's ledgers (2026-10-15 to 10-31), 69 green per-task `ci` runs were scoped, with medians of 17–104 s against 199 s for a full run. Under 0.10.0 all of them run full, about 3 extra CPU-hours per two weeks on one machine. A tick cannot change what a test runs.
+So SETUP's remedy cannot work. In an adopter's ledgers over two weeks, dozens of green per-task `ci` runs were scoped and took a fraction of a full run. Under 0.10.0 all of them run full, costing hours of extra CPU time per fortnight on one machine. A tick cannot change what a test runs.
 
 ## What Changes
 

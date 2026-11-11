@@ -348,8 +348,8 @@ that judging a design was "not ours", and waited for someone to run the two toge
 **The revised boundary.** Judging a plan before it is approved is now ours, because it
 moves the planning phase from `act` to `close` (the rejection test's single question).
 Until then gatedloop closed implementation, and planning ended at "a human read it".
-The evidence is #168, from tessellate-space under 0.11.1: of 24 plan PRs merged on
-2026-11-05 and 2026-11-06, 20 were amendments made after approval, because of handoff
+The evidence is #168, an adopter's report under 0.11.1: most of its plan PRs over two
+days were amendments made after approval, because of handoff
 refusals, failed test-quality reviews, plans wrong about the code, a task order that
 deadlocked, and plans that drifted while they waited for handoff. Authoring a plan
 stays OpenSpec's: the loop judges a plan and authors none of it.
@@ -474,7 +474,7 @@ deletion has none to author. Promote if adopters report that review alone lets
 unjustified deletions through; the clause can be added without changing the grammar
 (`test-rewrites` design D1).
 
-**Field evidence (#168, unpromoted).** Tessellate-space asked for `gates plan check` to
+**Field evidence (#168, unpromoted).** An adopter asked for `gates plan check` to
 refuse a `rewrites:` path that a task deletes. The plan has no way to declare a
 deletion, so the check cannot be mechanical, and `plan-preflight` D10 (a) made it
 implementability check 3, judged by plan review. The report is evidence that a plan

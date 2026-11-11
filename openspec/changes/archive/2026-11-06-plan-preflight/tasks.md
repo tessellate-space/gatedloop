@@ -57,4 +57,4 @@ Target: 0.12.0. Tests are authored inline by the implementer. Docs travel with e
 
 ## Workflow follow-up
 
-- Open the implementation PR with "Refs #168". The 0.12.0 release notes describe the plan loop, its tiers and the classifier slot, `loop.plan-preflight`, `blast-radius`, the `gates plan` commands, the preflight store with its snapshot branch (`plan save`, `plan restore`), the `tests check` backstop, and that plan review runs on Opus, and tell adopters running an interim preflight (such as tessellate's #134) to switch to the shipped one.
+- Open the implementation PR with "Refs #168". The 0.12.0 release notes describe the plan loop, its tiers and the classifier slot, `loop.plan-preflight`, `blast-radius`, the `gates plan` commands, the preflight store with its snapshot branch (`plan save`, `plan restore`), the `tests check` backstop, and that plan review runs on Opus, and tell adopters running an interim preflight to switch to the shipped one.
