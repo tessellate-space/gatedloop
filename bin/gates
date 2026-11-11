@@ -11183,6 +11183,239 @@ _UNPUSHED_MERGE_ADVISORY = (
 )
 
 
+def _decode_as_text_mode(data: bytes) -> str:
+    """`data` decoded exactly as `subprocess.run(..., text=True)` decodes a
+    child's output: the locale's encoding, strict, with universal newlines
+    (`\\r\\n` and a lone `\\r` both become `\\n`). The batched reader
+    hashes through here, so its sha matches `_approval_sha_ref`'s byte for
+    byte (batch-approval-check D2), quirk included."""
+    return io.TextIOWrapper(io.BytesIO(data), newline=None).read()
+
+
+class _RefPlanReader:
+    """One change's plan at a ref, read the way the single check always
+    has: one git call per question (batch-approval-check D1)."""
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def present(self, change: str, ref: str) -> bool:
+        return _change_present_on_ref(self.root, change, ref)
+
+    def openspec_yaml(self, change: str, ref: str) -> dict | None:
+        return _openspec_yaml_at_ref(self.root, change, ref)
+
+    def approval_sha(self, change: str, ref: str) -> str | None:
+        return _approval_sha_ref(self.root, change, ref)
+
+
+class _BatchPlanReader:
+    """The named changes' plans at a ref, read once per ref: one `git
+    ls-tree -r <ref> -- openspec/changes/` and one `git cat-file --batch`
+    for every blob those changes need (batch-approval-check D2), so the
+    number of git calls does not depend on how many changes are named.
+    Every answer is the one `_RefPlanReader` gives for the same change."""
+
+    def __init__(self, root: Path, changes):
+        self.root = root
+        self.changes = list(dict.fromkeys(changes))
+        self._refs: dict = {}
+
+    def _paths_for(self, change: str, listed) -> list[str]:
+        """The listed paths under `change`, as `ls-tree` prints them."""
+        prefix = f"openspec/changes/{change}/"
+        return [p for p in listed if p.startswith(prefix)]
+
+    def _load(self, ref: str):
+        """`(paths, blobs)` at `ref`: every listed path under
+        `openspec/changes/` with its object id, and the decoded blobs the
+        named changes need, by path; `None` when `ref` lists nothing git
+        can read."""
+        if ref in self._refs:
+            return self._refs[ref]
+        out = subprocess.run(
+            ["git", "ls-tree", "-r", ref, "--", "openspec/changes/"],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            self._refs[ref] = None
+            return None
+        paths: dict[str, str] = {}
+        for line in out.stdout.splitlines():
+            meta, sep, path = line.partition("\t")
+            fields = meta.split()
+            if sep and len(fields) == 3:
+                paths[path] = fields[2]
+        wanted = []
+        for change in self.changes:
+            prefix = f"openspec/changes/{change}/"
+            for path in self._paths_for(change, paths):
+                rel = path[len(prefix):]
+                if _is_plan_artifact_relpath(rel) or rel in (".openspec.yaml", "tasks.md"):
+                    wanted.append(path)
+        blobs: dict[str, str] = {}
+        oids = list(dict.fromkeys(paths[p] for p in wanted))
+        if oids:
+            batch = subprocess.run(
+                ["git", "cat-file", "--batch"], cwd=self.root, capture_output=True,
+                input=("\n".join(oids) + "\n").encode(),
+            )
+            by_oid = _parse_cat_file_batch(batch.stdout) if batch.returncode == 0 else {}
+            for path in wanted:
+                data = by_oid.get(paths[path])
+                if data is not None:
+                    blobs[path] = _decode_as_text_mode(data)
+        self._refs[ref] = (paths, blobs)
+        return self._refs[ref]
+
+    def change_names(self, ref: str) -> list[str]:
+        """Every change under `openspec/changes/` at `ref`, except
+        `archive/`, in name order."""
+        loaded = self._load(ref)
+        if loaded is None:
+            return []
+        names = set()
+        for path in loaded[0]:
+            parts = path.split("/")
+            if len(parts) > 3 and parts[2] != "archive":
+                names.add(parts[2])
+        return sorted(names)
+
+    def present(self, change: str, ref: str) -> bool:
+        loaded = self._load(ref)
+        return loaded is not None and bool(self._paths_for(change, loaded[0]))
+
+    def openspec_yaml(self, change: str, ref: str) -> dict | None:
+        loaded = self._load(ref)
+        text = None if loaded is None else loaded[1].get(f"openspec/changes/{change}/.openspec.yaml")
+        if text is None:
+            return None
+        try:
+            return _parse_yaml_text(text) or {}
+        except Exception:
+            return None
+
+    def approval_sha(self, change: str, ref: str) -> str | None:
+        """`_approval_sha_ref(root, change, ref)`, from the batch's blobs."""
+        loaded = self._load(ref)
+        if loaded is None:
+            return None
+        paths, blobs = loaded
+        prefix = f"openspec/changes/{change}/"
+        rel_paths = sorted(
+            p[len(prefix):] for p in self._paths_for(change, paths)
+            if _is_plan_artifact_relpath(p[len(prefix):])
+        )
+        if not rel_paths:
+            return None
+        h = hashlib.sha256()
+        for rel in rel_paths:
+            content = blobs.get(prefix + rel)
+            if content is None:
+                return None
+            h.update(rel.encode() + b"\n")
+            h.update(content.encode())
+            h.update(b"\n")
+        _update_with_oracle_tags(h, blobs.get(f"{prefix}tasks.md"))
+        return h.hexdigest()
+
+
+def _parse_cat_file_batch(data: bytes) -> dict[str, bytes]:
+    """`git cat-file --batch` output as `{oid: content}`; a `missing`
+    object is left out."""
+    out: dict[str, bytes] = {}
+    pos = 0
+    while pos < len(data):
+        end = data.find(b"\n", pos)
+        if end < 0:
+            break
+        header = data[pos:end].decode(errors="replace").split()
+        pos = end + 1
+        if len(header) != 3:
+            continue
+        oid, _kind, size = header
+        n = int(size)
+        out[oid] = data[pos:pos + n]
+        pos += n + 1
+    return out
+
+
+class _ApprovalContext:
+    """What every verdict in one check shares (batch-approval-check D1):
+    the policy, the resolved target (or why none resolved) and, under
+    `self`, the local counterpart branch when it exists."""
+
+    def __init__(self, root: Path, policy: str, target: str | None,
+                 target_reason: str | None, local: str | None):
+        self.root = root
+        self.policy = policy
+        self.target = target
+        self.target_reason = target_reason
+        self.local = local
+
+
+def _approval_context(root: Path, m: dict | None = None) -> _ApprovalContext:
+    policy = _approval_policy(m or {})
+    target, reason = _resolve_merge_target(root)
+    local = None
+    if target is not None and policy == "self":
+        name = _local_counterpart_branch(target)
+        if name and _local_branch_exists(root, name):
+            local = name
+    return _ApprovalContext(root, policy, target, reason, local)
+
+
+def _approval_verdict(ctx: _ApprovalContext, change: str, reader) -> tuple:
+    """`(ok, ref, reason, meta)` for one change: `_approval_check_at`'s
+    rules in its order, with its reason strings, read through `reader`.
+    `meta` is `(approved_by, approved_at, approved_sha)` from the
+    `.openspec.yaml` on the ref consulted, or all `None` when none was read.
+    `ref` is `None` on a refusal."""
+    none = (None, None, None)
+    target = ctx.target
+    if target is None:
+        return False, None, (
+            f"no merge target resolved ({ctx.target_reason}) — push a branch to a remote "
+            "with an 'origin/HEAD', or create a local 'main', then retry"
+        ), none
+    ref = target
+    advisory = ""
+    if not reader.present(change, target):
+        if ctx.local and reader.present(change, ctx.local):
+            ref = ctx.local
+            advisory = _UNPUSHED_MERGE_ADVISORY
+        else:
+            return False, None, (
+                f"change '{change}' is not present on '{target}' — the plan must be "
+                f"reviewed and merged to '{target}' before implementation starts"
+            ), none
+    data = reader.openspec_yaml(change, ref)
+    if data is None:
+        return False, None, (
+            f"no .openspec.yaml found for '{change}' on '{ref}' — cannot verify "
+            f"approval; ensure the change's full plan (including .openspec.yaml) is "
+            f"merged to '{ref}'"
+        ), none
+    meta = _approval_meta(data)
+    approved_by, _approved_at, approved_sha = meta
+    if not approved_by:
+        return False, None, (
+            f"change '{change}' is merged but its .openspec.yaml has no approved_by — "
+            "a merge proves the plan landed, not that a human agreed with it — "
+            f"attest it (`gates approval attest {change} --local` under a self-"
+            "approval policy, or get its PR reviewed and attested with `--pr`)"
+        ), meta
+    computed = reader.approval_sha(change, ref)
+    if not approved_sha or computed != approved_sha:
+        return False, None, (
+            f"change '{change}'s approved_sha does not match its current plan content on "
+            f"'{ref}' — it was edited after approval — get it re-approved (re-attest "
+            f"with `gates approval attest {change} --local` or a fresh PR review) before "
+            "implementing"
+        ), meta
+    return True, ref, f"change '{change}' is merged to '{ref}' and approved by {approved_by}{advisory}", meta
+
+
 def _approval_check(root: Path, change: str, m: dict | None = None) -> tuple[bool, str]:
     ok, _ref, reason = _approval_check_at(root, change, m)
     return ok, reason
@@ -11207,50 +11440,13 @@ def _approval_check_at(root: Path, change: str, m: dict | None = None) -> tuple[
     the forge's approving review, which a purely local ref cannot evidence,
     so the origin ref is unconditionally required — a local-only merge is
     refused exactly as if it weren't merged at all.
+
+    batch-approval-check D1: the rules live in `_approval_verdict`; this is
+    one context and a single-change reader around it.
     """
-    policy = _approval_policy(m or {})
-    target, reason = _resolve_merge_target(root)
-    if target is None:
-        return False, None, (
-            f"no merge target resolved ({reason}) — push a branch to a remote "
-            "with an 'origin/HEAD', or create a local 'main', then retry"
-        )
-    ref = target
-    advisory = ""
-    if not _change_present_on_ref(root, change, target):
-        local = _local_counterpart_branch(target) if policy == "self" else None
-        if local and _local_branch_exists(root, local) and _change_present_on_ref(root, change, local):
-            ref = local
-            advisory = _UNPUSHED_MERGE_ADVISORY
-        else:
-            return False, None, (
-                f"change '{change}' is not present on '{target}' — the plan must be "
-                f"reviewed and merged to '{target}' before implementation starts"
-            )
-    data = _openspec_yaml_at_ref(root, change, ref)
-    if data is None:
-        return False, None, (
-            f"no .openspec.yaml found for '{change}' on '{ref}' — cannot verify "
-            f"approval; ensure the change's full plan (including .openspec.yaml) is "
-            f"merged to '{ref}'"
-        )
-    approved_by, _approved_at, approved_sha = _approval_meta(data)
-    if not approved_by:
-        return False, None, (
-            f"change '{change}' is merged but its .openspec.yaml has no approved_by — "
-            "a merge proves the plan landed, not that a human agreed with it — "
-            f"attest it (`gates approval attest {change} --local` under a self-"
-            "approval policy, or get its PR reviewed and attested with `--pr`)"
-        )
-    computed = _approval_sha_ref(root, change, ref)
-    if not approved_sha or computed != approved_sha:
-        return False, None, (
-            f"change '{change}'s approved_sha does not match its current plan content on "
-            f"'{ref}' — it was edited after approval — get it re-approved (re-attest "
-            f"with `gates approval attest {change} --local` or a fresh PR review) before "
-            "implementing"
-        )
-    return True, ref, f"change '{change}' is merged to '{ref}' and approved by {approved_by}{advisory}"
+    ok, ref, reason, _meta = _approval_verdict(
+        _approval_context(root, m), change, _RefPlanReader(root))
+    return ok, ref, reason
 
 
 def _plan_approval_refusal(m: dict, root: Path, change: str, head: str, what: str) -> str | None:

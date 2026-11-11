@@ -2,7 +2,7 @@
 
 ## 1. The context, the verdict and the reader (D1, D2)
 
-- [ ] 1.1 Split `_approval_check_at` in `bin/gates` into `_approval_context` and `_approval_verdict`, with a per-ref batched blob reader (`git ls-tree -r <ref> -- openspec/changes/` plus one `git cat-file --batch`) that decodes each blob as `text=True` does today, and keep `_approval_check_at` as a wrapper with unchanged results. Verify with tests in a new `tests/test_approval_check_batch.py` on real repositories: the batched approval sha equals `_approval_sha_ref`'s for a change with a CRLF file and a non-ASCII file, and the existing approval, handoff and check-implement tests pass untouched [oracle: unit]
+- [x] 1.1 Split `_approval_check_at` in `bin/gates` into `_approval_context` and `_approval_verdict`, with a per-ref batched blob reader (`git ls-tree -r <ref> -- openspec/changes/` plus one `git cat-file --batch`) that decodes each blob as `text=True` does today, and keep `_approval_check_at` as a wrapper with unchanged results. Verify with tests in a new `tests/test_approval_check_batch.py` on real repositories: the batched approval sha equals `_approval_sha_ref`'s for a change with a CRLF file and a non-ASCII file, and the existing approval, handoff and check-implement tests pass untouched [oracle: unit]
 
 ## 2. The batched command (D3, D4, D5)
 
