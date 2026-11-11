@@ -1,0 +1,21 @@
+# Tasks
+
+Precondition: `batch-approval-check` is merged into this change's base (design D0).
+
+## 1. The approval binds the snapshot (D1)
+
+- [ ] 1.1 Per D1: make `_plan_save` write `x-gatedloop-preflight-tree` after `update-ref` succeeds (replace an existing line in place, else append; keep other lines; when `.openspec.yaml` is absent, save without the key and say so). Make `_approval_sha_ref`, the batched approval reader and `_approval_sha_worktree` add the key's exact bytes after the oracle-tag update when it is present. Add `_approval_sha_worktree(..., preflight=False)` for `_plan_digests` and the snapshot message. Verify with tests on real repositories: a change without the key hashes as before; a committed key is covered, so changing its value makes `gates approval check` fail; an identical re-save writes the same value; other `.openspec.yaml` lines survive; a save after a green round leaves `gates plan status` reporting it unmoved; `gates approval check --json` over several changes agrees with the single-change check for a change carrying the key. [oracle: unit]
+
+## 2. Adoption and the handoff (D2, D3)
+
+- [ ] 2.1 Extract `_preflight_stale(current, saved, held)` from `_preflight_reuse`, keeping `gates tests brief --preflight`'s output unchanged. Add `gates tests adopt <change>` per D2 (its refusals, snapshot search and single fetch, the three categories over every task in `tasks.md`, `ADOPTED.json` with merge-on-rerun and the different-tree refusal), register it in argparse and regenerate `tests/contract.json`. Verify in a new `tests/test_tests_adopt.py` with a test for each case: every test-discipline adoption and refusal scenario; a snapshot found only in the branch's history; a re-run that merges into `ADOPTED.json`. [oracle: unit]
+- [ ] 2.2 Per D3: make a full, non-dry `gates tests handoff` read `ADOPTED.json`, record `preflight_tree` and `adopted` (a task is adopted only when its file set equals the snapshot's and every blob matches), and delete the file after appending its row. `--task` and `--dry-run` leave the file alone. Regenerate `tests/contract.json`. Verify with tests for each case: every task adopted; one task re-authored after adoption, which is not listed; no `ADOPTED.json`, so neither field is recorded; a `--task` or `--dry-run` handoff leaves the file; a task with a deleted held file is not listed; adopted tests still need a red run after placement. [oracle: unit]
+
+## 3. The loop adopts first (D4)
+
+- [ ] 3.1 Per D4, update the prompts: `skills/tdd-apply/SKILL.md` §4b: adopt before step 1 when no handoff exists, dispatch the author for stale tasks only, and review only the tasks authored in this run; `skills/tdd-apply/SKILL.md` §5-inline: adopt, then author only stale tasks inline; review the stale and present tasks; `commands/orchestrator.md`: skip step 3.1's author dispatch when the approved plan carries the key, leaving adoption and the handoff to the lane; `agents/test-author.md`: author only the named tasks; `commands/propose.md` and `commands/planner.md`: commit `.openspec.yaml` after the final `gates plan save`. Verify that the convention review of the `prompts` surface reports no `stack-agnostic-prompts` finding. [oracle: none]
+
+## 4. The branch is deleted after archive (D5)
+
+- [ ] 4.1 Per D5, delete the preflight branch after `_merge_publish` succeeds (the target's remote via `_split_target` and `ls-remote`; a local target deletes nothing remote) and in `cmd_record_merged` (remote `origin`, only after the record commit succeeds). On failure, print the command and leave the exit status unchanged. Verify with tests on real repositories with a bare remote: local and remote deleted; local only; a local target; no branch, with nothing printed; a refused remote deletion: exit unchanged, command printed; `record-merged` deleting after archive; `record-merged` leaving the branch for a `plan/` head; a refused record commit leaving the branch. [oracle: unit]
+- [ ] 4.2 Document `gates tests adopt`, the bound key and the automatic deletion in SETUP.md and AUTOMATION.md. Remove SETUP.md's "delete it by hand" line, and rewrite `docs/status.md`'s sentence beginning "The preflight's held tests are not yet the handed-off ones" so that it describes adoption. Verify that `scripts/release docs` reports no gap. [oracle: none]
