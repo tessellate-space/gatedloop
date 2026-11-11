@@ -32,7 +32,8 @@ fails when the code and that file disagree, so no change to it lands unreviewed:
   per-step codes;
 - the `gatedloop/<gate>` commit status contexts;
 - the top-level keys of `.gates.yaml`;
-- the top-level keys of `gates handoff --json` and `gates stats --json`;
+- the top-level keys of `gates handoff --json`, `gates stats --json` and
+  `gates approval check --json`;
 - the ledger row fields, and the row version `v`.
 
 Three things outside that file are covered too: the `tasks.md` oracle tag syntax
@@ -56,7 +57,7 @@ or removing one, or changing what a value means, raises it.
   few outputs they parse come from `internal` subcommands that ship with them);
 - an `internal` subcommand: one the bundled hooks or skills call, listed with its
   reason in `tests/test_contract.py`;
-- any `--json` document other than `handoff` and `stats`.
+- any `--json` document other than `handoff`, `stats` and `approval check`.
 
 These change without a deprecation.
 

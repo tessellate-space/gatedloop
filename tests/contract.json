@@ -1,5 +1,11 @@
 {
  "documents": {
+  "approval check": [
+   "fingerprint",
+   "policy",
+   "results",
+   "target"
+  ],
   "handoff": [
    "approval",
    "change",
@@ -187,7 +193,9 @@
    "visibility": "public"
   },
   "approval check": {
-   "options": [],
+   "options": [
+    "--json"
+   ],
    "positionals": [
     "change"
    ],
