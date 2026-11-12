@@ -8786,11 +8786,20 @@ def _plan_finding(kind: str, task: str | None, path: str | None, detail: str) ->
     return {"kind": kind, "task": task, "path": path, "detail": detail}
 
 
-def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> list[dict]:
+# advisory-rewrite-paths D1: the one oracle warning that predicts no handoff
+# refusal. Matched on the fixed suffix `_task_oracle_problems` emits.
+_PLAN_ADVISORY_SUFFIX = "does not look like a test path — the test author will read its content"
+
+
+def _plan_check_findings(m: dict, root: Path, change: str,
+                         at: str = "HEAD") -> tuple[list[dict], list[dict]]:
     """Every static finding for one change's plan (D10): its oracle-tag errors
     and warnings, its untagged tasks under `loop.task-oracle: required`, and
-    each `rewrites:` path absent at `at`."""
+    each `rewrites:` path absent at `at` -- and, apart, its advisories: a
+    `rewrites:` path that does not look like a test path, which the handoff
+    does not refuse (advisory-rewrite-paths D1)."""
     findings: list[dict] = []
+    advisories: list[dict] = []
     prefix = f"change '{change}'"
     errs, warns = _task_oracle_problems(m, root)
     for kind, msgs in (("oracle-error", errs), ("oracle-warning", warns)):
@@ -8799,8 +8808,10 @@ def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> 
                 continue
             mt = _PLAN_FINDING_TASK_RE.search(msg) or _PLAN_FINDING_LINE_RE.search(msg)
             rw = re.search(r"declares rewrites: (\S+?),", msg)
-            findings.append(_plan_finding(kind, mt.group(1) if mt else None,
-                                          rw.group(1) if rw else None, msg))
+            advisory = kind == "oracle-warning" and msg.endswith(_PLAN_ADVISORY_SUFFIX)
+            (advisories if advisory else findings).append(_plan_finding(
+                "rewrite-not-test-path" if advisory else kind, mt.group(1) if mt else None,
+                rw.group(1) if rw else None, msg))
     tasks_md = root / "openspec" / "changes" / change / "tasks.md"
     lines = []
     if tasks_md.is_file():
@@ -8834,7 +8845,12 @@ def _plan_check_findings(m: dict, root: Path, change: str, at: str = "HEAD") -> 
             else:
                 detail += " — the handoff refuses a rewrite of a file absent at the base"
             findings.append(_plan_finding("rewrite-absent", tid, path, detail))
-    return findings
+    return findings, advisories
+
+
+def _plan_print_advisories(advisories: list[dict]) -> None:
+    for a in advisories:
+        print(f"advisory: {a['task']} {a['path']}: {a['detail']}")
 
 
 def _plan_drift_named(root: Path, change: str) -> list[str]:
@@ -9467,7 +9483,7 @@ def _plan_preflight_mode(m: dict) -> str:
 
 def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None,
                     base: str | None = None) -> dict:
-    findings = _plan_check_findings(m, root, change, against or "HEAD")
+    findings, advisories = _plan_check_findings(m, root, change, against or "HEAD")
     if against and base:
         findings += _plan_drift_findings(root, change, against, base)
     return {
@@ -9476,6 +9492,7 @@ def _plan_check_doc(m: dict, root: Path, change: str, against: str | None = None
         "tier": _plan_tier_doc(m, root, change, run_classifier=False),
         "against": against,
         "findings": findings,
+        "advisories": advisories,
     }
 
 
@@ -9504,6 +9521,7 @@ def _plan_check(m: dict, root: Path, args) -> int:
         where = " ".join(x for x in (f"task {f['task']}" if f["task"] else None,
                                      f["path"]) if x)
         print(f"{f['kind']}: {where + ': ' if where else ''}{f['detail']}")
+    _plan_print_advisories(doc["advisories"])
     if doc["findings"]:
         print(f"gatedloop: plan check — {len(doc['findings'])} finding(s) in '{change}'. "
               "Amend the plan; a round opens only on a plan with none.", file=sys.stderr)
@@ -9549,10 +9567,11 @@ def _plan_row(root: Path, change: str, event: str, **fields) -> dict:
 def _plan_round(m: dict, root: Path, args) -> int:
     change = args.change
     _plan_require_change(root, change)
-    findings = _plan_check_findings(m, root, change)
+    findings, advisories = _plan_check_findings(m, root, change)
+    for f in findings:
+        print(f"{f['kind']}: {f['detail']}")
+    _plan_print_advisories(advisories)
     if findings:
-        for f in findings:
-            print(f"{f['kind']}: {f['detail']}")
         print(f"gatedloop: plan round — {len(findings)} static finding(s); no round was opened "
               "and none is counted. Amend the plan and run `gates plan round` again.",
               file=sys.stderr)
