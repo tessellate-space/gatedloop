@@ -240,7 +240,7 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.12.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.13.0. Read a change's
 `design.md` before touching the area it covers:
 
 - `review-provenance`: a `SubagentStop` hook records how each convention review ran, review rows
@@ -251,6 +251,9 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 - `checkable-disputes`: a `setup`/`assertion` defect and the author's new `--defend` reply must
   `--cite` a path or spec scenario the shim resolves, a `green` defect needs a passing oracle run
   in the ledger, and `gates tests show` gives the human both sides.
+- `approved-tests`: the tests the plan loop authored before approval are snapshotted into the
+  approval (`x-gatedloop-preflight-tree`), adopted after approval by `gates tests adopt` instead
+  of authored a second time, and the `gatedloop/preflight/<change>` branch is deleted at merge.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 
