@@ -7244,6 +7244,46 @@ def _tests_check_problems(root: Path, change: str, rows: list[dict], state: dict
     return _lock_problems(root, change, rows, state, staged, only)
 
 
+def _release_blocker(root: Path, change: str, path: str, placers: set[str],
+                     state: dict, oracles: dict[str, dict | None]) -> str | None:
+    """release-voided-lock D1/D3: `None` when `path`, pinned only because
+    every placement of it is void, is released -- every task that placed it
+    is declared NO-TESTS in the latest handoff and tagged `[oracle: none]`
+    both in the approved plan on the merge target and in the evaluated tree
+    (`oracles`), and no task's handoff holds it. Otherwise the first unmet
+    condition, as a clause for the refusal. Reads the target directly and
+    ignores `--task`, so every reader reaches the same verdict."""
+    tasks = sorted(placers, key=_task_sort_key)
+
+    def is_none(oracle: dict | None) -> bool:
+        return oracle is not None and oracle.get("gate") is None
+
+    for task in tasks:
+        if task not in state["no_behaviour"]:
+            return f"task {task} is not declared NO-TESTS in the latest handoff"
+    target, _reason = _resolve_merge_target(root)
+    text = (_blob_at(root, target, f"openspec/changes/{change}/tasks.md")
+            if target is not None else None)
+    if text is None:
+        where = f"on {target}" if target is not None else "on the merge target"
+        return f"the approved plan {where} could not be read"
+    approved = {tid: oracle for tid, _t, oracle in _task_lines_text(text)}
+    for task in tasks:
+        if not is_none(approved.get(task)):
+            return f"task {task} is not tagged [oracle: none] in the approved plan on {target}"
+    for task in tasks:
+        if not is_none(oracles.get(task)):
+            return f"task {task} is not tagged [oracle: none] in this tree"
+    for task in sorted(state["tests"], key=_task_sort_key):
+        if path in state["tests"][task]:
+            return f"task {task}'s handoff holds it"
+    return None
+
+
+_RELEASE_ROUTE = ("the path is released only when the approved plan moves every task "
+                  "that placed it out of the authored set")
+
+
 def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                    staged: dict[str, str], only: str | None,
                    at: str | None = None) -> list[str]:
@@ -7264,12 +7304,14 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     #    whose placements are all void must be back at its authoring-time
     #    content, so a halt or defect cannot carry an edited test past it.
     expected: dict[str, tuple[str | None, str | None]] = {}
+    placers: dict[str, set[str]] = {}
     for r in rows:
         if r.get("gate") != TESTS_PLACED_EVENT:
             continue
         for task, paths in (r.get("tests") or {}).items():
             for path in paths:
                 expected.setdefault(path, (state["base"].get(path), None))
+                placers.setdefault(path, set()).add(task)
     # A path whose placement a defect at a completed task voided keeps that
     # content (D4) until the task is placed again, in row order with the
     # placements in force.
@@ -7279,6 +7321,19 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     for _i, task, paths in sorted(in_force, key=lambda t: t[0]):
         for path, blob in paths.items():
             expected[path] = (blob, task)
+    # release-voided-lock D1: a voided path the approved plan moved out of
+    # the authored set is released -- condition 1 no longer checks it.
+    oracles = _oracles_in_tree(root, change, staged)
+    pinned: dict[str, str] = {}
+    for path, (blob, task) in list(expected.items()):
+        if task is not None or staged.get(path) == blob:
+            continue
+        blocker = _release_blocker(root, change, path, placers.get(path, set()),
+                                   state, oracles)
+        if blocker is None:
+            del expected[path]
+        else:
+            pinned[path] = f"it stays pinned: {blocker} — {_RELEASE_ROUTE}"
     for path, (blob, task) in sorted(expected.items()):
         if only is not None and task not in (only, None):
             continue
@@ -7290,7 +7345,8 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                 problems.append(
                     f"{path}: at {short} it differs from its content before this "
                     "change, and no placement of it is in force (a defect or halt "
-                    "voided it) — an authored test changes only through its author"
+                    f"voided it) — an authored test changes only through its author; "
+                    f"{pinned[path]}"
                 )
             elif have is None:
                 problems.append(f"{path}: task {task}'s placed test is missing at {short}")
@@ -7306,7 +7362,7 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
                 f"{path}: staged content differs from its content before this "
                 "change, and no placement of it is in force — the implementer "
                 "never edits an authored test; record `gates tests defect <N.M> "
-                "--kind setup|assertion --detail ...` instead"
+                f"--kind setup|assertion --detail ...` instead; {pinned[path]}"
             )
         elif have is None or _file_blob(root, path) == blob:
             problems.append(
@@ -7381,7 +7437,6 @@ def _lock_problems(root: Path, change: str, rows: list[dict], state: dict,
     #    the first such run passed: its tests must be seen to pin the tree as
     #    it was. The oracle gate is the plan's tag, read from the evaluated
     #    tree, or `unit` for an untagged task (task-oracle D4).
-    oracles = _oracles_in_tree(root, change, staged)
     problems.extend(_oracle_drift_problems(root, change, oracles, only))
     for task, (index, paths) in sorted(active.items()):
         if only is not None and task != only:
