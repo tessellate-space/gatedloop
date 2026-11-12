@@ -108,12 +108,16 @@ required` refuses untagged tasks at handoff; it is off by default. Since 0.11.1
 a task rewrites: the author reads exactly those files from its brief and no other
 existing test, and the rewrite is locked as the task's authored test. An existing test
 a task must change but the plan doesn't name is still unreadable to the author, and
-stays a blocking question.
+stays a blocking question. Since 0.13.0 (`release-voided-lock`) a test whose placements
+were all voided is released from the lock once a re-approved plan tags every task that
+placed it `[oracle: none]` and the author declares them `NO-TESTS`; before that, such a
+path stayed pinned with no route out (#195).
 
 ### The plan loop's verdicts are judgements, recorded and never blocking — *shipped, opt-in*
 
 Since 0.12.0 (`plan-preflight`) `gates plan check` runs in every propose path and reports
-what the handoff would refuse after approval. Under `loop.plan-preflight: run` the
+what the handoff would refuse after approval; since 0.13.0 a `rewrites:` path that
+doesn't look like a test is printed as an advisory and no longer fails it (#192). Under `loop.plan-preflight: run` the
 planner also loops plan review, the preflight test author, a dry-run handoff and the
 authored-set review until the plan is green, asks a human, or spends its round budget.
 Those verdicts are LLM judgements: they are recorded in the change's ledger and shown in
