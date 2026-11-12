@@ -9,6 +9,16 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.13.0 — 2026-11-12
+
+- **batch-approval-check**: A console that shows whether each change is approved has to call `gates approval check <change>` once per change.
+- **advisory-rewrite-paths**: An adopter's plans rewrite end-to-end assets: Gherkin feature files, step definitions and a fixture.
+- **release-voided-lock**: The authored-test lock pins every path that any placement in a change ever held.
+
+### Other changes
+
+- docs: reconcile with 0.13.0 (#209)
+
 ## 0.12.1 — 2026-11-11
 
 Two fixes for lanes that got stuck with no sanctioned way out, short of a hand edit to the ledger or the locked area, or a history rewrite. Both defects date from 0.11.1. Nothing new to configure.
