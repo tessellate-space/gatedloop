@@ -1,0 +1,369 @@
+"""The citation resolver (change `checkable-disputes`, design D1 and D6).
+
+`unresolved_citations(root, change, citations)` returns the citations that do
+not resolve against the worktree at `root`, in input order, and an empty list
+when all do. A citation is a path, `path:line`, `path:a-b`, or
+`spec:<capability>#<scenario>`; the holding area `.gatedloop/authored/<change>/`
+is part of the worktree, and a scenario is looked up in the change's delta
+specs, then in `openspec/specs/`, ignoring case and runs of whitespace.
+
+Task 1.2 adds the command's side: new handoff rows carry `disputes: "cited"`,
+and `gates tests defect --kind setup|assertion` then requires a resolving
+`--cite` and stores it as `cites`, while a handoff recorded before this change
+keeps the old rules.
+
+Stdlib only, per `zero-dep-shim`. The resolver cases are pure filesystem cases: a throwaway directory
+tree, no git, the shim loaded by path as `bin/gates` has no `.py` suffix.
+
+Run with:  python3 -m unittest discover -s tests
+"""
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GATES_SHIM = REPO / "bin" / "gates"
+
+_loader = importlib.machinery.SourceFileLoader("gates_shim_dispute_citations", str(GATES_SHIM))
+_spec = importlib.util.spec_from_loader(_loader.name, _loader)
+gates = importlib.util.module_from_spec(_spec)
+_loader.exec_module(gates)
+
+CHANGE = "demo-change"
+HELD = f".gatedloop/authored/{CHANGE}/1.1/tests/test_calc.py.authored"
+
+DELTA = """\
+# Spec Delta
+
+## ADDED Requirements
+
+### Requirement: Expired cards are declined
+
+#### Scenario: Expired card is declined
+- **WHEN** a card past its expiry is charged
+- **THEN** the charge is declined
+"""
+
+MAIN = """\
+# Orders
+
+### Requirement: Duplicates are rejected
+
+#### Scenario: Duplicate order is rejected
+- **WHEN** the same order is submitted twice
+- **THEN** the second is rejected with 409
+"""
+
+
+def _tree(tmp):
+    root = Path(tmp)
+    (root / "src").mkdir()
+    (root / "src" / "api.py").write_text("one\ntwo\nthree\n")
+    held = root / HELD
+    held.parent.mkdir(parents=True)
+    held.write_text("def test_add():\n    assert add(2, 3) == 5\n")
+    delta = root / "openspec" / "changes" / CHANGE / "specs" / "checkout"
+    delta.mkdir(parents=True)
+    (delta / "spec.md").write_text(DELTA)
+    main = root / "openspec" / "specs" / "orders"
+    main.mkdir(parents=True)
+    (main / "spec.md").write_text(MAIN)
+    return root
+
+
+def _unresolved(root, *citations):
+    return gates.unresolved_citations(root, CHANGE, list(citations))
+
+
+class TestPathCitations(unittest.TestCase):
+    """Regressions guarded: a citation to a file that is not there accepted,
+    so a defect can point at nothing."""
+
+    def test_an_existing_path_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py"), [])
+
+    def test_a_missing_file_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/missing.py"), ["src/missing.py"])
+
+    def test_a_held_test_under_the_holding_area_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), HELD), [])
+            self.assertEqual(_unresolved(_tree(tmp), f"{HELD}:2"), [])
+
+
+class TestLineCitations(unittest.TestCase):
+    """Regressions guarded: a line number past the end of the file accepted
+    as evidence, or a range whose end is past it."""
+
+    def test_a_line_within_the_file_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _tree(tmp)
+            self.assertEqual(_unresolved(root, "src/api.py:1", "src/api.py:3"), [])
+
+    def test_a_line_past_the_end_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:4"), ["src/api.py:4"])
+
+    def test_a_range_within_the_file_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:1-3"), [])
+
+    def test_a_range_ending_past_the_end_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:2-9"), ["src/api.py:2-9"])
+
+    def test_a_line_of_a_missing_file_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/gone.py:1"), ["src/gone.py:1"])
+
+
+class TestSpecCitations(unittest.TestCase):
+    """Regressions guarded: a scenario that does not exist accepted, a
+    scenario looked up under the wrong capability, or the main specs ignored
+    when the change's delta does not hold it."""
+
+    def test_a_scenario_in_the_change_delta_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "spec:checkout#Expired card is declined"), [])
+
+    def test_a_scenario_in_the_main_specs_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "spec:orders#Duplicate order is rejected"), [])
+
+    def test_case_and_whitespace_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                _unresolved(_tree(tmp), "spec:checkout#expired   CARD is  declined"), [])
+
+    def test_a_missing_scenario_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:checkout#Card is refunded"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+    def test_a_scenario_of_another_capability_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:orders#Expired card is declined"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+    def test_a_missing_capability_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:shipping#Parcel is sent"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+
+class TestResultShape(unittest.TestCase):
+    """Regressions guarded: the unresolved ones reported out of order or
+    mixed with the resolved ones, which makes the refusal name the wrong
+    citation."""
+
+    def test_no_citations_means_nothing_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp)), [])
+
+    def test_only_the_unresolved_come_back_in_input_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _tree(tmp)
+            got = _unresolved(
+                root, "src/zzz.py", "src/api.py:1", "spec:checkout#Nope", "src/api.py:99", HELD)
+            self.assertEqual(got, ["src/zzz.py", "spec:checkout#Nope", "src/api.py:99"])
+
+
+# ---- task 1.2: the command ------------------------------------------------
+
+MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\n  unit: "false"\n'
+TEST_V1 = "def test_add():\n    assert add(2, 3) == 5\n"
+TEST_V2 = TEST_V1 + "\ndef test_add_negative():\n    assert add(-2, 1) == -1\n"
+
+
+def _env():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    env["CLAUDECODE"] = "1"
+    return env
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                          text=True, env=_env())
+
+
+def _run_gates(root, *args):
+    return subprocess.run([sys.executable, str(GATES_SHIM), *args], cwd=root,
+                          capture_output=True, text=True, env=_env())
+
+
+def _ledger(root):
+    return root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
+
+
+def _rows(root):
+    p = _ledger(root)
+    if not p.exists():
+        return []
+    return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+
+
+def _defects(root):
+    return [r for r in _rows(root) if r["gate"] == "test-defect"]
+
+
+def _handed_off_repo(tmp):
+    """A change branch whose task 1.1 tests were handed off by the real shim,
+    with a main spec to cite."""
+    root = Path(tmp)
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / ".gates.yaml").write_text(MANIFEST)
+    (root / "src").mkdir()
+    (root / "src" / "api.py").write_text("one\ntwo\nthree\n")
+    change_dir = root / "openspec" / "changes" / CHANGE
+    change_dir.mkdir(parents=True)
+    (change_dir / ".openspec.yaml").write_text("schema: spec-driven\n")
+    main = root / "openspec" / "specs" / "orders"
+    main.mkdir(parents=True)
+    (main / "spec.md").write_text(MAIN)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "init")
+    _git(root, "checkout", "-b", CHANGE)
+    _hold(root, TEST_V1)
+    result = _run_gates(root, "tests", "handoff", CHANGE)
+    assert result.returncode == 0, result.stderr
+    return root
+
+
+def _hold(root, content):
+    held = root / HELD
+    held.parent.mkdir(parents=True, exist_ok=True)
+    held.write_text(content)
+
+
+def _defect(root, *extra, kind="assertion", detail="expects 6", task="1.1"):
+    return _run_gates(root, "tests", "defect", task, "--kind", kind, "--detail", detail, *extra)
+
+
+def _make_handoff_legacy(root):
+    """Rewrite the ledger as an older shim wrote it: handoff rows with no
+    `disputes` marker."""
+    rows = _rows(root)
+    for r in rows:
+        if r["gate"] == "tests-handoff":
+            r.pop("disputes", None)
+    _ledger(root).write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+class TestHandoffStampsDisputes(unittest.TestCase):
+    """Regression guarded: a handoff that does not mark itself as governed by
+    the citation rules, so no defect against it could ever be held to them."""
+
+    def test_a_new_handoff_row_carries_disputes_cited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            (row,) = [r for r in _rows(root) if r["gate"] == "tests-handoff"]
+            self.assertEqual(row["disputes"], "cited")
+            self.assertIsNone(row["cites"])
+
+    def test_a_task_handoff_row_carries_disputes_cited_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            _hold(root, TEST_V2)
+            result = _run_gates(root, "tests", "handoff", CHANGE, "--task", "1.1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            row = [r for r in _rows(root) if r["gate"] == "tests-handoff"][-1]
+            self.assertEqual(row["disputes"], "cited")
+
+    def test_other_rows_carry_neither_field_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            self.assertEqual(_defect(root, "--cite", "src/api.py:1").returncode, 0)
+            (row,) = _defects(root)
+            self.assertIn("disputes", row)
+            self.assertIsNone(row["disputes"])
+
+
+class TestDefectCitations(unittest.TestCase):
+    """Regressions guarded: a setup or assertion defect recorded with no
+    evidence, with evidence that points at nothing, or whose evidence is not
+    kept on the row for the author and the human to read."""
+
+    def test_a_defect_with_no_citation_is_refused_naming_the_forms(self):
+        for kind in ("setup", "assertion"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = _handed_off_repo(tmp)
+                result = _defect(root, kind=kind)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("--cite", result.stderr)
+                self.assertIn("path:line", result.stderr)
+                self.assertIn("spec:", result.stderr)
+                self.assertEqual(_defects(root), [])
+
+    def test_an_unresolved_citation_is_refused_naming_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            result = _defect(root, "--cite", "src/api.py:900", "--cite", "src/api.py:2")
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("src/api.py:900", result.stderr)
+            self.assertEqual(_defects(root), [])
+
+    def test_each_unresolved_citation_is_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            result = _defect(root, "--cite", "src/nope.py", "--cite", "spec:orders#No such scenario")
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("src/nope.py", result.stderr)
+            self.assertIn("spec:orders#No such scenario", result.stderr)
+
+    def test_resolving_citations_are_stored_in_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            cites = ["src/api.py:2-3", "spec:orders#Duplicate order is rejected", HELD]
+            args = [a for c in cites for a in ("--cite", c)]
+            result = _defect(root, *args, kind="setup")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (row,) = _defects(root)
+            self.assertEqual((row["task"], row["kind"], row["detail"]), ("1.1", "setup", "expects 6"))
+            self.assertEqual(row["cites"], cites)
+
+    def test_the_held_test_is_citable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            self.assertEqual(_defect(root, "--cite", f"{HELD}:2").returncode, 0)
+
+
+class TestEarlierHandoffsKeepTheOldRules(unittest.TestCase):
+    """Regressions guarded: an in-flight change broken by the upgrade, or a
+    task that is re-handed off keeping the old rules for good."""
+
+    def test_a_defect_under_an_earlier_handoff_needs_no_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            _make_handoff_legacy(root)
+            result = _defect(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (row,) = _defects(root)
+            self.assertIsNone(row["cites"])
+
+    def test_a_task_re_handed_off_after_the_upgrade_takes_the_new_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            _make_handoff_legacy(root)
+            _hold(root, TEST_V2)
+            handoff = _run_gates(root, "tests", "handoff", CHANGE, "--task", "1.1")
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            result = _defect(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("--cite", result.stderr)
+            self.assertEqual(_defects(root), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

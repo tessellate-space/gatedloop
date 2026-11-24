@@ -1,0 +1,172 @@
+"""The citation resolver (change `checkable-disputes`, design D1 and D6).
+
+`unresolved_citations(root, change, citations)` returns the citations that do
+not resolve against the worktree at `root`, in input order, and an empty list
+when all do. A citation is a path, `path:line`, `path:a-b`, or
+`spec:<capability>#<scenario>`; the holding area `.gatedloop/authored/<change>/`
+is part of the worktree, and a scenario is looked up in the change's delta
+specs, then in `openspec/specs/`, ignoring case and runs of whitespace.
+
+Stdlib only, per `zero-dep-shim`. Pure filesystem cases: a throwaway directory
+tree, no git, the shim loaded by path as `bin/gates` has no `.py` suffix.
+
+Run with:  python3 -m unittest discover -s tests
+"""
+
+import importlib.machinery
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GATES_SHIM = REPO / "bin" / "gates"
+
+_loader = importlib.machinery.SourceFileLoader("gates_shim_dispute_citations", str(GATES_SHIM))
+_spec = importlib.util.spec_from_loader(_loader.name, _loader)
+gates = importlib.util.module_from_spec(_spec)
+_loader.exec_module(gates)
+
+CHANGE = "demo-change"
+HELD = f".gatedloop/authored/{CHANGE}/1.1/tests/test_calc.py.authored"
+
+DELTA = """\
+# Spec Delta
+
+## ADDED Requirements
+
+### Requirement: Expired cards are declined
+
+#### Scenario: Expired card is declined
+- **WHEN** a card past its expiry is charged
+- **THEN** the charge is declined
+"""
+
+MAIN = """\
+# Orders
+
+### Requirement: Duplicates are rejected
+
+#### Scenario: Duplicate order is rejected
+- **WHEN** the same order is submitted twice
+- **THEN** the second is rejected with 409
+"""
+
+
+def _tree(tmp):
+    root = Path(tmp)
+    (root / "src").mkdir()
+    (root / "src" / "api.py").write_text("one\ntwo\nthree\n")
+    held = root / HELD
+    held.parent.mkdir(parents=True)
+    held.write_text("def test_add():\n    assert add(2, 3) == 5\n")
+    delta = root / "openspec" / "changes" / CHANGE / "specs" / "checkout"
+    delta.mkdir(parents=True)
+    (delta / "spec.md").write_text(DELTA)
+    main = root / "openspec" / "specs" / "orders"
+    main.mkdir(parents=True)
+    (main / "spec.md").write_text(MAIN)
+    return root
+
+
+def _unresolved(root, *citations):
+    return gates.unresolved_citations(root, CHANGE, list(citations))
+
+
+class TestPathCitations(unittest.TestCase):
+    """Regressions guarded: a citation to a file that is not there accepted,
+    so a defect can point at nothing."""
+
+    def test_an_existing_path_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py"), [])
+
+    def test_a_missing_file_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/missing.py"), ["src/missing.py"])
+
+    def test_a_held_test_under_the_holding_area_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), HELD), [])
+            self.assertEqual(_unresolved(_tree(tmp), f"{HELD}:2"), [])
+
+
+class TestLineCitations(unittest.TestCase):
+    """Regressions guarded: a line number past the end of the file accepted
+    as evidence, or a range whose end is past it."""
+
+    def test_a_line_within_the_file_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _tree(tmp)
+            self.assertEqual(_unresolved(root, "src/api.py:1", "src/api.py:3"), [])
+
+    def test_a_line_past_the_end_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:4"), ["src/api.py:4"])
+
+    def test_a_range_within_the_file_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:1-3"), [])
+
+    def test_a_range_ending_past_the_end_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/api.py:2-9"), ["src/api.py:2-9"])
+
+    def test_a_line_of_a_missing_file_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "src/gone.py:1"), ["src/gone.py:1"])
+
+
+class TestSpecCitations(unittest.TestCase):
+    """Regressions guarded: a scenario that does not exist accepted, a
+    scenario looked up under the wrong capability, or the main specs ignored
+    when the change's delta does not hold it."""
+
+    def test_a_scenario_in_the_change_delta_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "spec:checkout#Expired card is declined"), [])
+
+    def test_a_scenario_in_the_main_specs_resolves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp), "spec:orders#Duplicate order is rejected"), [])
+
+    def test_case_and_whitespace_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                _unresolved(_tree(tmp), "spec:checkout#expired   CARD is  declined"), [])
+
+    def test_a_missing_scenario_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:checkout#Card is refunded"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+    def test_a_scenario_of_another_capability_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:orders#Expired card is declined"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+    def test_a_missing_capability_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cite = "spec:shipping#Parcel is sent"
+            self.assertEqual(_unresolved(_tree(tmp), cite), [cite])
+
+
+class TestResultShape(unittest.TestCase):
+    """Regressions guarded: the unresolved ones reported out of order or
+    mixed with the resolved ones, which makes the refusal name the wrong
+    citation."""
+
+    def test_no_citations_means_nothing_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(_unresolved(_tree(tmp)), [])
+
+    def test_only_the_unresolved_come_back_in_input_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _tree(tmp)
+            got = _unresolved(
+                root, "src/zzz.py", "src/api.py:1", "spec:checkout#Nope", "src/api.py:99", HELD)
+            self.assertEqual(got, ["src/zzz.py", "spec:checkout#Nope", "src/api.py:99"])
+
+
+if __name__ == "__main__":
+    unittest.main()

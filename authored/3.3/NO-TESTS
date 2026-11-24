@@ -1,0 +1,1 @@
+A documentation edit: SETUP.md, AUTOMATION.md and README.md describe the flags; the behaviour is tested under 1.1-3.2, and the release-docs check in the task's own verification covers the docs.

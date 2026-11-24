@@ -1,0 +1,203 @@
+"""Both positions reach the human with their evidence (change
+`checkable-disputes`, design D4 and D6; the show-and-refusal requirement).
+
+`gates tests show` lists each defect with its citations and the defence that
+answered it, in ledger order: the text form puts a defect's citations on the
+line after it and a defence as `defence: <detail>`; `--json` adds one
+top-level `exchanges` key, `{task: [entry, ...]}`, and keeps what it had.
+The refusal past the `assertion` cap prints one line per defect and defence,
+each followed by `    cites: <c1>, <c2>` when it has citations.
+
+Real git in throwaway repositories, driving the shim as the loop does.
+
+Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GATES_SHIM = REPO / "bin" / "gates"
+
+CHANGE = "demo-change"
+MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\n  unit: "false"\n'
+HELD = f".gatedloop/authored/{CHANGE}/1.1/tests/test_calc.py.authored"
+TEST_V1 = "def test_add():\n    assert add(2, 3) == 5\n"
+SPEC = "spec:orders#Duplicate order is rejected"
+MAIN = """\
+# Orders
+
+### Requirement: Duplicates are rejected
+
+#### Scenario: Duplicate order is rejected
+- **WHEN** the same order is submitted twice
+- **THEN** the second is rejected with 409
+"""
+D1 = "expects 6 but the spec says 5"
+W1 = "the spec requires 5 in this case"
+D2 = "still wrong on negative numbers"
+D3 = "a third position"
+
+
+def _env():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    env["CLAUDECODE"] = "1"
+    return env
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                          text=True, env=_env())
+
+
+def _gates(root, *args):
+    return subprocess.run([sys.executable, str(GATES_SHIM), *args], cwd=root,
+                          capture_output=True, text=True, env=_env())
+
+
+def _repo(tmp):
+    root = Path(tmp)
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / ".gates.yaml").write_text(MANIFEST)
+    change_dir = root / "openspec" / "changes" / CHANGE
+    change_dir.mkdir(parents=True)
+    (change_dir / ".openspec.yaml").write_text("schema: spec-driven\n")
+    main = root / "openspec" / "specs" / "orders"
+    main.mkdir(parents=True)
+    (main / "spec.md").write_text(MAIN)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "init")
+    _git(root, "checkout", "-b", CHANGE)
+    held = root / HELD
+    held.parent.mkdir(parents=True)
+    held.write_text(TEST_V1)
+    assert _gates(root, "tests", "handoff", CHANGE).returncode == 0
+    return root
+
+
+def _defect(root, detail, *cites):
+    args = [a for c in cites for a in ("--cite", c)]
+    return _gates(root, "tests", "defect", "1.1", "--kind", "assertion", "--detail", detail, *args)
+
+
+def _defend(root, why, *cites):
+    args = [a for c in cites for a in ("--cite", c)]
+    return _gates(root, "tests", "handoff", CHANGE, "--task", "1.1", "--defend", why, *args)
+
+
+def _exchange(tmp):
+    """defect (two citations), defence (one), defect (one), in that order."""
+    root = _repo(tmp)
+    assert _defect(root, D1, ".gates.yaml", HELD).returncode == 0
+    r = _defend(root, W1, SPEC)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _defect(root, D2, SPEC).returncode == 0
+    return root
+
+
+class TestShowListsTheExchange(unittest.TestCase):
+    """Regression guarded: the human at a halt reading a defect with no
+    evidence and no answer, or the answer before the claim it answers."""
+
+    def test_text_form_lists_defect_defence_defect_in_order_with_citations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _exchange(tmp)
+            out = _gates(root, "tests", "show", CHANGE).stdout
+
+        positions = [out.index(x) for x in (D1, ".gates.yaml", HELD, f"defence: {W1}", D2)]
+        self.assertEqual(positions, sorted(positions))
+        self.assertGreater(out.index(SPEC, out.index(f"defence: {W1}")), out.index(f"defence: {W1}"))
+        self.assertGreater(out.rindex(SPEC), out.index(D2))
+
+    def test_json_exchanges_hold_every_entry_in_ledger_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _exchange(tmp)
+            doc = json.loads(_gates(root, "tests", "show", CHANGE, "--json").stdout)
+
+        self.assertEqual(doc["exchanges"]["1.1"], [
+            {"event": "test-defect", "kind": "assertion", "detail": D1,
+             "cites": [".gates.yaml", HELD]},
+            {"event": "test-defence", "kind": None, "detail": W1, "cites": [SPEC]},
+            {"event": "test-defect", "kind": "assertion", "detail": D2, "cites": [SPEC]},
+        ])
+
+    def test_json_keeps_what_it_had(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _exchange(tmp)
+            doc = json.loads(_gates(root, "tests", "show", CHANGE, "--json").stdout)
+
+        for key in ("handoff", "mode", "authors", "tasks"):
+            self.assertIn(key, doc)
+        self.assertEqual(doc["tasks"]["1.1"]["defects_by_kind"],
+                         {"assertion": 2, "setup": 0, "green": 0})
+
+    def test_a_defect_recorded_before_citations_existed_has_empty_cites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            ledger = root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
+            with ledger.open("a") as f:
+                f.write(json.dumps({
+                    "ts": "2026-09-01T00:00:00+00:00", "gate": "test-defect", "exit": None,
+                    "duration_ms": 0, "change": CHANGE, "task": "1.1",
+                    "kind": "assertion", "detail": "legacy"}) + "\n")
+            doc = json.loads(_gates(root, "tests", "show", CHANGE, "--json").stdout)
+
+        (entry,) = doc["exchanges"]["1.1"]
+        self.assertEqual(entry["cites"], [])
+        self.assertEqual((entry["event"], entry["detail"]), ("test-defect", "legacy"))
+
+
+class TestTheCapRefusalCarriesBothSides(unittest.TestCase):
+    """Regression guarded: the refusal that hands a dispute to a human
+    quoting only the defects' details, so the author's answer and every
+    piece of evidence are lost at the moment they matter."""
+
+    def test_the_third_assertion_defect_is_refused_with_the_whole_exchange(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _exchange(tmp)
+
+            r = _defect(root, D3, ".gates.yaml")
+
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("oracle-conflict", r.stderr)
+        lines = r.stderr.splitlines()
+        want = [
+            f"  defect 1 (assertion): {D1}",
+            f"    cites: .gates.yaml, {HELD}",
+            f"  defence: {W1}",
+            f"    cites: {SPEC}",
+            f"  defect 2 (assertion): {D2}",
+            f"    cites: {SPEC}",
+        ]
+        at = [lines.index(w) for w in want]
+        self.assertEqual(at, list(range(at[0], at[0] + len(want))))
+
+    def test_a_row_without_citations_gets_no_cites_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            ledger = root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
+            with ledger.open("a") as f:
+                for n in (1, 2):
+                    f.write(json.dumps({
+                        "ts": "2026-09-01T00:00:00+00:00", "gate": "test-defect", "exit": None,
+                        "duration_ms": 0, "change": CHANGE, "task": "1.1",
+                        "kind": "assertion", "detail": f"legacy {n}"}) + "\n")
+
+            r = _defect(root, D3, ".gates.yaml")
+
+        self.assertEqual(r.returncode, 1, r.stdout)
+        lines = r.stderr.splitlines()
+        i = lines.index("  defect 1 (assertion): legacy 1")
+        self.assertEqual(lines[i + 1], "  defect 2 (assertion): legacy 2")
+
+
+if __name__ == "__main__":
+    unittest.main()

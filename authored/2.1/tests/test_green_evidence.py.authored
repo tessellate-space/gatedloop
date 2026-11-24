@@ -1,0 +1,203 @@
+"""A `green` defect is backed by a recorded passing run (change
+`checkable-disputes`, design D2, D5 and D6; the green-defect requirement and
+the in-flight green scenario).
+
+`gates tests defect --kind green` claims the task's placed tests pass before
+anything is implemented. The claim is a fact about a run, so the shim checks
+the ledger for a passing run of the task's oracle gate recorded after the
+task's latest placement, and refuses without one, naming the gate. A task
+whose governing handoff predates the check keeps recording `green` defects
+as before.
+
+Real git in throwaway repositories, driving the shim as the loop does and
+reading the ledger back. The `unit` gate passes while `.pass` exists.
+
+Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GATES_SHIM = REPO / "bin" / "gates"
+
+CHANGE = "demo-change"
+MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\n  unit: "test -f .pass"\n'
+GREEN = "its placed tests passed before any implementation"
+
+
+def _env():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    env["CLAUDECODE"] = "1"
+    return env
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                          text=True, env=_env())
+
+
+def _gates(root, *args):
+    return subprocess.run([sys.executable, str(GATES_SHIM), *args], cwd=root,
+                          capture_output=True, text=True, env=_env())
+
+
+def _ledger(root):
+    return root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
+
+
+def _rows(root):
+    p = _ledger(root)
+    if not p.exists():
+        return []
+    return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+
+
+def _defects(root):
+    return [r for r in _rows(root) if r["gate"] == "test-defect"]
+
+
+def _repo(tmp):
+    root = Path(tmp)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / ".gates.yaml").write_text(MANIFEST)
+    change_dir = root / "openspec" / "changes" / CHANGE
+    change_dir.mkdir(parents=True)
+    (change_dir / ".openspec.yaml").write_text("schema: spec-driven\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    _git(root, "checkout", "-q", "-b", CHANGE)
+    held = root / ".gatedloop" / "authored" / CHANGE
+    for task, name in (("1.1", "test_data"), ("1.2", "test_more")):
+        p = held / task / "tests" / f"{name}.py.authored"
+        p.parent.mkdir(parents=True)
+        p.write_text(f"def test_{name}():\n    assert {name}() == 1\n")
+    r = _gates(root, "tests", "handoff", CHANGE)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return root
+
+
+def _place(root, task="1.1"):
+    assert _gates(root, "task", "start", task).returncode == 0
+    r = _gates(root, "tests", "place", task)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def _unit(root, task="1.1", passing=True):
+    flag = root / ".pass"
+    if passing:
+        flag.write_text("")
+    elif flag.exists():
+        flag.unlink()
+    r = _gates(root, "run", "unit", "--task", task, "--attempt", "1")
+    assert (r.returncode == 0) == passing, r.stdout + r.stderr
+
+
+def _green(root, task="1.1"):
+    return _gates(root, "tests", "defect", task, "--kind", "green", "--detail", GREEN)
+
+
+class TestGreenNeedsAPassingRun(unittest.TestCase):
+    """Regression guarded: a `green` defect recorded on the agent's word,
+    with no passing run of the task's oracle gate in the ledger to back it."""
+
+    def test_refused_when_the_only_run_since_placement_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+            _unit(root, passing=False)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("unit", r.stderr)
+            self.assertIn("passing run", r.stderr)
+            self.assertEqual(_defects(root), [])
+
+    def test_refused_when_the_task_was_placed_and_never_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(_defects(root), [])
+
+    def test_recorded_when_a_passing_run_follows_the_placement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+            _unit(root, passing=True)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            (row,) = _defects(root)
+            self.assertEqual((row["task"], row["kind"], row["detail"]), ("1.1", "green", GREEN))
+            self.assertIsNone(row["cites"])
+
+    def test_a_passing_run_before_the_latest_placement_does_not_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+            _unit(root, passing=True)
+            self.assertEqual(_gates(root, "tests", "place", "1.1").returncode, 0)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(_defects(root), [])
+
+    def test_a_passing_run_for_another_task_does_not_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root, "1.1")
+            _place(root, "1.2")
+            _unit(root, "1.2", passing=True)
+
+            r = _green(root, "1.1")
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(_defects(root), [])
+
+    def test_refused_before_the_tests_are_placed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(_defects(root), [])
+
+
+class TestEarlierHandoffsKeepGreenAsBefore(unittest.TestCase):
+    """Regression guarded: the upgrade breaking an in-flight change, whose
+    governing handoff predates the check, by refusing a `green` defect it
+    could always record."""
+
+    def test_a_green_defect_under_an_earlier_handoff_needs_no_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            rows = _rows(root)
+            for r in rows:
+                if r["gate"] == "tests-handoff":
+                    r.pop("disputes", None)
+            _ledger(root).write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(len(_defects(root)), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
