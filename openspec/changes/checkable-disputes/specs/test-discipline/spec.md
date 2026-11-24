@@ -34,6 +34,10 @@
 - **WHEN** a passing run of task 2.1's oracle gate is recorded after its placement
 - **THEN** the `green` defect is recorded
 
+#### Scenario: Green before placement
+- **WHEN** the implementer records a `green` defect for task 2.1 and its tests have not been placed
+- **THEN** it exits 1 and records nothing
+
 ### Requirement: A defence is recorded and cannot change the tests
 
 `gates tests handoff <change> --task <N.M> --defend <why>` SHALL record a `test-defence` row answering the task's latest defect, with at least one `--cite` resolved as defects' are. It SHALL be refused when the task has no unanswered defect, or when the task's held tests differ from its previous handoff.
@@ -50,6 +54,18 @@
 - **WHEN** the author passes `--defend` for a task with no defect since its last handoff
 - **THEN** the handoff exits 1 and records nothing
 
+#### Scenario: A defence must name its task and its evidence
+- **WHEN** the author passes `--defend` without `--task`, or without a `--cite`
+- **THEN** the handoff exits 1 and records nothing
+
+#### Scenario: A dry run cannot defend
+- **WHEN** the author passes `--defend` with `--dry-run`
+- **THEN** the handoff exits 1 and says a dry run records nothing, so it cannot record a defence
+
+#### Scenario: A citation without a defence is refused
+- **WHEN** the author passes `--cite` to `gates tests handoff` without `--defend`
+- **THEN** the handoff exits 1 and records nothing
+
 ### Requirement: Both positions reach the human with their evidence
 
 `gates tests show` SHALL list each defect with its citations and the defence that answered it, if any. The refusal past the `assertion` cap SHALL print every defect and defence for the task with their citations.
@@ -64,10 +80,14 @@
 
 ### Requirement: A change handed off earlier keeps its rules
 
-The citation and defence checks SHALL apply to a task only when the handoff that governs it was recorded by a shim that has them. A task governed by an earlier handoff SHALL keep accepting defects without citations.
+The citation, passing-run and defence checks SHALL apply to a task only when the handoff that governs it was recorded by a shim that has them. A task governed by an earlier handoff SHALL keep accepting defects without citations, and `green` defects without a recorded passing run.
 
 #### Scenario: An in-flight change is not broken by the upgrade
 - **WHEN** a task's governing handoff row predates this change and the implementer records a defect with no `--cite`
+- **THEN** the defect is recorded as before
+
+#### Scenario: An in-flight change keeps its green defects
+- **WHEN** a task's governing handoff row predates this change and the implementer records a `green` defect with no passing run recorded since placement
 - **THEN** the defect is recorded as before
 
 #### Scenario: A task re-handed off after the upgrade takes the new rules
