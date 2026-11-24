@@ -38,6 +38,17 @@ Every row is a `PreToolUse` or `Stop` hook, or a check inside `gates`, that deni
 
 A task is done exactly when its code, its checkbox and its ledger row are committed together, so a halted run resumes from the first unchecked task, and the ledger is the record of every gate verdict along the way.
 
+### How tests flow
+
+The tests come first and stay out of the implementer's hands from start to finish:
+
+1. **Written up front, by someone else.** After the plan is approved, the `test-author` agent writes every task's failing tests for the whole change before any of it is implemented. It works from the specs, the design and the public interfaces, never from the code. Where the plan tags a task `[oracle: …]`, the author is told which gate the task's tests run under, or that the task has none. A `rewrites: <path>` clause names the existing tests a task may rewrite, and the author reads those files and no other existing test.
+2. **Held until their task starts.** `gates tests handoff` stores the tests under `.gatedloop/authored/<change>/<task>/`, where no test runner finds them, so a task never sees the tests of the tasks after it.
+3. **Placed one task at a time, and seen to fail.** When a task starts, `gates tests place <task>` moves only that task's tests into the tree, and the task's oracle gate must go red before any code is written.
+4. **Locked from then on.** The implementer can make the tests pass or report one as a defect, which sends it back to the author. It can never edit one. The lock is checked at every commit, again at the merge head, and at the forge.
+
+**Optionally, the tests are written during planning too.** Under `loop.plan-preflight: run` the author also writes the tests before approval, and they are reviewed alongside the plan, so a plan whose tasks can't be tested shows up before anyone approves it. Today those preflight tests are not carried over: the author writes them again after approval.
+
 ## Quickstart
 
 You need Claude Code, the OpenSpec CLI (1.14.3 to 1.16.0, the range [`docs/stability.md`](./docs/stability.md) declares), Python 3.9+, and `gh` for the pull-request steps. In Claude Code:
@@ -95,6 +106,7 @@ flowchart TD
 
     subgraph OS["OpenSpec: authoring"]
         propose["/opsx:propose<br/>proposal, specs,<br/>design, tasks"]
+        preflight["Optional plan loop<br/>plan review, preflight<br/>tests and their review"]
     end
 
     subgraph YOU1["You: approve the plan"]
@@ -104,7 +116,8 @@ flowchart TD
 
     subgraph LOOP["gatedloop: the gated loop"]
         branch["One branch per change"]
-        red["Red: place the authored tests<br/>the task's oracle gate fails<br/>(unit by default)"]
+        author["Test author writes every<br/>task's failing tests,<br/>held out of the tree"]
+        red["Red: place this task's<br/>held tests, its oracle<br/>gate fails (unit by default)"]
         green["Green: implement<br/>the same gate passes"]
         gate["gates run ci<br/>plus convention review"]
         commit["Atomic commit<br/>code, task tick, ledger row"]
@@ -120,8 +133,9 @@ flowchart TD
     archive["/gatedloop:archive<br/>specs promoted,<br/>move committed"]
     done(["Verified on main"])
 
-    idea --> propose --> planpr --> attest --> branch
-    branch --> red --> green --> gate --> commit --> more
+    idea --> propose --> planpr
+    propose -. opt-in .-> preflight -.-> planpr --> attest --> branch
+    branch --> author --> red --> green --> gate --> commit --> more
     more -- yes --> red
     more -- no --> verify --> live --> merge --> archive --> done
 
