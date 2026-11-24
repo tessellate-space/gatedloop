@@ -24,7 +24,7 @@ This change is implemented on a base that already contains `batch-approval-check
 **Hashing it for approval.** The approval digest mixes the key in. This applies to:
 - `_approval_sha_ref`;
 - the batched reader;
-- `_approval_sha_worktree` when called for approval (`approval record --local`, `plan status`'s approval line).
+- `_approval_sha_worktree` when called for approval (`approval sha`, `approval attest --local`, `approval attest --pr`: every caller except the two below, by the default).
 
 When the key is present, after the oracle-tag update and in the style of `_update_with_oracle_tags`, it adds `h.update(b".openspec.yaml#x-gatedloop-preflight-tree\n" + value.encode() + b"\n")`, where `value` is the key's value stripped of whitespace. When the key is absent, nothing is added, so every recorded approval keeps its sha.
 
@@ -44,7 +44,7 @@ Saving the store therefore never moves a round or marks a green round moved.
 - a `tests-handoff` row for the change already exists in the ledger. Adopting is a pre-handoff step, and a resumed loop that has already handed off skips it.
 - no snapshot with the bound tree is found.
 
-**Finding the snapshot.** It searches the history of `refs/heads/gatedloop/preflight/<change>` and of `refs/remotes/origin/gatedloop/preflight/<change>` for a commit whose tree is the bound one. It fetches `origin gatedloop/preflight/<change>` once, only when neither history carries that tree. The remote is `origin`, as `plan save` and `plan restore` already print it.
+**Finding the snapshot.** It searches the history of `refs/heads/gatedloop/preflight/<change>` and of `refs/remotes/origin/gatedloop/preflight/<change>` for a commit whose tree is the bound one. It fetches once, only when neither history carries that tree, with the explicit refspec `+refs/heads/gatedloop/preflight/<change>:refs/remotes/origin/gatedloop/preflight/<change>`, so the remote-tracking ref is updated whatever `remote.origin.fetch` says, and then searches that ref's history again. The remote is `origin`, as `plan save` and `plan restore` already print it.
 
 **Nothing to adopt.** When the approved `.openspec.yaml` has no key, it prints "nothing to adopt" and exits 0.
 
@@ -70,25 +70,29 @@ It prints the three lists.
 ### D3. The handoff records the adoption
 
 Only a full (no `--task`), non-dry handoff that succeeds reads `ADOPTED.json`:
-- A listed task counts as adopted only when its directory's file set equals the snapshot's `authored/<N.M>/` file set and every blob matches (read with `git cat-file` from the commit that carries the tree). A deleted or added file disqualifies it.
+- A listed task counts as adopted only when its directory's file set equals the snapshot's `authored/<N.M>/` file set and every blob matches (read directly from the tree object `ADOPTED.json` names, with `git ls-tree` and `git cat-file` on that sha: no snapshot search and no fetch). A deleted or added file disqualifies it.
 - It records `preflight_tree` and `adopted` on its `tests-handoff` row. `adopted` lists the tasks whose files all still match.
 - It deletes `ADOPTED.json` after appending the row.
 
+When that tree object is not readable locally, the handoff refuses with exit 1, names the tree, says to re-run `gates tests adopt <change>` (which fetches the snapshot again), and appends no row and leaves `ADOPTED.json` in place.
+
 `--task` and `--dry-run` handoffs neither read nor delete the file. An `--inline` handoff is a full handoff and reads it.
 
-The lock and the red-run rules are unchanged: adopted tests are placed and run red like any others. The two fields are additions, so the row version stays.
+The lock and the red-run rules are unchanged: adopted tests are placed and run red like any others. The two fields are additions, so the row version stays. They are appended to `LEDGER_ROW_FIELDS` under its union rule, so every row carries both keys: any row that records no adoption (a `--task`, dry or no-`ADOPTED.json` handoff, and every other row kind) carries them as `null`.
 
 ### D4. The loop adopts first
 
 In `skills/tdd-apply/SKILL.md` §4b (which runs on the change's branch):
 - When `gates tests show <change> --json` reports no handoff, the loop runs `gates tests adopt <change>` before step 1.
+- When adopt exits 1, the loop HALTs (cause `other`) quoting adopt's message, and authors nothing.
+- When adopt says there is nothing to adopt, every task is stale and the author is dispatched for the whole change, as today.
 - With no stale task, it does not dispatch the author.
 - With stale tasks, it dispatches the author naming only those tasks.
 - **present** tasks are never dispatched.
 
 - Under `loop.test-author: inline` (§5-inline), the loop adopts the same way and then authors only the stale tasks itself before its `--inline` handoff.
 
-The authored-set review covers the stale tasks just authored plus the **present** tasks (written by an earlier, interrupted run that never handed off, so never reviewed). Adopted tasks were reviewed in the plan loop before approval, and their brief digests show their inputs have not moved since. When both sets are empty, the review is skipped. The handoff and the authoring commit always follow, run by the loop itself as today.
+The authored-set review covers the stale tasks just authored plus the **present** tasks (written by an earlier, interrupted run that never handed off, so never reviewed). Adopted tasks were reviewed in the plan loop before approval, and their brief digests show their inputs have not moved since. The loop names the stale and present task ids in its dispatch of the `convention-review` agent, and the reviewer reads only those `<N.M>/` directories of the holding area; `agents/convention-review.md` is unchanged, since its authored-set mode already takes the subject from its caller. When both sets are empty, the review is skipped. The handoff and the authoring commit always follow, run by the loop itself as today.
 
 `commands/orchestrator.md` step 3.1 dispatches the test author before the lane exists, so adopt (which runs only on the change's branch) cannot run there. When the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree`, the orchestrator skips its step 3.1 author dispatch and opens the lane. The implementer's §4b then adopts, dispatches the author for stale tasks, hands off and commits. A plan without the key keeps today's step 3.1.
 
