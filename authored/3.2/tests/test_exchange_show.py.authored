@@ -112,10 +112,31 @@ class TestShowListsTheExchange(unittest.TestCase):
             root = _exchange(tmp)
             out = _gates(root, "tests", "show", CHANGE).stdout
 
-        positions = [out.index(x) for x in (D1, ".gates.yaml", HELD, f"defence: {W1}", D2)]
-        self.assertEqual(positions, sorted(positions))
-        self.assertGreater(out.index(SPEC, out.index(f"defence: {W1}")), out.index(f"defence: {W1}"))
-        self.assertGreater(out.rindex(SPEC), out.index(D2))
+        lines = out.splitlines()
+        first = next(i for i, ln in enumerate(lines) if D1 in ln)
+        block = lines[first:]  # the task's defect block, from its first defect on
+        self.assertIn(D1, block[0])
+        self.assertEqual(block[1], f"          cites: .gates.yaml, {HELD}")
+        self.assertEqual(block[2], f"        defence: {W1}")
+        self.assertEqual(block[3], f"          cites: {SPEC}")
+        self.assertIn(D2, block[4])
+        self.assertEqual(block[5], f"          cites: {SPEC}")
+
+    def test_text_form_prints_no_cites_line_for_a_row_without_citations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            ledger = root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
+            with ledger.open("a") as f:
+                for n in (1, 2):
+                    f.write(json.dumps({
+                        "ts": "2026-09-01T00:00:00+00:00", "gate": "test-defect", "exit": None,
+                        "duration_ms": 0, "change": CHANGE, "task": "1.1",
+                        "kind": "assertion", "detail": f"legacy {n}"}) + "\n")
+            lines = _gates(root, "tests", "show", CHANGE).stdout.splitlines()
+
+        first = next(i for i, ln in enumerate(lines) if "legacy 1" in ln)
+        self.assertIn("legacy 2", lines[first + 1])
+        self.assertNotIn("cites:", "\n".join(lines[first:first + 2]))
 
     def test_json_exchanges_hold_every_entry_in_ledger_order(self):
         with tempfile.TemporaryDirectory() as tmp:

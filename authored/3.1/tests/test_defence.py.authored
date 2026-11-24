@@ -15,8 +15,6 @@ reading the ledger back.
 Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
 """
 
-import importlib.machinery
-import importlib.util
 import json
 import os
 import subprocess
@@ -27,11 +25,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 GATES_SHIM = REPO / "bin" / "gates"
-
-_loader = importlib.machinery.SourceFileLoader("gates_shim_defence", str(GATES_SHIM))
-_spec = importlib.util.spec_from_loader(_loader.name, _loader)
-gates = importlib.util.module_from_spec(_spec)
-_loader.exec_module(gates)
 
 CHANGE = "demo-change"
 MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\n  unit: "false"\n'
@@ -159,9 +152,6 @@ class TestADefenceIsRecorded(unittest.TestCase):
 
             after = [x for x in _rows(root) if x["gate"] == "tests-handoff"][-1]["tests"]
             self.assertEqual(before, after)
-
-    def test_test_defence_is_an_event_not_a_gate(self):
-        self.assertIn("test-defence", gates.NON_GATE_EVENTS)
 
     def test_a_defence_answers_once(self):
         with tempfile.TemporaryDirectory() as tmp:

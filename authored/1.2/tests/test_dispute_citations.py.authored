@@ -281,13 +281,13 @@ class TestHandoffStampsDisputes(unittest.TestCase):
             row = [r for r in _rows(root) if r["gate"] == "tests-handoff"][-1]
             self.assertEqual(row["disputes"], "cited")
 
-    def test_other_rows_carry_neither_field_set(self):
+    def test_a_defect_row_stores_its_citations_but_is_not_stamped_disputes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _handed_off_repo(tmp)
             self.assertEqual(_defect(root, "--cite", "src/api.py:1").returncode, 0)
             (row,) = _defects(root)
-            self.assertIn("disputes", row)
             self.assertIsNone(row["disputes"])
+            self.assertEqual(row["cites"], ["src/api.py:1"])
 
 
 class TestDefectCitations(unittest.TestCase):
@@ -351,6 +351,19 @@ class TestEarlierHandoffsKeepTheOldRules(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             (row,) = _defects(root)
             self.assertIsNone(row["cites"])
+
+    def test_a_citation_given_under_an_earlier_handoff_is_still_resolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _handed_off_repo(tmp)
+            _make_handoff_legacy(root)
+            bad = _defect(root, "--cite", "src/api.py:900")
+            self.assertEqual(bad.returncode, 1, bad.stdout)
+            self.assertIn("src/api.py:900", bad.stderr)
+            self.assertEqual(_defects(root), [])
+            good = _defect(root, "--cite", "src/api.py:2")
+            self.assertEqual(good.returncode, 0, good.stderr)
+            (row,) = _defects(root)
+            self.assertEqual(row["cites"], ["src/api.py:2"])
 
     def test_a_task_re_handed_off_after_the_upgrade_takes_the_new_rules(self):
         with tempfile.TemporaryDirectory() as tmp:

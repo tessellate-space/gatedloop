@@ -157,6 +157,19 @@ class TestGreenNeedsAPassingRun(unittest.TestCase):
             self.assertEqual(r.returncode, 1, r.stdout)
             self.assertEqual(_defects(root), [])
 
+    def test_a_passing_run_after_the_latest_placement_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+            _unit(root, passing=True)
+            self.assertEqual(_gates(root, "tests", "place", "1.1").returncode, 0)
+            _unit(root, passing=True)
+
+            r = _green(root)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(len(_defects(root)), 1)
+
     def test_a_passing_run_for_another_task_does_not_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _repo(tmp)
@@ -176,6 +189,24 @@ class TestGreenNeedsAPassingRun(unittest.TestCase):
             r = _green(root)
 
             self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertEqual(_defects(root), [])
+
+
+class TestGreenTakesNoCitation(unittest.TestCase):
+    """Regression guarded: a `green` defect carrying a citation, as though a
+    path could stand in for the run that is its evidence."""
+
+    def test_cite_with_green_is_refused_even_with_a_passing_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _repo(tmp)
+            _place(root)
+            _unit(root, passing=True)
+
+            r = _gates(root, "tests", "defect", "1.1", "--kind", "green", "--detail", GREEN,
+                       "--cite", ".gates.yaml")
+
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("run", r.stderr)
             self.assertEqual(_defects(root), [])
 
 
