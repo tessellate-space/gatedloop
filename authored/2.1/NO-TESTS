@@ -1,0 +1,1 @@
+Prompt edits only (skills/tdd-apply/SKILL.md, agents/tdd-implementer.md, commands/orchestrator.md); prompts have no oracle in ci, and what they make a model do is the eval gate's job — its check is the convention review of the prompts surface.

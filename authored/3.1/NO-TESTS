@@ -1,0 +1,1 @@
+Docs only (SETUP.md, AUTOMATION.md, README.md, docs/candidates.md); no behaviour changes, and the docs gap check is scripts/release docs, run under ci.

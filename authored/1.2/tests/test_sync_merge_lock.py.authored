@@ -1,0 +1,341 @@
+"""Tests for change `sync-merge-lock`: a sync of the merge target is not
+implementation (D1-D4), and placement holds a task's held tests to its
+current tag (D5).
+
+Every test drives `bin/gates` over a real repository (`_lock_fixture.LockRepo`:
+a bare `origin`, change `add-thing`, a lane worktree). The behaviour under test
+IS git's merge state -- `MERGE_HEAD`, what `git merge --no-commit` stages, a
+conflict and its resolution, an octopus, a ref the target does not contain, a
+tag a sync brought -- so these tests sit on the git layer boundary on purpose:
+no cheaper layer can observe what a real merge stages.
+
+Stdlib only, per `zero-dep-shim`.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from _approved_plan import record_approval
+from _lock_fixture import TEST_REL, TEST_V2, LockRepo
+from _merge_fixture import CHANGE, LEDGER_REL, clean_env, combined, git
+
+TASKS_REL = f"openspec/changes/{CHANGE}/tasks.md"
+HOLDING_REL = f".gatedloop/authored/{CHANGE}"
+NOT_PLACED = "its authored tests are not placed"
+
+TASK_11 = "- [ ] 1.1 Add the thing"
+TASK_12 = "- [ ] 1.2 Extend the thing [oracle: unit]"
+TASK_13 = "- [ ] 1.3 Document the thing [oracle: none]"
+
+
+def tasks_md(t11: str = TASK_11, t12: str = TASK_12, t13: str = TASK_13) -> str:
+    return f"## 1. Do it\n\n{t11}\n{t12}\n{t13}\n"
+
+
+# Agrees with `_lock_fixture`'s held sets: 1.1 and 1.2 hold tests, 1.3 a
+# NO-TESTS reason. 1.1 is untagged, which the default oracle mode allows.
+TASKS = tasks_md()
+# The same plan with 1.2 tagged characterization (held with its declaration).
+TASKS_CHAR = tasks_md(t12="- [ ] 1.2 Extend the thing [oracle: unit characterization]")
+
+
+# ---- arranging a history --------------------------------------------------
+
+def planned(tmp, tasks: str = TASKS, lane: bool = True,
+            characterization: bool = False) -> LockRepo:
+    """A `LockRepo` whose approved plan on `main` (and `origin/main`) carries
+    `tasks`, with the change branch cut from it. With `characterization`,
+    task 1.2's `CHARACTERIZATION` declaration is held for the handoff."""
+    repo = LockRepo(Path(tmp))
+    p = repo.primary
+    (p / TASKS_REL).write_text(tasks)
+    repo.approve_plan()
+    git(p, "add", "-A")
+    git(p, "commit", "-q", "-m", "plan: tag add-thing's tasks")
+    git(p, "push", "-q", "origin", "HEAD:main")
+    repo.start_change(lane=lane)
+    if characterization:
+        held = repo.lane / HOLDING_REL / "1.2" / "CHARACTERIZATION"
+        held.parent.mkdir(parents=True, exist_ok=True)
+        held.write_text("1.2's tests pin output the tree already writes\n")
+    return repo
+
+
+def at_boundary(tmp, branch_files: dict | None = None, tick: bool = False,
+                lane: bool = True) -> LockRepo:
+    """Task 1.1 placed, red, implemented (plus `branch_files`, and with `tick`
+    its line ticked) and committed; then task 1.2 started and not placed --
+    the task boundary at which the loop syncs."""
+    repo = planned(tmp, lane=lane)
+    repo.author()
+    repo.place("1.1")
+    repo.red("1.1")
+    repo.write("src/task_1_1.txt", "task 1.1\n")
+    for rel, content in (branch_files or {}).items():
+        repo.write(rel, content)
+    if tick:
+        repo.write(TASKS_REL, TASKS.replace("- [ ] 1.1", "- [x] 1.1"))
+    repo.gated_commit("task 1.1", "1.1")
+    repo.must("task", "start", "1.2")
+    return repo
+
+
+def land_on_target(repo: LockRepo, files: dict, branch: str = "main") -> str:
+    """Another integrator lands `files` (None deletes) on origin's `branch`,
+    cut from origin's main. A `tasks.md` amendment lands re-approved."""
+    o = repo.other
+    git(o, "fetch", "-q", "origin")
+    git(o, "checkout", "-q", "-B", branch, "origin/main")
+    for rel, content in files.items():
+        f = o / rel
+        if content is None:
+            f.unlink()
+        else:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+    if TASKS_REL in files:
+        record_approval(o, CHANGE)
+    git(o, "add", "-A")
+    git(o, "commit", "-q", "-m", f"land {', '.join(files)}")
+    git(o, "push", "-q", "origin", f"HEAD:{branch}")
+    sha = git(o, "rev-parse", "HEAD")
+    git(o, "checkout", "-q", "-B", "main", "origin/main")
+    return sha
+
+
+def start_sync(repo: LockRepo, *refs: str, fetch: bool = True) -> subprocess.CompletedProcess:
+    """The documented sync, left open: `git merge --no-commit` in the lane."""
+    if fetch:
+        git(repo.lane, "fetch", "-q", "origin")
+    return subprocess.run(
+        ["git", "merge", "--no-commit", "--no-ff", *(refs or ("origin/main",))],
+        cwd=repo.lane, capture_output=True, text=True, env=clean_env(),
+    )
+
+
+def check(repo: LockRepo) -> subprocess.CompletedProcess:
+    return repo.gates("tests", "check", cwd=repo.lane)
+
+
+def synced(tmp, target_files: dict, tasks: str = TASKS, characterization: bool = False,
+           done: tuple = ("1.1",)) -> LockRepo:
+    """The change authored, the `done` tasks committed, then a sync of the
+    target carrying `target_files` committed: the plan amendment has reached
+    the lane."""
+    repo = planned(tmp, tasks=tasks, characterization=characterization)
+    repo.author()
+    for task in done:
+        repo.do_task(task)
+    land_on_target(repo, target_files)
+    r = start_sync(repo)
+    if r.returncode != 0:
+        raise AssertionError(f"fixture sync conflicted: {combined(r)}")
+    repo.gated_commit("sync: merge origin/main")
+    return repo
+
+
+def untouched(repo: LockRepo) -> tuple:
+    """What a refused placement must leave as it was: the holding area, the
+    ledger, the working tree's status and the placed test path."""
+    lane = repo.lane
+    holding = {
+        str(p.relative_to(lane)): p.read_bytes()
+        for p in sorted((lane / HOLDING_REL).rglob("*")) if p.is_file()
+    }
+    return (
+        holding,
+        (lane / LEDGER_REL).read_bytes(),
+        git(lane, "status", "--porcelain", "--untracked-files=all"),
+        (lane / TEST_REL).read_bytes(),
+    )
+
+
+# ---- D1-D4: a sync's own result is not implementation -----------------------
+
+class SyncIsNotImplementation(unittest.TestCase):
+
+    def test_a_sync_at_a_task_boundary_commits_with_the_task_unplaced(self):
+        # fails if the in-flight half still reads the target's paths as task 1.2's code
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = at_boundary(tmp)
+            land_on_target(repo, {"src/from_target.txt": "landed by another change\n"})
+            r = start_sync(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+            r = check(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+            sha = repo.gated_commit("sync: merge origin/main")
+            parents = git(repo.lane, "rev-list", "--parents", "-n", "1", sha).split()
+            self.assertEqual(len(parents), 3, "the sync commit concludes the merge")
+
+    def test_tasks_md_resolved_to_the_target_with_the_branch_ticks(self):
+        # fails if the tasks.md candidate (D4) is missing or applies the ticks wrongly
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = at_boundary(tmp, tick=True)
+            amended = tasks_md(t12="- [ ] 1.2 Extend the thing, twice over [oracle: unit]")
+            land_on_target(repo, {TASKS_REL: amended})
+            r = start_sync(repo)
+            self.assertNotEqual(r.returncode, 0, "fixture: the adjacent edits should conflict")
+            self.assertIn(TASKS_REL, git(repo.lane, "diff", "--name-only", "--diff-filter=U").splitlines())
+            repo.write(TASKS_REL, amended.replace("- [ ] 1.1", "- [x] 1.1"))
+            git(repo.lane, "add", TASKS_REL)
+            r = check(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+
+    def test_a_file_both_sides_changed_without_conflict(self):
+        # fails if git's automatic merge (merge-tree, D2 candidate 2) is not a sync's own result
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = at_boundary(tmp, branch_files={"shared.txt": "ONE\ntwo\nthree\n"})
+            land_on_target(repo, {"shared.txt": "one\ntwo\nTHREE\n"})
+            r = start_sync(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+            self.assertEqual((repo.lane / "shared.txt").read_text(), "ONE\ntwo\nTHREE\n",
+                             "fixture: the staged file is neither side's")
+            r = check(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+
+    def test_a_deletion_the_target_brought(self):
+        # fails if a path absent at MERGE_HEAD and absent in the index is not matched as the target's state
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = at_boundary(tmp)
+            land_on_target(repo, {"shared.txt": None})
+            r = start_sync(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+            r = check(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+
+    def test_an_edit_staged_inside_the_sync_is_refused_as_before(self):
+        # fails if the exemption lets a staged path outside the merge's result through,
+        # or changes the refusal's wording
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = at_boundary(tmp)
+            land_on_target(repo, {"src/from_target.txt": "landed by another change\n"})
+            r = start_sync(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+            repo.write("src/extra.txt", "task 1.2's code, ridden in on the sync\n")
+            git(repo.lane, "add", "src/extra.txt")
+            r = check(repo)
+            self.assertEqual(r.returncode, 1, combined(r))
+            self.assertIn(NOT_PLACED, combined(r))
+            git(repo.lane, "rm", "-q", "--cached", "src/extra.txt")
+            (repo.lane / "src" / "extra.txt").unlink()
+            r = check(repo)
+            self.assertEqual(r.returncode, 0, combined(r))
+
+    def test_an_unqualified_merge_gets_no_exemption(self):
+        # fails if a hand resolution, a ref the target lacks, an octopus or a
+        # merge with no resolvable target passes as a sync
+        cases = {
+            "a conflict resolved by hand": self._hand_resolved,
+            "a ref the target does not contain": self._side_ref,
+            "an octopus MERGE_HEAD": self._octopus,
+            "no resolvable merge target": self._no_target,
+        }
+        for name, arrange in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                repo = arrange(tmp)
+                r = check(repo)
+                self.assertEqual(r.returncode, 1, combined(r))
+                self.assertIn(NOT_PLACED, combined(r))
+
+    # ---- the unqualified merges --------------------------------------------
+
+    def _hand_resolved(self, tmp) -> LockRepo:
+        repo = at_boundary(tmp, branch_files={"shared.txt": "one\nTWO-branch\nthree\n"})
+        land_on_target(repo, {"shared.txt": "one\nTWO-target\nthree\n"})
+        self.assertNotEqual(start_sync(repo).returncode, 0, "fixture: shared.txt should conflict")
+        repo.write("shared.txt", "one\nTWO-both\nthree\n")
+        git(repo.lane, "add", "shared.txt")
+        return repo
+
+    def _side_ref(self, tmp) -> LockRepo:
+        repo = at_boundary(tmp)
+        land_on_target(repo, {"src/side.txt": "never landed on main\n"}, branch="side")
+        r = start_sync(repo, "origin/side")
+        self.assertEqual(r.returncode, 0, combined(r))
+        return repo
+
+    def _octopus(self, tmp) -> LockRepo:
+        repo = at_boundary(tmp)
+        land_on_target(repo, {"src/a.txt": "a\n"}, branch="topic-a")
+        land_on_target(repo, {"src/b.txt": "b\n"}, branch="topic-b")
+        o = repo.other
+        git(o, "merge", "-q", "--no-ff", "--no-edit", "origin/topic-a", "origin/topic-b")
+        git(o, "push", "-q", "origin", "HEAD:main")
+        r = start_sync(repo, "origin/topic-a", "origin/topic-b")
+        self.assertEqual(r.returncode, 0, combined(r))
+        merge_head = repo.lane / git(repo.lane, "rev-parse", "--git-path", "MERGE_HEAD")
+        self.assertEqual(len(merge_head.read_text().split()), 2, "fixture: an octopus MERGE_HEAD")
+        return repo
+
+    def _no_target(self, tmp) -> LockRepo:
+        repo = at_boundary(tmp, lane=False)
+        land_on_target(repo, {"src/from_target.txt": "landed by another change\n"})
+        git(repo.lane, "fetch", "-q", "origin")
+        # Neither origin/HEAD nor a local main or master: nothing resolves.
+        git(repo.lane, "branch", "-m", "main", "trunk")
+        git(repo.lane, "remote", "set-head", "origin", "-d")
+        r = start_sync(repo, fetch=False)
+        self.assertEqual(r.returncode, 0, combined(r))
+        return repo
+
+
+# ---- D5: placement holds the held tests to the task's current tag -----------
+
+# (what the sync brought, the plan before it, held CHARACTERIZATION, the
+#  target's files, the task placed, a path the refusal must name)
+SYNCED_TAGS = (
+    ("a rewrites: clause with no full file held", TASKS, False,
+     {TASKS_REL: tasks_md(t12="- [ ] 1.2 Extend the thing [oracle: unit rewrites: tests/test_other.py]"),
+      "tests/test_other.py": "# another change's existing test\n"},
+     "1.2", "tests/test_other.py"),
+    ("tests held, the tag moved to none", TASKS, False,
+     {TASKS_REL: tasks_md(t12="- [ ] 1.2 Extend the thing [oracle: none]")},
+     "1.2", None),
+    ("NO-TESTS held, the tag moved from none to a gate", TASKS, False,
+     {TASKS_REL: tasks_md(t13="- [ ] 1.3 Document the thing [oracle: unit]")},
+     "1.3", None),
+    ("the tag moved to characterization, no declaration held", TASKS, False,
+     {TASKS_REL: TASKS_CHAR},
+     "1.2", None),
+    ("the declaration held, the tag moved off characterization", TASKS_CHAR, True,
+     {TASKS_REL: TASKS},
+     "1.2", None),
+)
+
+
+class PlacementHoldsTheTag(unittest.TestCase):
+
+    def test_a_handoff_the_synced_tag_contradicts_is_not_placed(self):
+        # fails if `gates tests place` moves, deletes or records anything for a
+        # handoff that contradicts the task's current tag, or omits the re-handoff route
+        for name, tasks, char, target, task, named in SYNCED_TAGS:
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                repo = synced(tmp, target, tasks=tasks, characterization=char)
+                repo.must("task", "start", task)
+                before = untouched(repo)
+                r = repo.gates("tests", "place", task, cwd=repo.lane)
+                out = combined(r)
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn(f"gates tests handoff {CHANGE} --task {task}", out)
+                if named:
+                    self.assertIn(named, out)
+                self.assertEqual(untouched(repo), before,
+                                 "a refused placement moves, deletes and records nothing")
+
+    def test_a_handoff_that_agrees_with_the_synced_tags_places(self):
+        # fails if the tag check refuses a consistent tagged task or an untagged one
+        with tempfile.TemporaryDirectory() as tmp:
+            amended = tasks_md(t11="- [ ] 1.1 Add the thing, amended",
+                               t12="- [ ] 1.2 Extend the thing, amended [oracle: unit]")
+            repo = synced(tmp, {TASKS_REL: amended}, done=())
+            repo.do_task("1.1")  # untagged
+            repo.place("1.2")    # tagged, held tests agree
+            self.assertEqual((repo.lane / TEST_REL).read_text(), TEST_V2)
+
+
+if __name__ == "__main__":
+    unittest.main()
