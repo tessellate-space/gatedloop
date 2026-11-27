@@ -1,2 +1,5 @@
 schema: spec-driven
 created: 2026-11-24
+x-gatedloop-approved-by: "radub21 (merged #219)"
+x-gatedloop-approved-at: "2026-11-27T09:13:48Z"
+x-gatedloop-approved-sha: "8054f746f32f6b2c69b739e2265e436ec00f4f62128b02a9aa99a86c117f3cc1"
