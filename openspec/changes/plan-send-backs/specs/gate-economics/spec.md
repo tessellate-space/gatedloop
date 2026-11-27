@@ -2,7 +2,7 @@
 
 ### Requirement: `gates stats --plans` reports why plans went back before approval
 
-`gates stats --plans` SHALL read the same durable ledger as `gates stats`, with its scope resolution, fail-loud refusal on a missing ledger and tolerance of other-era rows. Per change it SHALL report send-backs (`plan-returned` rows) in total, by sender and by class, listing every closed-set value with zeros; the loop's own returns (`plan-review` rows with verdict `findings` or `question`) by checker; the `resume` count; and the earliest send-back's timestamp. Output SHALL be deterministic.
+`gates stats --plans` SHALL read the same durable ledger as `gates stats`, with its scope resolution, fail-loud refusal on a missing ledger and tolerance of other-era rows. Per change it SHALL report send-backs (`plan-returned` rows) in total, by sender and by class, listing every closed-set value with zeros; the loop's own returns (`plan-review` rows with verdict `findings` or `question`) by checker, listing only checkers with at least one such row; the `resume` count; and the earliest send-back's timestamp. Output SHALL be deterministic.
 
 #### Scenario: One change's send-backs
 

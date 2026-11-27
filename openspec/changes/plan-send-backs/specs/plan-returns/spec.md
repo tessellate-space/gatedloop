@@ -86,7 +86,7 @@ No approval, handoff, merge, implementation, attempt-counting or plan-round chec
 
 #### Scenario: Resuming with the human's answer recorded
 
-- **WHEN** the loop stopped on a question and the planner runs `gates plan resume plan-x --reason "retention: 30 days" --by human --class decision --words "Take option (a), 30 days."`
+- **WHEN** the loop stopped on a question and, before amending, a person runs `gates plan resume plan-x --reason "retention: 30 days" --by human --class decision --words "Take option (a), 30 days."`
 - **THEN** a `plan-returned` row with class `decision` and those words is appended, followed by a `plan-round` row with outcome `resume` and the reason, and the next round opens round 1 of the new loop
 
 #### Scenario: A partial send-back on resume is refused
@@ -134,7 +134,7 @@ The manifest key `loop.plan-returns` SHALL take `record` or `skip`, and SHALL de
 
 ### Requirement: Recording send-backs from the shipped prompts is opt-in
 
-Under `loop.plan-returns: record`, `/gatedloop:propose` and `/gatedloop:planner` SHALL record each human or non-checker send-back with the sender's exact words before amending the plan against it, and SHALL commit the change's ledger with the amendment whenever the ledger exists; under `skip` they SHALL record none. `gates plan returned` and `gates stats --plans` SHALL work under either value.
+Under `loop.plan-returns: record`, `/gatedloop:propose` and `/gatedloop:planner` SHALL record each human or non-checker send-back with the sender's exact words, with `gates plan returned`, before amending the plan against it (so the row carries the digests of the content sent back), and SHALL commit the change's ledger with the amendment whenever the ledger exists; under `skip` they SHALL record none. `gates plan returned` and `gates stats --plans` SHALL work under either value.
 
 #### Scenario: The command works under skip
 
