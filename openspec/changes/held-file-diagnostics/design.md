@@ -83,6 +83,8 @@ Why this option:
 - [Hashing a working-tree file on every condition-2 mismatch] → It runs only on a mismatch, which is already a refusal, and only for holding-area files.
 - [An existing test that depends on the "differs" wording for an unstaged file] → Only `tests/test_tests_check_staged_output.py` pins condition-2 text, and its held-file case stages the edit with `git add -A`, so it still reads "differs". The task keeps that module's output byte-identical.
 
+- [An existing test that pins a per-task handoff's refusal of an empty task] → None meets all three restore conditions. `tests/test_authored_tests.py` (`test_refusals_write_nothing`) and `tests/test_plan_preflight_dry_run.py` (`test_an_empty_area_is_refused_alike`) refuse an empty area in a full handoff, which the restore never touches. `test_a_task_holding_nothing_is_refused_alike_under_task` hands off `--task 3.9`, which no handoff declares behaviour-free, so it still refuses. No test is rewritten.
+
 ## Migration Plan
 
 Nothing to migrate: no manifest key, ledger field or flag changes. An older shim reading a ledger after a restore sees exactly the rows it would have seen, because the restore writes none.

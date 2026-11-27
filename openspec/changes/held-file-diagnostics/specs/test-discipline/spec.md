@@ -29,20 +29,25 @@ When `gates tests check` finds a held file whose staged content does not match t
 - **WHEN** a behaviour-free task's placement is voided and its `NO-TESTS` file is in neither the working tree nor the index
 - **THEN** the line says it is missing from the holding area and names `gates tests handoff <change> --task <N.M>`
 
-#### Scenario: A held test missing but committed
+#### Scenario: A held test or CHARACTERIZATION declaration missing but committed
 
-- **WHEN** a held test is absent from the working tree and the index, and `HEAD` holds it
+- **WHEN** a held test, or a held `CHARACTERIZATION` file, is absent from the working tree and the index, and `HEAD` holds it
 - **THEN** the line says it is missing from the holding area and names `git checkout HEAD -- <path>`
 
-#### Scenario: A held test missing with no committed copy
+#### Scenario: A held test or CHARACTERIZATION declaration missing with no committed copy
 
-- **WHEN** a held test is absent from the working tree and the index, and `HEAD` lacks it
+- **WHEN** a held test, or a held `CHARACTERIZATION` file, is absent from the working tree and the index, and `HEAD` lacks it
 - **THEN** the line says it is missing and names the author's re-handoff of that task
 
 #### Scenario: A CHARACTERIZATION declaration left unstaged
 
 - **WHEN** a held `CHARACTERIZATION` file on disk matches the handoff's declaration and its index entry does not
 - **THEN** the line names the file as not staged, not as differing from the handoff
+
+#### Scenario: Classifying a mismatch writes no object
+
+- **WHEN** the staged check classifies a held file's mismatch against the working tree, and no placed path mismatches
+- **THEN** the object store holds the same objects after the check as before it
 
 #### Scenario: A commit checked with --ref
 
