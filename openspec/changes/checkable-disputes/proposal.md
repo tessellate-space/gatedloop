@@ -31,5 +31,5 @@ None.
 
 - `bin/gates`: `tests defect` (`--cite`, the green-run check), `tests handoff` (`--defend`, `--cite`), `tests show`, the assertion-cap refusal text, and a citation resolver.
 - `agents/test-author.md`, `agents/tdd-implementer.md`, `skills/tdd-apply/SKILL.md`.
-- `tests/contract.json` (new flags), README.md and SETUP.md (the commands' new flags), tests for each check.
+- `tests/contract.json` and `tests/parser-structure.json` (new flags and ledger fields, rewritten by the task that adds them, design D7), README.md, SETUP.md and AUTOMATION.md (the commands' new flags and refusals), tests for each check, and the existing tests that pin the ledger's field set or record a defect without a citation or a green defect without a passing run (declared under `rewrites:`).
 - No manifest key.
