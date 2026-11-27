@@ -136,6 +136,21 @@ The manifest key `loop.plan-returns` SHALL take `record` or `skip`, and SHALL de
 
 Under `loop.plan-returns: record`, `/gatedloop:propose` and `/gatedloop:planner` SHALL record each human or non-checker send-back with the sender's exact words, with `gates plan returned`, before amending the plan against it (so the row carries the digests of the content sent back), and SHALL commit the change's ledger with the amendment whenever the ledger exists; under `skip` they SHALL record none. `gates plan returned` and `gates stats --plans` SHALL work under either value.
 
+#### Scenario: A requested change is recorded before the amendment
+
+- **WHEN** `loop.plan-returns: record` is declared and a reviewer requests changes on an open plan PR
+- **THEN** `/gatedloop:propose` writes the reviewer's exact words to a scratch file, runs `gates plan returned` with `--words-file` before amending, and stages `.gatedloop/runs/<name>.jsonl` with the amendment
+
+#### Scenario: A closed plan PR is recorded and nothing is reopened
+
+- **WHEN** `loop.plan-returns: record` is declared and a person tells the session the plan PR was closed without merging
+- **THEN** the prompt records the send-back, commits and pushes the ledger on `plan/<name>`, and opens or updates no PR
+
+#### Scenario: A checker's finding and an unchanged stall resume record nothing
+
+- **WHEN** `loop.plan-returns: record` is declared and a lens returns findings, or a human resumes a stalled loop without changing the plan
+- **THEN** no `plan-returned` row is written
+
 #### Scenario: The command works under skip
 
 - **WHEN** the manifest leaves `loop.plan-returns` unset and a person runs `gates plan returned` by hand

@@ -49,7 +49,7 @@ With `--all`, `gates stats --plans` SHALL add an aggregate: the per-change total
 
 ### Requirement: The plans view discloses its blind spots
 
-`data_quality` SHALL count unparseable lines, send-back rows without a usable timestamp, and `plan-returned` rows whose sender or class is missing or outside its set; such a row SHALL be excluded from every count, `first_ts` and the trend. The human report SHALL print the same disclosures and end by stating what the ledger cannot answer: a send-back nobody recorded, and the send-backs of a plan whose branch never reached the checkout being read.
+`data_quality` SHALL count unparseable lines, send-back rows without a usable timestamp, and `plan-returned` rows whose sender or class is missing or outside its set. A row whose sender or class is missing or outside its set SHALL be excluded from every count, `first_ts` and the trend; a well-formed row without a usable timestamp SHALL be counted in the totals, by sender and by class, but left out of `first_ts` and the trend. The human report SHALL print the same disclosures and end by stating what the ledger cannot answer: a send-back nobody recorded, and the send-backs of a plan whose branch never reached the checkout being read.
 
 #### Scenario: A malformed send-back is disclosed
 
