@@ -44,7 +44,9 @@ This passes the rejection test as "makes a stated guarantee enforceable". The gu
 1. **The blocking setting's shape.** A `loop.mutation: advisory|blocking` key, or the existing per-gate declaration style? Decided in design.
 2. **Per-task cost.** One run per task is N runs per change. Is a cap or a time budget needed, and is it the shim's or the adopter's? The adopter's tool usually has its own budget flag.
 3. **Tasks with shared code.** When two tasks touch the same file, which task's tests does a mutant in that file belong to? Candidate answer: run with the union of both tasks' tests, and report against the later task.
-4. **Dependency.** This builds on `checkable-disputes`: a `strength` defect and its defence should carry citations like the other kinds. Sequence this change after that one merges.
+4. **Dependencies.**
+   - **`checkable-disputes`:** a `strength` defect and its defence should carry citations like the other kinds. Sequence this change after that one merges.
+   - **#227 (the test author's read boundary is prompt-only):** a `strength` defect reopens a *completed* task, so the author is re-dispatched while the implementation is committed and readable. Nothing enforces or records that it doesn't read the code, so an author answering a surviving mutant could copy the implementation into its tests. At minimum #227's first step (recording what the author reads) must land before this change, so `strength` re-dispatches are observed.
 
 ## Capabilities
 
