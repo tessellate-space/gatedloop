@@ -56,6 +56,16 @@ With `--all`, `gates stats --plans` SHALL add an aggregate: the per-change total
 - **WHEN** a ledger holds a `plan-returned` row whose class is not in the closed set
 - **THEN** the report prints normally, the by-class breakdown excludes that row, and `data_quality` counts it
 
+#### Scenario: A send-back without a usable timestamp
+
+- **WHEN** a ledger holds a well-formed `plan-returned` row whose `ts` cannot be parsed
+- **THEN** it is counted in the totals, by sender and by class, and under `data_quality.rows_without_ts`, and is absent from `first_ts` and the trend
+
+#### Scenario: The human report ends with what the ledger cannot see
+
+- **WHEN** `gates stats --plans` runs without `--json`
+- **THEN** the report prints the data-quality line and ends with the closing sentence design D6 states
+
 ### Requirement: The existing stats views ignore send-back rows
 
 `gates stats` (with or without `--cost`) and `gates stats --outcomes` SHALL produce byte-identical output with or without `plan-returned` rows in the ledger. A send-back SHALL never read as a gate run, an intervention, a halt or a change's first activity.

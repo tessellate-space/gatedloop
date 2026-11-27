@@ -31,12 +31,17 @@ The shim SHALL define exactly one closed set of senders: `human` (a person) and 
 
 ### Requirement: A send-back carries the sender's words
 
-A send-back SHALL carry the sender's words, given as `--words <text>` or read from `--words-file <path>`, and stored exactly, line breaks and trailing newlines included. Exactly one of the two SHALL be given. Empty or whitespace-only words, both flags, or an unreadable file SHALL be refused, and nothing written.
+A send-back SHALL carry the sender's words, given as `--words <text>` or read from `--words-file <path>`, and stored exactly, line breaks and trailing newlines included. Exactly one of the two SHALL be given. Empty or whitespace-only words, both flags, neither flag, or an unreadable file SHALL be refused, and nothing written; a file that does not decode as UTF-8 counts as unreadable.
 
 #### Scenario: Words from a file are kept verbatim
 
 - **WHEN** a send-back is recorded with `--words-file` naming a file whose text holds a double quote, a `$`, two lines and a trailing newline
 - **THEN** the row's `words` equals the file's text byte for byte
+
+#### Scenario: An unusable words source is refused
+
+- **WHEN** a send-back is recorded with both `--words` and `--words-file`, with neither, or with a `--words-file` that cannot be read or is not valid UTF-8
+- **THEN** it exits 1 and nothing is written
 
 #### Scenario: Empty words are refused
 
