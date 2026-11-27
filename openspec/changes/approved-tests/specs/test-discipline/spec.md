@@ -36,6 +36,11 @@ the holding area SHALL be left untouched as present.
 - **WHEN** `tasks.md` holds task 3.1 and the snapshot has no digest for it
 - **THEN** `gates tests adopt` reports 3.1 stale
 
+#### Scenario: A kept task with no held files
+
+- **WHEN** task 1.1's digest still matches but the snapshot holds no `authored/1.1/` files
+- **THEN** `gates tests adopt` reports 1.1 stale
+
 #### Scenario: A re-run before the handoff
 
 - **WHEN** adoption ran once, task 1.2 was removed from the holding area, and adopt runs
@@ -105,6 +110,12 @@ locked and run red like any authored tests.
 - **THEN** the handoff row's `adopted` lists 1.1 only, and both tasks are placed and run
   red as usual
 
+#### Scenario: An inline handoff
+
+- **WHEN** a `--inline` handoff runs with `ADOPTED.json` present
+- **THEN** it records `preflight_tree` and `adopted` like any full handoff and deletes the
+  file
+
 #### Scenario: A held file deleted after adoption
 
 - **WHEN** task 1.1 was adopted and one of its held files was then deleted
@@ -113,12 +124,36 @@ locked and run red like any authored tests.
 #### Scenario: A partial or dry handoff
 
 - **WHEN** a `--task` or `--dry-run` handoff runs with `ADOPTED.json` present
-- **THEN** the file is left in place and no row carries the fields
+- **THEN** the file is left in place and any row it appends has `preflight_tree` and
+  `adopted` set to `null`
 
 #### Scenario: No adoption
 
 - **WHEN** the handoff runs without `ADOPTED.json`
-- **THEN** its row carries neither field
+- **THEN** its row has `preflight_tree` and `adopted` set to `null`
+
+#### Scenario: Adopted tasks in task-list order
+
+- **WHEN** a full handoff reads `ADOPTED.json` listing 2.1 and 1.1, and both still match
+- **THEN** its row's `adopted` is `["1.1", "2.1"]`
+
+#### Scenario: Adoption read but nothing still matches
+
+- **WHEN** a full handoff reads `ADOPTED.json` and no task it lists still matches the
+  snapshot
+- **THEN** its row has `preflight_tree` set to the file's tree and `adopted` set to `[]`
+
+#### Scenario: Any other row kind
+
+- **WHEN** a row other than a `tests-handoff` row is appended, such as a review row
+- **THEN** it has `preflight_tree` and `adopted` set to `null`
+
+#### Scenario: The adopted tree is not readable
+
+- **WHEN** a full, non-dry handoff runs with `ADOPTED.json` present and the tree it names
+  is not readable locally
+- **THEN** the handoff exits 1 naming the tree and `gates tests adopt`, appends no row,
+  and leaves `ADOPTED.json` in place
 
 ### Requirement: The loop authors only what adoption leaves
 
@@ -129,8 +164,9 @@ SHALL cover the stale and present tasks, and not the adopted ones.
 
 #### Scenario: Nothing stale
 
-- **WHEN** adoption reports no stale task
-- **THEN** the loop hands off without dispatching the test author
+- **WHEN** adoption reports no stale task and no present task
+- **THEN** the loop runs `gates tests handoff` itself without dispatching the test author,
+  and skips the authored-set review
 
 #### Scenario: Some tasks stale
 
@@ -142,3 +178,40 @@ SHALL cover the stale and present tasks, and not the adopted ones.
 
 - **WHEN** adoption reports 1.2 present and no task stale
 - **THEN** the author is not dispatched and the authored-set review covers 1.2
+
+#### Scenario: Adoption refuses
+
+- **WHEN** `gates tests adopt` exits 1 before the author would be dispatched
+- **THEN** the loop halts quoting adopt's message and authors nothing
+
+#### Scenario: Nothing to adopt
+
+- **WHEN** `gates tests adopt` says there is nothing to adopt
+- **THEN** every task is stale and the author is dispatched for the whole change
+
+#### Scenario: The orchestrator with a bound snapshot
+
+- **WHEN** the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree` and the
+  project does not declare `loop.test-author: inline`
+- **THEN** the orchestrator opens the lane first, runs `gates tests adopt` in the lane
+  worktree, dispatches the test author naming only the stale tasks (or runs the handoff
+  itself when none is stale), commits the authoring commit there, and dispatches the
+  implementer only once the handoff is recorded
+
+#### Scenario: The orchestrator's adoption refuses
+
+- **WHEN** the orchestrator runs `gates tests adopt` in a newly opened lane and it exits 1
+- **THEN** the orchestrator removes the lane's worktree and branch, reports adopt's
+  message, and dispatches nothing for that change
+
+#### Scenario: The orchestrator under inline authoring
+
+- **WHEN** the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree` and the
+  project declares `loop.test-author: inline`
+- **THEN** the orchestrator opens the lane and dispatches the implementer as today, and
+  the lane adopts in §5-inline
+
+#### Scenario: The orchestrator without a bound snapshot
+
+- **WHEN** the approved `.openspec.yaml` has no `x-gatedloop-preflight-tree`
+- **THEN** the orchestrator dispatches the test author at its step 3.1 as today
