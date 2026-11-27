@@ -6,14 +6,16 @@ retired. When gatedloop reaches 1.0 is not decided here; [`status.md`](./status.
 
 ## Supported environment
 
-- **OpenSpec CLI:** `1.14.3` (minimum) to `1.14.3` (highest tested)
+- **OpenSpec CLI:** `1.14.3` (minimum) to `1.16.0` (highest tested)
 - **Python:** 3.9 or later
 - **Operating systems:** macOS and Linux
 
 Windows is not supported: the hooks are bash.
 
-Pull-request ci runs `gates run ci` on each of these: both operating systems, the
-minimum and the latest Python, and both ends of the OpenSpec range. A weekly job runs
+Pull-request ci runs `gates run ci` on four legs, both operating systems with the
+minimum and the latest Python, all against the minimum OpenSpec (`1.14.3`). One fifth
+leg runs the highest tested OpenSpec (`1.16.0`) on Ubuntu with Python 3.13 only, so
+that end of the range is not crossed with the other operating system or Python. A weekly job runs
 the same `ci` against OpenSpec's latest release, outside the range, as an early
 warning. It is not a required check. `gates doctor` warns, without failing, when the
 installed OpenSpec is outside the range. The range widens when ci proves a new end;
@@ -30,11 +32,13 @@ fails when the code and that file disagree, so no change to it lands unreviewed:
   per-step codes;
 - the `gatedloop/<gate>` commit status contexts;
 - the top-level keys of `.gates.yaml`;
-- the top-level keys of `gates handoff --json` and `gates stats --json`;
+- the top-level keys of `gates handoff --json`, `gates stats --json` and
+  `gates approval check --json`;
 - the ledger row fields, and the row version `v`.
 
 Three things outside that file are covered too: the `tasks.md` oracle tag syntax
-(`[oracle: <gate>]`, `[oracle: <gate> characterization]`, `[oracle: none]`), the
+(`[oracle: <gate>]`, `[oracle: <gate> characterization]`, `[oracle: none]`, and from
+0.11.1 a gate tag's trailing `rewrites: <path>[, <path>]...` clause), the
 `NO-TESTS` and `CHARACTERIZATION` markers, and the `x-gatedloop-*` keys in
 `.openspec.yaml`.
 
@@ -53,7 +57,7 @@ or removing one, or changing what a value means, raises it.
   few outputs they parse come from `internal` subcommands that ship with them);
 - an `internal` subcommand: one the bundled hooks or skills call, listed with its
   reason in `tests/test_contract.py`;
-- any `--json` document other than `handoff` and `stats`.
+- any `--json` document other than `handoff`, `stats` and `approval check`.
 
 These change without a deprecation.
 

@@ -57,7 +57,8 @@ openspec instructions <artifact> --change <name> --json
   nothing removed), and `cut` refuses while it reports a gap. `cut
   <patch|minor|major>` bumps all three version fields and drafts a `CHANGELOG.md`
   section; review and edit it, then `publish` commits, tags and creates the
-  GitHub release. `check` (run by `ci`) keeps the three
+  GitHub release; it refuses inside an agent session and prints the commands to run
+  from a terminal outside one. `check` (run by `ci`) keeps the three
   fields in agreement. Releases are batched and the maintainer decides when;
   adopters get a change only on a version bump. A project-level SessionStart
   hook in `.claude/settings.json` (this repo only, never `hooks/hooks.json`)
@@ -120,11 +121,15 @@ LLM; the *selection* does not.
       per task: red (gates run unit) → green → gate → atomic commit
       gate = gates run ci green AND convention-review agent clean
       completion: gates run verify → gates run live-check (blocking) → squash-merge
-/gatedloop:propose   → /opsx:propose authors; this adds the plan branch, commit and PR
+/gatedloop:propose   → /opsx:propose authors; this adds the plan branch, the plan loop
+                      (gates plan check always; under loop.plan-preflight: run, rounds of
+                      plan review → preflight test author → dry-run handoff → authored-set review),
+                      commit and PR
 /gatedloop:merge     → gates merge <change>: prove the head, squash, ci, confirm, archive, one push
                       (pull-request mode: publish gatedloop/* statuses and hand the PR to the forge)
 /gatedloop:upgrade   → walk the settings a new plugin version asks this project to decide
-/gatedloop:planner   → propose in its own worktree, send `gates handoff`'s payload; never implements
+/gatedloop:planner   → propose in its own worktree, run the plan loop, send `gates handoff`'s payload;
+                      never implements
 /gatedloop:orchestrator → verify each handoff, dispatch lanes, merge and archive
 /gatedloop:archive   → delegates to /opsx:archive, then commits the move
 ```
@@ -132,13 +137,24 @@ LLM; the *selection* does not.
 - `agents/test-author.md` (Sonnet) writes every task's failing tests for the whole change
   before implementation starts; the tests are held, placed per task and locked, and a
   red run is enforced after placement (`gates tests …`), on the task's oracle gate: the
-  `[oracle: …]` tag ending its `tasks.md` line, `unit` when untagged. `agents/merge-runner.md`
+  `[oracle: …]` tag ending its `tasks.md` line, `unit` when untagged. The author reads no
+  existing test except those a tag's `rewrites: <path>` clause names, which its brief prints
+  from `HEAD` and the lock then holds as authored. `agents/merge-runner.md`
   (Sonnet) runs `gates merge` for an orchestrator.
 - `agents/tdd-implementer.md` (Sonnet) runs that same skill autonomously. It differs
   in four load-bearing ways: it cannot ask the user (HALTs instead of guessing), it
   is resumable because **done ⟺ committed** (a task's `[x]` flip is committed with
   its code), it always halts with a clean tree at a task boundary, and it **stops
   before the merge**.
+- `agents/plan-review.md` (Opus, read-only) reads a plan cold before approval, through one
+  lens per run (`rules/plan-lenses.md`, selected by `gates plan brief`), and reads only the
+  code the brief names; every finding cites `<lens-id> #<n>`. Its `gatedloop.blast-radius`
+  lens returns only the tier JSON (`schema/plan-tier.schema.json`). The tier's floor is
+  computed in `bin/gates` (`gates plan tier`); a classifier, built-in or an adopter's bound
+  command, may only raise it. The loop's rows (`plan-round`, `plan-review`) are a record
+  and never gate approval, handoff or merge. Its held tests live in the ignored
+  `.gatedloop/out/preflight/<change>/`, snapshotted to `gatedloop/preflight/<change>` by
+  `gates plan save`.
 - `agents/convention-review.md` (Sonnet, read-only) is deliberately cheap: diff →
   `gates rules` → read only those rules → judge. Under ~10 tool calls; every
   finding cites its rule-id.
@@ -224,11 +240,20 @@ it reads back (which is why the contract is an exit code and nothing else), and 
 
 ## In-flight work
 
-`openspec list --json` is the source; this list is a snapshot from 0.11.0. Read a change's
+`openspec list --json` is the source; this list is a snapshot from 0.13.0. Read a change's
 `design.md` before touching the area it covers:
 
+- `review-provenance`: a `SubagentStop` hook records how each convention review ran, review rows
+  carry `via: subagent|inline`, the reviewer's limits move into agent config and a Bash
+  allowlist hook, and an opt-in `loop.review: isolated` makes `gates merge` refuse inline reviews.
 - `prompt-evals`: an on-demand `claude plugin eval` suite under `evals/` for the implementer, the
   test author and the convention review, run by `scripts/eval-prompts`; no `eval` gate.
+- `checkable-disputes`: a `setup`/`assertion` defect and the author's new `--defend` reply must
+  `--cite` a path or spec scenario the shim resolves, a `green` defect needs a passing oracle run
+  in the ledger, and `gates tests show` gives the human both sides.
+- `approved-tests`: the tests the plan loop authored before approval are snapshotted into the
+  approval (`x-gatedloop-preflight-tree`), adopted after approval by `gates tests adopt` instead
+  of authored a second time, and the `gatedloop/preflight/<change>` branch is deleted at merge.
 
 Ideas that pass the rejection test but aren't scheduled live in `docs/candidates.md`.
 

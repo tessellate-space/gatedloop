@@ -125,7 +125,9 @@ class StagedCheckOutputTest(unittest.TestCase):
             f"{TEST_REL}: staged content differs from its content before this change, "
             "and no placement of it is in force — the implementer never edits an authored "
             "test; record `gates tests defect <N.M> --kind setup|assertion --detail ...` "
-            "instead\n"
+            "instead; it stays pinned: task 1.1 is not declared NO-TESTS in the latest "
+            "handoff — the path is released only when the approved plan moves every task "
+            "that placed it out of the authored set\n"
         )), r.stderr)
 
 

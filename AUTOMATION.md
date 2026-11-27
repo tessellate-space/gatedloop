@@ -29,6 +29,10 @@ The workflow's hard rules used to live only in prompt text:
 | A human accepted the behaviour, not just clicked merge (opt-in: `approval.acceptance`) | acceptance-gate D4 | `hooks/gate-merge.sh`'s fourth check, after taint: `gates acceptance check <tree>` on the same tree the live-check and unscoped-`ci` markers matched — passes only when the latest `acceptance` ledger row for that tree is an `accept`, attested by `gates acceptance attest --local` or from the merged PR (`--merged`, which `gates record-merged` runs) under `self`, or from the PR's `APPROVED` review (`--pr`); passes stating "not required" when no policy is declared, so the hook is byte-identical to before for everyone else |
 | A forge merge requires the gates that passed locally (`pull-request` mode) | merge-pull-request D1 | `gates marker publish <gate>` posts `gatedloop/<gate>` only from a green local marker for the commit's normalized tree, naming that tree; `gates marker check-remote` verifies one. Nothing local can block a forge merge: branch protection requiring `gatedloop/ci` and `gatedloop/tests` from the CI provider is what enforces it (layer 4) |
 | A locked test edited past the commit hooks never merges | test-lock-remote-check D1–D4 | `gates tests check --ref <commit>` evaluates the authored-test lock against a commit's tree and the ledger it carries, every task. `gates merge` step 1 runs it on the branch head in both modes; `gates marker publish tests` posts the result as `gatedloop/tests` (computed, no marker), success naming the tree or failure naming the path, and the shipped workflow publishes it on every pull request for branch protection to require |
+| A test the approved plan moved out of the authored set is released, and nothing else is | release-voided-lock D1–D3 | The authored-test lock (`gates tests check`, its `--task` and `--ref` forms) releases a path whose placements are all void only when every task that placed it is `NO-TESTS` in the latest handoff and tagged `[oracle: none]` both in the approved plan on the merge target and in the evaluated tree, and no handoff holds it; it never releases when that plan cannot be read, and a refusal names the first unmet condition |
+| A plan loop's round budget cannot be miscounted, and its checkers' content is pinned | plan-preflight D4, D5 | `gates plan round` counts the current loop's rounds from `plan-round` rows (budget `loop.plan-preflight.rounds` under full, 1 under light), opens none on a static finding or, on a light floor, without a classifier verdict, and past the budget appends a `stalled` row and exits 1; `gates plan record` refuses with no open round, on digests that moved since the round opened, and for a checker the tier does not run, and records the dry run from its own exit. The rows are record-only: no approval, handoff, merge or stats verdict reads them |
+| Held tests are never committed off their change's branch | plan-preflight D8 | `gates tests check`, which `hooks/gate-commit.sh` and the git-layer `pre-commit` already run, refuses a staged path under `.gatedloop/authored/` whenever the current branch names no active change (a `plan/*` branch, the merge target, any other branch), naming each path; on a change branch its verdict is unchanged |
+| An existing test a task rewrites is rewritten in sight, under the approved plan, and locked like any authored test | test-rewrites D1–D5 | The `rewrites:` clause of a task's oracle tag is covered by the approval sha and the tag-drift check; `gates tests brief` prints only the declared files' `HEAD` content; `gates tests handoff` refuses a declared path absent at `HEAD` or not handed off in full; once placed, the rewritten file is a handed-off path with a base, so the same lock, red run and defects hold it (no change to the evaluator); `gates tests show --diff` puts what each rewrite dropped in front of the authored-set review |
 | A forge merge reaches the ledger | merge-pull-request D3 | `gates record-merged <sha>` resolves the change through the squash commit's PR head, records the merge row against that sha and archives, in one local commit that `discipline check-commit` allows at planning grade (ledger rows ride along); under `approval.acceptance: self` the same commit first gets the PR merge's `accept` row (none when that tree is already accepted, nothing committed when the writer refuses); a merged `plan/<change>` PR re-attests a stale `approved_sha`; a commit from no active change is skipped |
 
 Interactively the old gap was fine: you were watching, and you caught drift. Unattended it was the whole risk — a model that skipped a gate produced a green-looking branch that was never gated, and nobody was present to notice. `harden-unattended-loop` closes that by converting every row above except the review-invocation one into a hook-enforced invariant — and that one into a recorded, auditable artifact, which is as far as a gate with no oracle behind it can honestly go (§0.3). See `SETUP.md`'s "Enforcement" section for the adopter-facing version of this table.
@@ -85,6 +89,19 @@ wall with one clearly-marked door that is then reported."
   `ci` marker compare). A planning diff that also carries ledger rows stays
   planning-grade (merge-pull-request D3): the ledger is invisible to every marker, so it
   neither earns nor costs the discount.
+  **What each layer requires under each `loop.ci-at` mode** (`ci-at` D2, D3): under
+  `task` (the default) both layers need the `ci` marker for a code commit. Under `ready`,
+  on a branch naming an active change, both also accept a `unit` marker for the staged
+  tree: `check-commit` writes the verdict token `unit`, both hooks print its allow line
+  (`… — loop.ci-at: ready; the full ci runs before READY and at the merge`) and run the
+  authored-test lock after it exactly as for `marker`. Off a change branch (`main`,
+  `plan/*`, the detached HEAD `gates merge` commits on) both layers need the `ci` marker
+  in either mode. Neither hook reads the manifest; the selection is the shim's. Each
+  denial ends with a gate-neutral remedy, "run the gate named above, then stage exactly
+  what it tested and commit again", because the check's own lines name the gate: `gates
+  run ci`, or under `ready` `gates run unit`. A git-layer copy installed before 0.12.0
+  already treats `unit` like `marker` and echoes the check's lines; refreshing it
+  (`git-hook-refresh`) brings the gate-neutral denial.
   The same install adds a git `pre-push` hook (`git-layer-enforcement` D3): a push that
   updates the merge target is denied unless `gates discipline check-push` finds the
   pushed commit proven — a `merge` ledger row records it (or records a commit it
@@ -110,6 +127,28 @@ wall with one clearly-marked door that is then reported."
   gate refuses a tainted change until a green `gates run ci` on the branch head appends a
   `taint-clear` row (append-only — the incident stays in history). The join is exact: a
   gated commit's tree equals the tree `gates run ci` recorded, so there is no heuristic.
+  One exemption (taint-preclear): a commit with no green-`ci` row of its own is recorded
+  **`vouched`** (`gate: "vouched"`), not tainted, when it is an ancestor of the branch head
+  being audited and a green **unscoped** `ci` row names that head's tree, compared
+  ledger-blind. That is the same evidence a `taint-clear` already accepts, applied before
+  the taint instead of after it, so a rebased branch whose head passed one full `ci` gets
+  through `gates merge` step 1 without a second one (#132). A scoped head `ci` vouches for
+  nothing, and timestamps are never read: a commit made after the head `ci` is a new head
+  the old row does not name, so it taints. The `vouched` row keeps the commit visible by
+  sha but counts neither as an incident nor as individually gated; the cost is that a
+  hook-slipping mid-branch commit a later full head `ci` covers is no longer counted as a
+  taint.
+  **Under `loop.ci-at: ready`** (`ci-at` D4) the audit accepts what the commit hook
+  accepted: a green `unit` row for a commit's tree gates it as a green `ci` row does, so a
+  unit-gated task commit audited on a `Stop` before any full `ci` exists records no taint
+  and no `vouched` row, and is classified by its row's session (an agent's records
+  nothing, a human's a `human-commit`). The merge's read-only check of a branch no worktree
+  holds accepts the same rows. A `unit` row never vouches for an ancestor: only a green
+  unscoped `ci` on the head does, as before, and a commit with neither row still taints.
+  The mode is read when the audit runs, so flipping `ready` to `task` mid-change makes
+  unaudited unit-only commits taint until a green `ci` on the head clears them. READY is
+  where the full `ci` moves: `gates ledger record-ready` refuses (exit 1, no row) until a
+  green unscoped `ci` row names the head's tree. The merge is unchanged.
 - **Layer 4 is a documented adopter requirement**, not gatedloop code — for
   `integration.mode: pull-request`, the forge's own branch protection is the only thing
   covering `gh pr merge`; see `SETUP.md`'s "Branch protection is required for
@@ -131,7 +170,7 @@ layers, and only the first is tied to Claude Code:
 
 | Guarantee | Tool hook (Claude Code) | Git layer (any host, agent session) | Forge (branch protection, statuses) |
 |---|---|---|---|
-| A commit only on a green `ci` for its tree | `PreToolUse` on `git commit` | `pre-commit`: `discipline check-commit` | `gatedloop/ci` required |
+| A commit only on a green `ci` for its tree (under `loop.ci-at: ready`, a task commit on a change branch on a green `unit` for its tree) | `PreToolUse` on `git commit` | `pre-commit`: `discipline check-commit` | `gatedloop/ci` required |
 | Authored tests stay locked, and run red first | `PreToolUse` on `git commit` | `pre-commit`: `tests check` | `gatedloop/tests` required |
 | A merge into the target only on a proven head | merge gate (`gate-merge.sh`) | not gated: a raw `git merge` is caught at the push instead (`pre-merge-commit` misses fast-forwards) | required statuses on the PR head |
 | A push of the target only of a proven commit | none | `pre-push`: `discipline check-push` | branch protection on the target |
@@ -507,7 +546,10 @@ ledger alone:
   exit 1, runs nothing and writes no row. The caller's `--attempt` is a label, so
   passing a smaller one buys nothing.
 - **One fresh restart, never self-granted.** `gates attempt restart` refuses on a
-  dirty tree and past `loop.fresh-restarts` (default 1). The `stalled` halt row
+  dirty tree and past `loop.fresh-restarts` (default 1). Every active or
+  halt-voided placement of the change at its placed content counts as clean,
+  whichever task placed it, and so do uncommitted `usage`, `restart` and `halt`
+  rows; a placed test edited after placement is refused, naming its task. The `stalled` halt row
   carries `restart_available`, computed by the shim, so a dispatcher decides from a
   fact rather than from the implementer's report.
 - **Memory between attempts.** `gates attempt note` records four bounded one-line
@@ -533,7 +575,13 @@ path, so the gap was a reader:
   same record at every `Stop`, re-invocations included, before the continue decision,
   so a halted or abandoned task is costed too. The git-layer `pre-commit` hook has no
   hook input; inside an agent session it records a `no-transcript` row with null
-  counts. Nothing the record does can deny a commit or fail a stop.
+  counts, staged into the commit as the tool hook's row is (`usage-row-staged`), so
+  a commit at either layer leaves the ledger clean. A copy of the hook installed
+  before 0.11.1 leaves its row unstaged; `gates doctor` reports it as `stale-copy`,
+  and `gates hook install` refreshes it. Merge step 1 commits its trailing rows as a
+  pathspec commit, which leaves the hook's staged row out of `.git/index`, so it
+  resets the ledger's index entry afterwards and halts there if the ledger is still
+  dirty. Nothing the record does can deny a commit or fail a stop.
 - **Counts only.** A row stores, per model, input, output, cache-read and cache-write
   token counts, the number of assistant messages and the window. No transcript text
   is ever copied into the ledger.

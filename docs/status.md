@@ -1,6 +1,6 @@
 # gatedloop status
 
-**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3, on macOS and Linux with Python 3.9 and 3.13.** Nobody
+**Tested by one maintainer, on their own projects, against OpenSpec 1.14.3 to 1.16.0, on macOS and Linux with Python 3.9 and 3.13.** Nobody
 else has reported running the loop end to end. This page says what has been
 exercised, where the plugin is fragile, and what depends on OpenSpec staying the way
 it is. It is kept current with each release; [`README.md`](../README.md) has the
@@ -26,7 +26,10 @@ mostly one host: Claude Code, locally and on the web.
 | Workflow packs (`bugfix`, `architecture`) and `workflow-select` | lightly | installed and dispatched; few real changes run through them |
 | Token usage rows, `gates stats --cost` and `loop.token-budget` | lightly | usage recorded on this repository's own changes since `token-ledger` merged; the budget has not halted a real change |
 | `/gatedloop:planner` and `/gatedloop:orchestrator` | not yet | new in 0.10.0; the planner/orchestrator split they encode has run by hand, as in [`topology.md`](./topology.md) |
-| The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
+| The stability contract (row `v`, `tests/contract.json`, the ci matrix) | yes, in ci | every pull request runs Ubuntu and macOS with Python 3.9 and 3.13 on OpenSpec 1.14.3, plus one Ubuntu, Python 3.13 leg on OpenSpec 1.16.0; the snapshot fails ci on any drift in the public surface; a weekly job runs OpenSpec's latest release |
+| A task's `rewrites:` clause (`gates tests show --diff`) | not yet | new in 0.11.1; covered by the `unittest` suite only, no real change has declared one |
+| `loop.ci-at: ready` and `loop.ci-scope: union` | not yet | new in 0.12.0; covered by the `unittest` suite only, no real change has run under either |
+| The plan loop (`loop.plan-preflight`, `gates plan …`, the `plan-review` agent) | not yet | new in 0.12.0; the shim side is covered by the `unittest` suite, including an end-to-end fixture loop, and the prompts have not run a real plan; it replaces the interim preflights adopters ran by hand |
 | The READY report's gate block (`gates ledger record-ready`) | lightly | this repository's own changes since `loop-hardening` |
 | `/gatedloop:feedback` | barely | built for reports that never came |
 
@@ -81,7 +84,12 @@ commits and pushes pass untouched, and an agent on another host is gated only on
 its variable is declared. The `pre-push` gate on the merge target is opt-in, and
 `--commit-only` declines it until `--push`. A hook installed before 0.8.0 is an old
 copy: re-run `gates hook install`, and `gates doctor` reports it as `stale-copy`
-until you do.
+until you do. So is a `pre-commit` copy installed before 0.11.1: it records its usage
+row without staging it, which leaves the ledger dirty after every commit and stops
+`gates merge` (#140). Since 0.11.1 the `pre-push` gate names only a change whose own
+commits the push carries in, and refuses a commit no change owns, a release commit
+say, as belonging to no change in flight; such a commit goes through a pull request
+or a push outside an agent session.
 
 ### The plan declares each task's oracle — *shipped, opt-in*
 
@@ -95,7 +103,31 @@ refuses a contradiction, and the lock reads the red run on the declared gate, so
 e2e task tagged `[oracle: integration]` goes red under `integration` instead of being
 declared `CHARACTERIZATION`. An untagged task is still the author's to decide from the
 prose, and a wrong guess there shows only as a `green` defect. `loop.task-oracle:
-required` refuses untagged tasks at handoff; it is off by default.
+required` refuses untagged tasks at handoff; it is off by default. Since 0.11.1
+(`test-rewrites`) a gate tag may end with `rewrites: <path>` to name the existing tests
+a task rewrites: the author reads exactly those files from its brief and no other
+existing test, and the rewrite is locked as the task's authored test. An existing test
+a task must change but the plan doesn't name is still unreadable to the author, and
+stays a blocking question. Since 0.13.0 (`release-voided-lock`) a test whose placements
+were all voided is released from the lock once a re-approved plan tags every task that
+placed it `[oracle: none]` and the author declares them `NO-TESTS`; before that, such a
+path stayed pinned with no route out (#195).
+
+### The plan loop's verdicts are judgements, recorded and never blocking — *shipped, opt-in*
+
+Since 0.12.0 (`plan-preflight`) `gates plan check` runs in every propose path and reports
+what the handoff would refuse after approval; since 0.13.0 a `rewrites:` path that
+doesn't look like a test is printed as an advisory and no longer fails it (#192). Under `loop.plan-preflight: run` the
+planner also loops plan review, the preflight test author, a dry-run handoff and the
+authored-set review until the plan is green, asks a human, or spends its round budget.
+Those verdicts are LLM judgements: they are recorded in the change's ledger and shown in
+the plan PR, and nothing in approval, handoff or merge reads them. The tier's floor reads
+the paths a plan names, so a plan that names fewer paths computes a lower floor; the
+implementability lens flags a task that changes code without naming it. Declaring an
+external classifier sends the plan digest to that provider. The preflight's held tests
+are not yet the handed-off ones: the test author runs again after approval until
+`approved-tests` lands, and the `gatedloop/preflight/<change>` branch is deleted by hand
+once the change is archived.
 
 ### A scoped `ci` or `unit` errs full on an unmatched path — *shipped*
 
@@ -110,6 +142,13 @@ change's own `tasks.md` doesn't count either, so the tick every task commit stag
 no longer forces the full `ci`; in 0.10.0 it did, and the `openspec/**` remedy the
 0.10.0 docs suggested only added a second hot surface (#122). Another change's
 `tasks.md` is an ordinary path.
+
+Since 0.12.0 (`ci-at`) two opt-in keys narrow `ci` further without dropping the last
+word. `loop.ci-at: ready` gates a task commit on a green `unit` for its staged tree and
+runs the full `ci` once before READY and again at the merge; a commit on the merge
+target, a `plan/*` branch or a detached merge head still needs `ci`. `loop.ci-scope:
+union` runs the hot surfaces' own `ci` overrides when every hot surface declares one.
+An adopter on `ready` refreshes a copied git hook with `gates hook install`.
 
 ### The merge rechecks the plan approval, and some commands are now denied — *shipped*
 
@@ -174,8 +213,9 @@ has the steps.
 ## Upstream coupling
 
 gatedloop does not author anything; OpenSpec does, and the shim reads what OpenSpec
-prints. Supported: **OpenSpec 1.14.3 to 1.14.3**, the range [`stability.md`](./stability.md)
-declares; ci tests both ends, and a weekly job runs OpenSpec's latest release. `gates doctor`
+prints. Supported: **OpenSpec 1.14.3 to 1.16.0**, the range [`stability.md`](./stability.md)
+declares. Pull-request ci runs the minimum on every leg and the highest tested on one
+(Ubuntu, Python 3.13), and a weekly job runs OpenSpec's latest release. `gates doctor`
 warns, without failing, outside the range.
 
 | gatedloop relies on | Used by | When upstream changes it |
@@ -192,7 +232,8 @@ Workflow packs also read `openspec schemas --json` and `openspec schema which`.
 
 What has broken before is the last row: OpenSpec 1.14.0 started reporting unknown
 change metadata, and `--strict` failed on every attested change until the keys moved
-under `x-`, which 1.14.2 reserves for tools. Expect the next break in the JSON shapes,
+under `x-`, which 1.14.2 reserves for tools. OpenSpec 1.16's `--strict` also fails a
+scenario with no WHEN/GIVEN or THEN step. Expect the next break in the JSON shapes,
 and check `gates doctor` first after any upgrade.
 
 ## What's next

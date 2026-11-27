@@ -1,6 +1,6 @@
 # gatedloop
 
-**Status.** Built for the author's own projects, and it works there. It is 0.x, so it changes without notice. It is tested against OpenSpec 1.14.3 to 1.14.3 on macOS and Linux; [`docs/stability.md`](./docs/stability.md) says what is covered and how a part of it is retired. No support is promised: one maintainer has run the loop so far, and [`docs/status.md`](./docs/status.md) says what has been exercised and where it is fragile. It is for people already running unattended coding agents who have been burned by "the agent said it ran the tests". Issues are welcome: run `/gatedloop:feedback`, or open a GitHub issue.
+**Status.** Built for the author's own projects, and it works there. It is 0.x, so it changes without notice. It is tested against OpenSpec 1.14.3 to 1.16.0 on macOS and Linux; [`docs/stability.md`](./docs/stability.md) says what is covered and how a part of it is retired. No support is promised: one maintainer has run the loop so far, and [`docs/status.md`](./docs/status.md) says what has been exercised and where it is fragile. It is for people already running unattended coding agents who have been burned by "the agent said it ran the tests". Issues are welcome: run `/gatedloop:feedback`, or open a GitHub issue.
 
 Issue numbers before 0.7.0 were remapped when the issues moved here from the private archive repository. PR references in the history and the changelog name that archive, not this repository.
 
@@ -38,9 +38,20 @@ Every row is a `PreToolUse` or `Stop` hook, or a check inside `gates`, that deni
 
 A task is done exactly when its code, its checkbox and its ledger row are committed together, so a halted run resumes from the first unchecked task, and the ledger is the record of every gate verdict along the way.
 
+### How tests flow
+
+The tests come first and stay out of the implementer's hands from start to finish:
+
+1. **Written up front, by someone else.** After the plan is approved, the `test-author` agent writes every task's failing tests for the whole change before any of it is implemented. It works from the specs, the design and the public interfaces, never from the code. Where the plan tags a task `[oracle: …]`, the author is told which gate the task's tests run under, or that the task has none. A `rewrites: <path>` clause names the existing tests a task may rewrite, and the author reads those files and no other existing test.
+2. **Held until their task starts.** `gates tests handoff` stores the tests under `.gatedloop/authored/<change>/<task>/`, where no test runner finds them, so a task never sees the tests of the tasks after it.
+3. **Placed one task at a time, and seen to fail.** When a task starts, `gates tests place <task>` moves only that task's tests into the tree, and the task's oracle gate must go red before any code is written.
+4. **Locked from then on.** The implementer can make the tests pass or report one as a defect, which sends it back to the author. It can never edit one. The lock is checked at every commit, again at the merge head, and at the forge.
+
+**Optionally, the tests are written during planning too.** Under `loop.plan-preflight: run` the author also writes the tests before approval, and they are reviewed alongside the plan, so a plan whose tasks can't be tested shows up before anyone approves it. Today those preflight tests are not carried over: the author writes them again after approval.
+
 ## Quickstart
 
-You need Claude Code, the OpenSpec CLI (1.14.3 to 1.14.3, the range [`docs/stability.md`](./docs/stability.md) declares), Python 3.9+, and `gh` for the pull-request steps. In Claude Code:
+You need Claude Code, the OpenSpec CLI (1.14.3 to 1.16.0, the range [`docs/stability.md`](./docs/stability.md) declares), Python 3.9+, and `gh` for the pull-request steps. In Claude Code:
 
 ```bash
 /plugin marketplace add tessellate-space/gatedloop
@@ -95,6 +106,7 @@ flowchart TD
 
     subgraph OS["OpenSpec: authoring"]
         propose["/opsx:propose<br/>proposal, specs,<br/>design, tasks"]
+        preflight["Optional plan loop<br/>plan review, preflight<br/>tests and their review"]
     end
 
     subgraph YOU1["You: approve the plan"]
@@ -104,7 +116,8 @@ flowchart TD
 
     subgraph LOOP["gatedloop: the gated loop"]
         branch["One branch per change"]
-        red["Red: place the authored tests<br/>the task's oracle gate fails<br/>(unit by default)"]
+        author["Test author writes every<br/>task's failing tests,<br/>held out of the tree"]
+        red["Red: place this task's<br/>held tests, its oracle<br/>gate fails (unit by default)"]
         green["Green: implement<br/>the same gate passes"]
         gate["gates run ci<br/>plus convention review"]
         commit["Atomic commit<br/>code, task tick, ledger row"]
@@ -120,8 +133,9 @@ flowchart TD
     archive["/gatedloop:archive<br/>specs promoted,<br/>move committed"]
     done(["Verified on main"])
 
-    idea --> propose --> planpr --> attest --> branch
-    branch --> red --> green --> gate --> commit --> more
+    idea --> propose --> planpr
+    propose -. opt-in .-> preflight -.-> planpr --> attest --> branch
+    branch --> author --> red --> green --> gate --> commit --> more
     more -- yes --> red
     more -- no --> verify --> live --> merge --> archive --> done
 
@@ -149,6 +163,8 @@ How to read it:
 - **Resumable at every task boundary.** A task is done only when its code, its checkbox and its ledger row are committed together, so a halted run restarts from the first unchecked task.
 - **A stopping rule in code.** After a task's RED run, it gets `loop.attempts` failed runs of its oracle gate (`unit` by default) or `ci` (default 2), counted from the ledger. After each one the loop writes a four-line `gates attempt note`. Past the budget, `gates run` refuses that task's next run. The dispatcher may then restart the task once in a fresh context that reads only the notes (`loop.fresh-restarts`, default 1, via `gates attempt restart`) before a human gets it.
 - **What each task cost.** The commit hook and the `Stop` hook read the session transcript and append a `usage` row per task: input, output, cache-read and cache-write tokens by model, counts only, never transcript text. `gates stats` prints tokens per task and per model beside time and says which tasks went unrecorded; `gates stats --cost` prices them from your own `economics.prices` (the plugin ships no price list). An optional `loop.token-budget` caps a change's recorded tokens: past it, `gates run` refuses and the loop halts with cause `budget`.
+- **When the full `ci` runs, and how wide.** `ci` is the biggest gate cost and is serialized machine-wide. Two opt-in knobs cut it without dropping the last word. `loop.ci-at: ready` gates each task commit on a green `unit` for its staged tree (plus the review) and runs the full `ci` once before READY, where `gates ledger record-ready` refuses without it, and again at the merge; it needs a global `unit` gate. `loop.ci-scope: union` lets a diff spanning several surfaces run their `ci` overrides instead of the global `ci`, when every hot surface declares one. Neither changes anything for a project that sets neither key.
+- **A plan checked before approval.** `gates plan check` always runs in the propose path and costs nothing. The model part of the plan loop (plan review, and on a full tier the preflight test author, its dry run and the authored-set review) is opt-in: `loop.plan-preflight: run` (default `skip`), a scalar or a mapping with `rounds`, the floor's `full-at` thresholds, an optional `classifier` command and dimension overrides. It needs `loop.test-author: separate`. `gates plan tier` computes the plan's tier, light or full, from six signals in code (task lines, named paths, hot surfaces, changed existing requirements, a costly oracle you declare, a hot `blast-radius: high` surface); a classifier may only raise it, and a `Plan tier: light — <reason>` line in the plan is the only way down. `gates plan digest` prints the bounded plan digest a classifier is given, byte for byte. Plan review judges through lenses, ids plus numbered checks shipped in `rules/plan-lenses.md` (`gatedloop.implementability`, `gatedloop.zero-decision`, and the classifier lens `gatedloop.blast-radius`); `gates plan brief` lists the lenses the tier runs, and `gates plan brief --lens <id>` prints one lens's brief: its rules path, the plan's artifacts and each named path with whether it exists at `HEAD`. Without a classifier of your own, the built-in `gatedloop.blast-radius` lens answers, and `gates plan classify` validates and stores its verdict. `gates plan round`, `gates plan record` and `gates plan resume` run the loop: the shim counts the round budget from ledger rows, stalls a loop that spends it, and records each checker's verdict on the exact plan content. `gates plan status` renders that record and the loop's state (green, question, stalled, open, amended), as a PR-body block with `--markdown`. A surface marked `blast-radius: high` (your public contract, say) sends any plan that names a path on it to the full tier.
 
 gatedloop ships no copy of the OpenSpec commands. Those commands are installed and kept current by OpenSpec itself, so they improve without us mirroring them — and when something breaks, the namespace tells you which project to file it against.
 
@@ -175,14 +191,15 @@ gatedloop owns exactly two surfaces — getting a project onto the loop, and run
 | `/gatedloop:tdd-apply` | The loop: branch-per-change, red→green→gate→atomic-commit per task, then verify + live self-check + squash-merge. |
 | `/gatedloop:archive` | Delegates to `/opsx:archive`, then **commits the move** — upstream leaves it in the working tree, and a loop that ends "verified on main" cannot end dirty. |
 | `/gatedloop:merge` | Integrates a finished change for a person: shows the acceptance brief, asks once, runs `gates merge <change>` and reports the step it ended on. `gates merge` does the whole `local-squash-merge` in code — prove the head, squash onto the target's tip, an unscoped `ci` on the merged tree, the merge row, the optional `confirm` gate, archive — and pushes once, only after every step passed. Under `integration.mode: pull-request` it proves the head the same way, pushes the branch, publishes its markers as `gatedloop/*` commit statuses (`gates marker publish`; `gates marker check-remote` verifies one) and opens or updates the PR with the brief as its body, enabling squash auto-merge only where nothing the declared process names stands in the way. After the forge merges it, `gates record-merged <sha>` records the merge and archives the change in one local commit; under `approval.acceptance: self` the same commit records the owner's merge as the acceptance (`gates acceptance attest <change> --merged <pr>` is the same writer by hand). |
-| `test-author` agent | Writes every task's failing tests for a change before any of it is implemented (Sonnet), from the specs, the design, public interfaces and your `tests` rules — never from the implementation. Dispatched once per change by whoever dispatches the implementer; where the plan tags a task `[oracle: <gate>]`, `[oracle: <gate> characterization]` or `[oracle: none]`, the brief tells it so and the handoff refuses a contradiction, so the author never guesses a task's kind. Its tests are locked, so the implementer can only make them pass on the task's oracle gate (`unit` by default) or send one back as a defect. The lock is checked at every commit by the commit hooks, verified again at the merge (`gates merge` step 1 runs `gates tests check --ref` on the head) and at the forge (`gates marker publish tests` posts a `gatedloop/tests` status branch protection can require). |
+| `test-author` agent | Writes every task's failing tests for a change before any of it is implemented (Sonnet), from the specs, the design, public interfaces and your `tests` rules — never from the implementation. Dispatched once per change by whoever dispatches the implementer; where the plan tags a task `[oracle: <gate>]`, `[oracle: <gate> characterization]` or `[oracle: none]`, the brief tells it so and the handoff refuses a contradiction, so the author never guesses a task's kind. A tag may also end `rewrites: <path>` to name the existing tests a task rewrites: the author reads exactly those files, from its brief, and no other existing test, and the authored-set review reads each rewrite's diff (`gates tests show --diff`). Its tests are locked, so the implementer can only make them pass on the task's oracle gate (`unit` by default) or send one back as a defect. The lock is checked at every commit by the commit hooks, verified again at the merge (`gates merge` step 1 runs `gates tests check --ref` on the head) and at the forge (`gates marker publish tests` posts a `gatedloop/tests` status branch protection can require). |
 | `tdd-implementer` agent | Runs the whole loop autonomously (Sonnet), resumable, halts-and-reports on ambiguity, **stops before the merge**. |
 | `merge-runner` agent | The merge for an orchestrator (Sonnet): runs `gates merge <change>` and routes on its exit code; in pull-request mode a PR handed off to the forge is success. On a local squash conflict it syncs the target into the change branch, resolves only a mechanical conflict (both sides added list entries, reordered imports), re-runs the head's gates and retries once; anything that needs a choice between two behaviours halts with cause `other`, naming the paths and both sides. |
 | `convention-review` agent | Fast read-only gate: checks a diff against the rules the change's surfaces select, plus the built-in `gatedloop.test-quality` rule (`rules/loop-rules.md`), which holds every test a diff adds or changes to failing for a real regression at the lowest layer that can observe it. |
+| `plan-review` agent | Reads a plan cold before approval, through one lens per run (Opus): `gatedloop.implementability` (the plan is right about the code) and `gatedloop.zero-decision` (no task leaves a decision to the implementer) report findings cited as `<lens-id> #<n>`, a human's decision marked `question` with its options; `gatedloop.blast-radius` returns only the tier verdict JSON. It starts from `gates plan brief <change> --lens <id>`, reads the plan and only the files the brief names, and never edits. Dispatched by the planner in the plan loop under `loop.plan-preflight: run`. |
 | `schema-review` agent | `convention-review`'s shape applied to a workflow schema instead of a diff: fit, instruction coherence, and whether `gates schema inspect`'s flagged tool names are real coupling or a passing mention — run automatically the moment a new schema is installed. |
 | Epics | A story of several changes: each child names its epic with `x-gatedloop-epic` in its own `.openspec.yaml`, and `gates validate` checks the link. Hooks keep the epic itself from ever being implemented and from being archived before every child is. `gates epics` lists each epic's children with a state derived from the ledger, `gates stats --epic <name>` rolls up their economics, and the session brief shows one line per active epic. |
 | `verify` skill | Spec→acceptance coverage + runs your acceptance suite. |
-| `gates` shim | Deterministically runs your gates/live-checks and computes which rules/probes apply to a diff, and keeps `openspec/config.yaml`'s artifact rules in sync with your conventions source. |
+| `gates` shim | Deterministically runs your gates/live-checks and computes which rules/probes apply to a diff, and keeps `openspec/config.yaml`'s artifact rules in sync with your conventions source. For a plan before approval, `gates plan check` reports what the handoff would refuse after it (tag problems, untagged tasks, rewrites of files absent at the base, and as an advisory that never fails it, a `rewrites:` path that doesn't look like a test; with `--against <ref>`, also each path the plan names that moved since the plan's base), and `gates tests brief --preflight`, `gates tests handoff --dry-run` and `gates tests show --preflight` let the test author work against a git-ignored preflight store, with the handoff's refusals and no ledger row; `gates plan save` snapshots that store onto its own branch, `gatedloop/preflight/<change>` (pushed with the plan branch, deleted by hand once the change is archived), and `gates plan restore` rebuilds it on another machine. |
 
 Alongside, from OpenSpec: `/opsx:explore` (think), `/opsx:propose` (proposal + specs + design + tasks), `/opsx:apply` (walk a task list, ungated — `tdd-apply` is the gated one), `/opsx:sync` (push edited specs back), `/opsx:archive`, plus stores and schemas.
 
@@ -290,7 +307,7 @@ conventions:
 
 ## Requirements
 
-- **OpenSpec, with its Claude Code integration** (`openspec init --tools claude`) — a hard prerequisite, not a variable. This release supports OpenSpec **1.14.3** to **1.14.3**; `gates doctor` warns, without failing, outside that range. The loop consumes four specific things from it, and each has a distinct failure mode when absent:
+- **OpenSpec, with its Claude Code integration** (`openspec init --tools claude`) — a hard prerequisite, not a variable. This release supports OpenSpec **1.14.3** to **1.16.0**; `gates doctor` warns, without failing, outside that range. The loop consumes four specific things from it, and each has a distinct failure mode when absent:
 
   | The loop consumes | Without it |
   |---|---|

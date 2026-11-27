@@ -9,7 +9,7 @@ Make the loop's stopping rule enforceable and give it memory: failed attempts ar
 
 For a task, the shim SHALL count failed attempts from the ledger alone, never from the
 caller's `--attempt`. A failed attempt is a red run, for that task, of its oracle gate or
-of `ci`. It counts only if recorded after the task's first red oracle-gate run since the
+of `ci`, and under `loop.ci-at: ready` also of `unit`, the commit gate there. It counts only if recorded after the task's first red oracle-gate run since the
 later of its latest task start and its latest test placement, and after its latest
 restart. The oracle gate is the gate the plan declares for the task, or `unit` when it
 declares none. Exit 75 SHALL NOT count.
@@ -33,12 +33,34 @@ declares none. Exit 75 SHALL NOT count.
 - **THEN** that run is the task's red run, and later red `integration` or `ci` runs
   count as failed attempts
 
+#### Scenario: An e2e task's commit-gate red under ready
+
+- **WHEN** `loop.ci-at: ready` is declared, task 5.1 is tagged `[oracle: integration]`,
+  its RED `integration` run is recorded, and a later `unit` run for it is red
+- **THEN** that `unit` run counts as a failed attempt
+
+#### Scenario: A unit red under task for an e2e task
+
+- **WHEN** `loop.ci-at` is absent and the same task records a red `unit` run after its
+  RED run
+- **THEN** the count is unchanged, as before
+
+#### Scenario: The full ci at READY is no task's attempt
+
+- **WHEN** `loop.ci-at: ready` is declared, every task is checked in HEAD's `tasks.md`,
+  and `gates run ci` with no `--task` is red on the head
+- **THEN** no task's failed-attempt count changes, and the gate is not refused by the
+  budget
+
 ### Requirement: The attempt cap is enforced
 
 Once a task's failed-attempt count reaches `loop.attempts`, `gates run unit` and `gates
 run ci` for the task SHALL refuse without running the gate, exiting 1 with a message
 naming the budget, the count and the remaining way forward. A run with no task SHALL
-never be budgeted.
+never be budgeted. A run given no `--task` SHALL belong to the latest task started after
+the handoff, unless that task is checked in the change's `tasks.md` at `HEAD`; then the
+run SHALL belong to no task, and its ledger row SHALL record no task. A run given
+`--task` SHALL belong to that task whether or not it is checked.
 
 #### Scenario: The budget is used
 
@@ -56,6 +78,23 @@ never be budgeted.
 
 - **WHEN** `gates run ci` runs with no task given and no task started
 - **THEN** no budget applies and the gate runs
+
+#### Scenario: A red ci on a fully ticked change
+
+- **WHEN** every task of the change is checked at `HEAD`, task 2.2 was the last started
+  and has used its attempts and its restart, and a red `ci` has been recorded since
+- **THEN** a plain `gates run ci` runs the gate, and its ledger row records no task
+
+#### Scenario: An explicit task stays budgeted
+
+- **WHEN** task 2.2 is checked at `HEAD` and its budget is used
+- **THEN** `gates run ci --task 2.2` refuses with exit 1 without running the gate
+
+#### Scenario: A tick not yet committed buys nothing
+
+- **WHEN** the task in flight has used its budget and is checked in the working tree's
+  `tasks.md` but not at `HEAD`
+- **THEN** a plain `gates run ci` is refused as that task's attempt
 
 ### Requirement: Attempt notes are structured ledger rows
 
@@ -80,8 +119,10 @@ oldest first, across restarts.
 
 `gates attempt restart <task>` SHALL refuse unless the working tree is clean at the
 task's last commit, and SHALL refuse once the task's restarts number
-`loop.fresh-restarts`. A task's placed tests SHALL count as clean while each holds
-exactly its placed content, and so SHALL the removal of their holding files. Otherwise it
+`loop.fresh-restarts`. Every placement of the change that is active, or voided only by a `halt`, SHALL count as
+clean while each placed test holds exactly its placed content, whichever task it belongs to, and so SHALL the removal of
+its holding files. An uncommitted append to the change's ledger made only of `usage`,
+`restart` and `halt` rows SHALL count as clean. Otherwise it
 SHALL record a `restart` row, after which the failed-attempt count starts again from
 zero. The implementer SHALL NOT restart itself; restarting is the dispatcher's act, in a
 new agent context.
@@ -113,7 +154,47 @@ new agent context.
 #### Scenario: A placed test edited after placement
 
 - **WHEN** one of task 1.2's placed tests differs from its placed content
-- **THEN** `gates attempt restart 1.2` refuses, naming the path, and records nothing
+- **THEN** `gates attempt restart 1.2` refuses, naming the path and its task, and records nothing
+
+#### Scenario: Two tasks placed together
+
+- **WHEN** tasks 8.1 and 8.2 were placed in one tree, both placements are uncommitted at
+  their placed content, and 8.2 halted `stalled`
+- **THEN** `gates attempt restart 8.2` records the `restart` row, and so does `gates
+  attempt restart 8.1`
+
+#### Scenario: The restarted task places its tests again
+
+- **WHEN** task 8.2 was restarted with its halt-voided placement still at its placed
+  content
+- **THEN** `gates tests place 8.2` records a new placement without its holding files, and
+  8.2 needs a red `unit` run after it
+
+#### Scenario: A defect-voided placement is not clean
+
+- **WHEN** a `test-defect` row voided task 8.1's placement and its placed test is still in
+  the tree
+- **THEN** `gates attempt restart 8.2` refuses, naming that path
+
+#### Scenario: A sibling's placed test edited
+
+- **WHEN** tasks 8.1 and 8.2 were placed together and one of 8.1's placed tests differs
+  from its placed content
+- **THEN** `gates attempt restart 8.2` refuses, naming the path and task 8.1, and records
+  nothing
+
+#### Scenario: Uncommitted bookkeeping rows
+
+- **WHEN** the only difference from the last commit is an append to the change's ledger
+  of `halt`, `restart` and `usage` rows
+- **THEN** `gates attempt restart` treats the tree as clean and records the `restart` row
+
+#### Scenario: A dirty tree's refusal
+
+- **WHEN** a restart refuses on uncommitted work other than placed tests and bookkeeping
+  rows
+- **THEN** the message names the paths and does not tell the agent to discard placed
+  tests
 
 ### Requirement: The budget is declared in the manifest
 

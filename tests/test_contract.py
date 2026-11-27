@@ -118,9 +118,10 @@ def _subcommands(parser: argparse.ArgumentParser, path: str = "") -> dict:
 
 
 def _document_keys() -> dict:
-    """The top-level keys of `gates handoff --json` and `gates stats --json`,
-    from real runs: a plan approved on `main` through `_plan_fixture`, whose
-    attestation leaves a ledger for `stats` to read."""
+    """The top-level keys of `gates handoff --json`, `gates stats --json` and
+    `gates approval check --json`, from real runs: a plan approved on `main`
+    through `_plan_fixture`, whose attestation leaves a ledger for `stats` to
+    read."""
     with tempfile.TemporaryDirectory() as tmp:
         plan = PlanRepo(Path(tmp))
         plan.merge_plan_pr(42, merger="alice")
@@ -131,7 +132,8 @@ def _document_keys() -> dict:
         plan.push_main()
         docs = {}
         for name, args in (("handoff", ("handoff", PLAN, "--json")),
-                           ("stats", ("stats", "--all", "--json"))):
+                           ("stats", ("stats", "--all", "--json")),
+                           ("approval check", ("approval", "check", "--json"))):
             r = plan.gates(*args)
             if r.returncode != 0:
                 raise AssertionError(f"`gates {' '.join(args)}` failed: {r.stdout}{r.stderr}")

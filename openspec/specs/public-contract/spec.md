@@ -12,7 +12,7 @@ The repository SHALL hold `tests/contract.json`, a snapshot of the public surfac
 - exit codes;
 - status contexts;
 - manifest keys;
-- the `handoff` and `stats` document keys;
+- the `handoff`, `stats` and `approval check --json` document keys;
 - ledger fields.
 
 Each subcommand SHALL be marked `public` or `internal`. It is `internal` only when it is listed, with a reason, as invoked solely by bundled hooks or prompts.
@@ -25,7 +25,7 @@ Each subcommand SHALL be marked `public` or `internal`. It is `internal` only wh
 #### Scenario: The snapshot names every listed surface
 
 - **WHEN** `tests/contract.json` is generated
-- **THEN** it holds the reserved exit codes, every `gatedloop/<gate>` context, the top-level keys of `schema/gates.schema.json`, the top-level keys of `gates handoff --json` and `gates stats --json`, the ledger row fields and the row version
+- **THEN** it holds the reserved exit codes, every `gatedloop/<gate>` context, the top-level keys of `schema/gates.schema.json`, the top-level keys of `gates handoff --json`, `gates stats --json` and `gates approval check --json`, the ledger row fields and the row version
 
 ### Requirement: ci fails when the code and the snapshot disagree
 
@@ -85,7 +85,7 @@ The repository SHALL declare a minimum Python version, a supported OpenSpec rang
 
 ### Requirement: ci runs on the declared environment, and a scheduled run watches OpenSpec's latest
 
-The pull-request ci SHALL run `gates run ci` on each supported OS, with the minimum and the latest Python, and with the OpenSpec minimum and highest tested version. A scheduled job SHALL run the same `ci` against OpenSpec's latest release. It SHALL NOT be a required status.
+The pull-request ci SHALL run `gates run ci` on each supported OS, with the minimum and the latest Python, and with the OpenSpec minimum and highest tested version. The OpenSpec minimum SHALL run on every OS and Python leg; the highest tested version, when it differs from the minimum, SHALL run on at least one leg. Only one leg, on the OpenSpec minimum, SHALL publish the `gatedloop/ci` and `gatedloop/tests` statuses. A scheduled job SHALL run the same `ci` against OpenSpec's latest release. It SHALL NOT be a required status.
 
 #### Scenario: A construct the minimum Python lacks
 
@@ -96,6 +96,11 @@ The pull-request ci SHALL run `gates run ci` on each supported OS, with the mini
 
 - **WHEN** a new OpenSpec release changes a JSON shape the shim reads
 - **THEN** the scheduled job fails within a week, while pull-request ci on the declared range stays green
+
+#### Scenario: The highest tested OpenSpec breaks the suite
+
+- **WHEN** a change passes on the OpenSpec minimum but fails `gates run ci` on the highest tested version
+- **THEN** the highest-tested leg fails the workflow run, and it publishes no `gatedloop/ci` or `gatedloop/tests` status
 
 ### Requirement: The contract and its deprecation policy are written down
 

@@ -31,6 +31,21 @@ reference for how a project declares that split, if it has adopted one). The
 unscoped run is still the last word before anything lands — a fast inner loop is a
 shape for the common case, not a replacement for the real gate.
 
+Two declared splits ship in the manifest, both opt-in:
+
+- **`loop.ci-at: ready`** moves the full `ci` from every task commit to READY. A task
+  commit on a change branch is gated on a green `unit` for its staged tree plus the
+  convention review; `gates ledger record-ready` refuses until an unscoped `ci` passes
+  on the head, and the merge runs its full `ci` as before. In the field report behind
+  it (#162), per-task full `ci` runs were about 70 % of `ci` time, and `ci` is
+  serialized machine-wide.
+- **`loop.ci-scope: union`** keeps `ci` per task but lets a diff spanning several
+  surfaces run the union of their `ci` overrides when every hot surface declares one,
+  instead of the global `ci`. Under `ready` it matters only for commits that still run
+  `ci`.
+
+Neither changes §4: the full, unscoped `ci` still gates the merge.
+
 ## 3. Key expensive builds on their inputs
 
 A build or compile step that re-runs from scratch on every gate invocation pays full
