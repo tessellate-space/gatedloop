@@ -132,6 +132,17 @@ locked and run red like any authored tests.
 - **WHEN** the handoff runs without `ADOPTED.json`
 - **THEN** its row has `preflight_tree` and `adopted` set to `null`
 
+#### Scenario: Adopted tasks in task-list order
+
+- **WHEN** a full handoff reads `ADOPTED.json` listing 2.1 and 1.1, and both still match
+- **THEN** its row's `adopted` is `["1.1", "2.1"]`
+
+#### Scenario: Adoption read but nothing still matches
+
+- **WHEN** a full handoff reads `ADOPTED.json` and no task it lists still matches the
+  snapshot
+- **THEN** its row has `preflight_tree` set to the file's tree and `adopted` set to `[]`
+
 #### Scenario: Any other row kind
 
 - **WHEN** a row other than a `tests-handoff` row is appended, such as a review row
@@ -153,8 +164,9 @@ SHALL cover the stale and present tasks, and not the adopted ones.
 
 #### Scenario: Nothing stale
 
-- **WHEN** adoption reports no stale task
-- **THEN** the loop hands off without dispatching the test author
+- **WHEN** adoption reports no stale task and no present task
+- **THEN** the loop runs `gates tests handoff` itself without dispatching the test author,
+  and skips the authored-set review
 
 #### Scenario: Some tasks stale
 
@@ -179,9 +191,25 @@ SHALL cover the stale and present tasks, and not the adopted ones.
 
 #### Scenario: The orchestrator with a bound snapshot
 
-- **WHEN** the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree`
-- **THEN** the orchestrator does not dispatch the test author at its step 3.1, and the
-  lane adopts, authors the stale tasks and hands off
+- **WHEN** the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree` and the
+  project does not declare `loop.test-author: inline`
+- **THEN** the orchestrator opens the lane first, runs `gates tests adopt` in the lane
+  worktree, dispatches the test author naming only the stale tasks (or runs the handoff
+  itself when none is stale), commits the authoring commit there, and dispatches the
+  implementer only once the handoff is recorded
+
+#### Scenario: The orchestrator's adoption refuses
+
+- **WHEN** the orchestrator runs `gates tests adopt` in a newly opened lane and it exits 1
+- **THEN** the orchestrator removes the lane's worktree and branch, reports adopt's
+  message, and dispatches nothing for that change
+
+#### Scenario: The orchestrator under inline authoring
+
+- **WHEN** the approved `.openspec.yaml` carries `x-gatedloop-preflight-tree` and the
+  project declares `loop.test-author: inline`
+- **THEN** the orchestrator opens the lane and dispatches the implementer as today, and
+  the lane adopts in §5-inline
 
 #### Scenario: The orchestrator without a bound snapshot
 
