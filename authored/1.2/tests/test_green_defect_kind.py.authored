@@ -78,6 +78,8 @@ def _repo(tmp):
     other.write_text("def test_more():\n    assert more() == 3\n")
     r = _gates(root, "tests", "handoff", CHANGE)
     assert r.returncode == 0, r.stdout + r.stderr
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "author tests")
     return root
 
 
@@ -97,6 +99,8 @@ def _ready_for_green(root, task="1.1"):
     assert placed.returncode == 0, placed.stdout + placed.stderr
     ran = _gates(root, "run", "unit", "--task", task, "--attempt", "1")
     assert ran.returncode == 0, ran.stdout + ran.stderr
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"placed {task}")
 
 
 GREEN = "its placed tests passed before any implementation"

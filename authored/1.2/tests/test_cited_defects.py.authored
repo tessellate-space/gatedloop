@@ -1,0 +1,215 @@
+"""Cited test defects (change `checkable-disputes`, design D2, D5, D6).
+
+A new handoff row carries `"disputes": "cited"`. Under such a governing
+handoff, `gates tests defect --kind setup|assertion` needs at least one
+repeatable `--cite`; every citation given is resolved under any handoff (an
+unresolved one refused, named) and stored on the row as `cites`; and `--cite`
+with `--kind green` is refused under any handoff, because a green defect's
+evidence is its recorded run. A task governed by an older handoff (a row with
+no `disputes`) keeps accepting citation-free defects until it is handed off
+again.
+
+Real git through `_dispute_fixture.DisputeRepo`, driving the shim as the loop
+does and reading the ledger back: the governing handoff is a ledger fact
+joined to the worktree, so the black-box run is the layer that can see it.
+
+Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
+"""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from _dispute_fixture import SPEC_CITE, DisputeRepo, authored_repo
+from _lock_fixture import TEST_REL
+
+
+class TestTheHandoffIsStamped(unittest.TestCase):
+    """Regression guarded: a new handoff written without `disputes`, so
+    every task silently keeps the old, citation-free rules."""
+
+    def test_a_new_handoff_row_carries_disputes_cited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            self.assertEqual([r["disputes"] for r in repo.rows_of("tests-handoff")], ["cited"])
+
+
+class TestACitationIsRequired(unittest.TestCase):
+    """Regressions guarded: an evidence-free setup or assertion defect
+    accepted under a cited handoff; a citation to nothing accepted; the
+    citations dropped instead of stored as given."""
+
+    def test_a_defect_with_no_citation_is_refused(self):
+        for kind in ("setup", "assertion"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                repo = authored_repo(tmp)
+
+                r = repo.defect("1.1", kind, "wrong status code")
+
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("--cite", r.stderr)
+                self.assertIn("spec:", r.stderr)  # the accepted forms are named
+                self.assertEqual(repo.rows_of("test-defect"), [])
+
+    def test_unresolved_citations_are_refused_naming_each(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+
+            r = repo.defect("1.1", "assertion", "wrong status code",
+                            "shared.txt:900", "shared.txt:2", "shared.txt:3-1")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("shared.txt:900", r.stderr)
+            self.assertIn("shared.txt:3-1", r.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+    def test_a_placed_test_a_range_and_a_spec_scenario_are_recorded_as_given(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.place("1.1")
+            repo.red("1.1")
+            cites = [f"{TEST_REL}:2", "shared.txt:1-3", SPEC_CITE]
+
+            r = repo.defect("1.1", "assertion", "expects the wrong value", *cites)
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            (row,) = repo.rows_of("test-defect")
+            self.assertEqual((row["task"], row["kind"], row["cites"]), ("1.1", "assertion", cites))
+
+    def test_a_green_defect_takes_no_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+
+            r = repo.defect("1.1", "green", "passed before implementation", "shared.txt")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--cite", r.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+
+class TestCheckOrder(unittest.TestCase):
+    """Design D6 fixes the order and reports only the first failing check.
+    Regressions guarded: a new check run ahead of today's, so a refusal
+    names the wrong fix (add `--cite`) where the real one is a detail, a
+    handoff or a halt; and the green cap reported over a `--cite` that is
+    refused for any green defect."""
+
+    def test_a_missing_detail_is_reported_before_a_missing_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+
+            r = repo.defect("1.1", "assertion", "  ")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--detail", r.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+    def test_a_missing_handoff_is_reported_before_a_missing_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = DisputeRepo(Path(tmp))
+            repo.start_change(lane=False)
+
+            r = repo.defect("1.1", "assertion", "wrong status code")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("handoff", r.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+    def test_the_assertion_cap_is_reported_before_a_missing_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            for n in (1, 2):
+                r = repo.defect("1.1", "assertion", f"position {n}", "shared.txt")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+            r = repo.defect("1.1", "assertion", "position 3")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("oracle-conflict", r.stderr)
+            self.assertEqual(len(repo.rows_of("test-defect")), 2)
+
+    def test_a_cited_green_defect_is_reported_before_the_green_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.place("1.1")
+            repo.unit("1.1", passing=True)
+            first = repo.defect("1.1", "green", "passed before implementation")
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+
+            r = repo.defect("1.1", "green", "still green", "shared.txt")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--cite", r.stderr)
+            self.assertNotIn("oracle-conflict", r.stderr)
+            self.assertEqual(len(repo.rows_of("test-defect")), 1)
+
+
+class TestAnEarlierHandoffKeepsItsRules(unittest.TestCase):
+    """Design D5: the citation requirement keys on the task's governing
+    handoff. Regressions guarded: an upgrade breaking an in-flight change's
+    defects; a re-handoff of one task not taking the new rules; a re-handoff
+    of one task changing another task's rules."""
+
+    def test_a_citation_free_defect_is_recorded_as_before(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.predate_handoffs()
+
+            r = repo.defect("1.1", "assertion", "wrong status code")
+
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            (row,) = repo.rows_of("test-defect")
+            self.assertEqual((row["task"], row["detail"], row["cites"]),
+                             ("1.1", "wrong status code", None))
+
+    def test_a_task_re_handed_off_after_the_upgrade_takes_the_new_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.predate_handoffs()
+            self.assertEqual(repo.handoff("--task", "1.1").returncode, 0)
+
+            refused = repo.defect("1.1", "assertion", "wrong status code")
+            other = repo.defect("1.2", "assertion", "wrong total")
+
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertIn("--cite", refused.stderr)
+            self.assertEqual(other.returncode, 0, other.stdout + other.stderr)
+            self.assertEqual([r["task"] for r in repo.rows_of("test-defect")], ["1.2"])
+
+
+class TestCitationsUnderAnEarlierHandoffAreStillChecked(unittest.TestCase):
+    """Regressions guarded: a bad citation stored because the task's
+    handoff predates the change, a good one dropped, or a green defect's
+    citation accepted there."""
+
+    def test_an_unresolved_citation_is_refused_and_a_resolved_one_stored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.predate_handoffs()
+
+            bad = repo.defect("1.1", "assertion", "wrong status code", "src/missing.py")
+            self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+            self.assertIn("src/missing.py", bad.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+            # `TEST_REL` holds the thing's existing tests, committed before authoring.
+            good = repo.defect("1.1", "assertion", "wrong status code", f"{TEST_REL}:1")
+            self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
+            (row,) = repo.rows_of("test-defect")
+            self.assertEqual(row["cites"], [f"{TEST_REL}:1"])
+
+    def test_a_green_defect_takes_no_citation_either(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.predate_handoffs()
+
+            r = repo.defect("1.1", "green", "passed before implementation", "shared.txt")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertEqual(repo.rows_of("test-defect"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

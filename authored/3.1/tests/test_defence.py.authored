@@ -1,178 +1,93 @@
 """A defence is recorded and cannot change the tests (change
-`checkable-disputes`, design D3 and D6; the defence requirement).
+`checkable-disputes`, design D1, D3 and D6; the defence requirement).
 
 `gates tests handoff <change> --task <N.M> --defend <why> --cite <c>...`
 hands the task's tests off unchanged and records why as a `test-defence`
-row directly after the handoff row. It is refused, writing nothing, without
-`--task`, without a `--cite`, with `--dry-run`, with a `--cite` it was not
-paired with `--defend`, with a citation that does not resolve, when the held
-tests differ from the previous handoff, and when no defect follows that
-handoff.
+row directly after the handoff row. It is refused, exiting 1 and writing
+nothing, for `--cite` without `--defend` and `--defend` without `--task`,
+with `--dry-run` or without a `--cite` (before the holding area is read);
+then when the held tests differ from the task's previous handoff entry,
+when no defect for the task follows its previous governing handoff, and
+when a citation does not resolve. None of these checks is keyed on the
+handoff's `disputes`: the flags are new, so they apply under any handoff.
+A placed task is defended by first rewriting its held copy byte-identical to
+the placed file.
 
-Real git in throwaway repositories, driving the shim as the loop does and
-reading the ledger back.
+Real git through `_dispute_fixture.DisputeRepo`, driving the shim as the
+loop does and reading the ledger back.
 
 Stdlib only, per `zero-dep-shim`. Run with: python3 -m unittest discover -s tests
 """
 
-import json
-import os
-import subprocess
-import sys
+from __future__ import annotations
+
+import shutil
 import tempfile
 import unittest
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-GATES_SHIM = REPO / "bin" / "gates"
+from _dispute_fixture import HOLDING, SPEC_CITE, authored_repo, held_rel
+from _lock_fixture import TEST_REL, TEST_V2
 
-CHANGE = "demo-change"
-MANIFEST = 'gatesVersion: 1\ngates:\n  ci: "true"\n  unit: "false"\n'
-HELD = f".gatedloop/authored/{CHANGE}/1.1/tests/test_calc.py.authored"
-TEST_V1 = "def test_add():\n    assert add(2, 3) == 5\n"
-TEST_V2 = TEST_V1 + "\ndef test_add_negative():\n    assert add(-2, 1) == -1\n"
-SPEC = "spec:orders#Duplicate order is rejected"
-WHY = "the spec requires 409"
-MAIN = """\
-# Orders
-
-### Requirement: Duplicates are rejected
-
-#### Scenario: Duplicate order is rejected
-- **WHEN** the same order is submitted twice
-- **THEN** the second is rejected with 409
-"""
-
-
-def _env():
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.pop("CLAUDE_PROJECT_DIR", None)
-    env["CLAUDECODE"] = "1"
-    return env
-
-
-def _git(cwd, *args):
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                          text=True, env=_env())
-
-
-def _gates(root, *args):
-    return subprocess.run([sys.executable, str(GATES_SHIM), *args], cwd=root,
-                          capture_output=True, text=True, env=_env())
-
-
-def _rows(root):
-    p = root / ".gatedloop" / "runs" / f"{CHANGE}.jsonl"
-    if not p.exists():
-        return []
-    return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
-
-
-def _hold(root, content, task="1.1", name="test_calc"):
-    p = root / ".gatedloop" / "authored" / CHANGE / task / "tests" / f"{name}.py.authored"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content)
-
-
-def _repo(tmp):
-    """Tasks 1.1 and 1.2 handed off by the real shim, then a defect on 1.1."""
-    root = Path(tmp)
-    _git(root, "init", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "T")
-    (root / ".gates.yaml").write_text(MANIFEST)
-    change_dir = root / "openspec" / "changes" / CHANGE
-    change_dir.mkdir(parents=True)
-    (change_dir / ".openspec.yaml").write_text("schema: spec-driven\n")
-    main = root / "openspec" / "specs" / "orders"
-    main.mkdir(parents=True)
-    (main / "spec.md").write_text(MAIN)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "init")
-    _git(root, "checkout", "-b", CHANGE)
-    _hold(root, TEST_V1)
-    _hold(root, TEST_V1, task="1.2", name="test_other")
-    assert _gates(root, "tests", "handoff", CHANGE).returncode == 0
-    return root
-
-
-def _defect(root, task="1.1", detail="expects 6"):
-    r = _gates(root, "tests", "defect", task, "--kind", "assertion", "--detail", detail,
-               "--cite", HELD if task == "1.1" else ".gates.yaml")
-    assert r.returncode == 0, r.stdout + r.stderr
+WHY = "the spec requires the thing to be 1"
+HELD = held_rel("1.1")
 
 
 def _disputed(tmp):
-    root = _repo(tmp)
-    _defect(root)
-    return root
+    """Every task handed off, then one assertion defect on 1.1."""
+    repo = authored_repo(tmp)
+    r = repo.defect("1.1", "assertion", "expects 2", HELD)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return repo
 
 
-def _defend(root, *extra, task="1.1"):
-    return _gates(root, "tests", "handoff", CHANGE, "--task", task, *extra)
-
-
-def _defences(root):
-    return [r for r in _rows(root) if r["gate"] == "test-defence"]
+def _defend(repo, *extra, task="1.1"):
+    return repo.handoff("--task", task, *extra)
 
 
 class TestADefenceIsRecorded(unittest.TestCase):
     """Regression guarded: the author's answer to a defect living only in a
     report to the dispatcher, so the human at a halt sees one side."""
 
-    def test_the_defence_row_carries_task_reason_and_citations(self):
+    def test_the_defence_row_follows_its_handoff_row_with_reason_and_citations(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
+            repo = _disputed(tmp)
+            before = repo.rows_of("tests-handoff")[-1]["tests"]
+            cites = [SPEC_CITE, f"{HELD}:1"]  # a spec scenario and the held copy
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC, "--cite", HELD)
+            r = _defend(repo, "--defend", WHY, "--cite", cites[0], "--cite", cites[1])
 
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            (row,) = _defences(root)
-            self.assertEqual((row["task"], row["detail"]), ("1.1", WHY))
-            self.assertEqual(row["cites"], [SPEC, HELD])
+            handoff, defence = repo.rows()[-2:]
+            self.assertEqual((handoff["gate"], handoff["task"]), ("tests-handoff", "1.1"))
+            self.assertEqual(handoff["tests"], before)  # handed off unchanged
+            self.assertEqual((defence["gate"], defence["task"], defence["detail"], defence["cites"]),
+                             ("test-defence", "1.1", WHY, cites))
 
-    def test_the_defence_row_directly_follows_the_handoff_row(self):
+    def test_a_placed_task_is_defended_from_its_restored_held_copy(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
+            repo = authored_repo(tmp)
+            repo.place("1.1")
+            repo.red("1.1")
+            d = repo.defect("1.1", "assertion", "expects 2", f"{TEST_REL}:2")
+            self.assertEqual(d.returncode, 0, d.stdout + d.stderr)
+            repo.restore_held("1.1", (repo.lane / TEST_REL).read_text())
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC)
+            r = _defend(repo, "--defend", WHY, "--cite", f"{HELD}:1")
 
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            rows = _rows(root)
-            self.assertEqual([x["gate"] for x in rows[-2:]], ["tests-handoff", "test-defence"])
-            self.assertEqual(rows[-2]["task"], "1.1")
-            self.assertEqual(rows[-2]["disputes"], "cited")
-
-    def test_the_held_tests_are_handed_off_unchanged(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = [x for x in _rows(root) if x["gate"] == "tests-handoff"][-1]["tests"]
-
-            self.assertEqual(_defend(root, "--defend", WHY, "--cite", SPEC).returncode, 0)
-
-            after = [x for x in _rows(root) if x["gate"] == "tests-handoff"][-1]["tests"]
-            self.assertEqual(before, after)
-
-    def test_a_defence_answers_once(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            self.assertEqual(_defend(root, "--defend", WHY, "--cite", SPEC).returncode, 0)
-
-            again = _defend(root, "--defend", "still so", "--cite", SPEC)
-
-            self.assertEqual(again.returncode, 1, again.stdout)
-            self.assertEqual(len(_defences(root)), 1)
+            self.assertEqual([x["detail"] for x in repo.rows_of("test-defence")], [WHY])
 
     def test_a_new_defect_can_be_defended_again(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            self.assertEqual(_defend(root, "--defend", WHY, "--cite", SPEC).returncode, 0)
-            _defect(root, detail="expects 7")
+            repo = _disputed(tmp)
+            self.assertEqual(_defend(repo, "--defend", WHY, "--cite", SPEC_CITE).returncode, 0)
+            d = repo.defect("1.1", "assertion", "expects 3", HELD)
+            self.assertEqual(d.returncode, 0, d.stdout + d.stderr)
 
-            again = _defend(root, "--defend", "the same answer", "--cite", SPEC)
+            again = _defend(repo, "--defend", "the same answer", "--cite", SPEC_CITE)
 
             self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
-            self.assertEqual(len(_defences(root)), 2)
+            self.assertEqual(len(repo.rows_of("test-defence")), 2)
 
 
 class TestADefenceThatCannotBeRecorded(unittest.TestCase):
@@ -180,100 +95,143 @@ class TestADefenceThatCannotBeRecorded(unittest.TestCase):
     answers nothing, that points at no evidence, or that a dry run lets
     through. Each is refused with exit 1 and writes nothing."""
 
-    def _assert_refused(self, root, result, before):
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertEqual(_defences(root), [])
-        self.assertEqual(len(_rows(root)), before)
+    def _assert_refused(self, repo, result, rows_before):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(repo.rows_of("test-defence"), [])
+        self.assertEqual(len(repo.rows()), rows_before)
 
     def test_changed_tests_are_a_revision_not_a_defence(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
-            _hold(root, TEST_V2)
+            repo = _disputed(tmp)
+            before = len(repo.rows())
+            repo.write(HELD, TEST_V2)
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC)
+            r = _defend(repo, "--defend", WHY, "--cite", SPEC_CITE)
 
-            self._assert_refused(root, r, before)
+            self._assert_refused(repo, r, before)
             self.assertIn("revision", r.stderr)
 
-    def test_a_defence_with_no_defect_to_answer(self):
+    def test_changed_tests_are_refused_under_an_earlier_handoff_too(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _repo(tmp)
-            before = len(_rows(root))
+            repo = authored_repo(tmp)
+            repo.predate_handoffs()
+            d = repo.defect("1.1", "assertion", "expects 2")
+            self.assertEqual(d.returncode, 0, d.stdout + d.stderr)
+            before = len(repo.rows())
+            repo.write(HELD, TEST_V2)
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC)
+            r = _defend(repo, "--defend", WHY, "--cite", SPEC_CITE)
 
-            self._assert_refused(root, r, before)
+            self._assert_refused(repo, r, before)
+            self.assertIn("revision", r.stderr)
 
-    def test_a_defect_on_another_task_is_not_an_answerable_defect(self):
+    def test_nothing_to_answer(self):
+        cases = {
+            "no defect at all": lambda repo: None,
+            "a defect on another task": lambda repo: repo.defect("1.2", "assertion", "x", HELD),
+            "a defect answered by a revision since": lambda repo: (
+                repo.defect("1.1", "assertion", "x", HELD),
+                repo.write(HELD, TEST_V2),
+                repo.handoff("--task", "1.1"),
+            ),
+        }
+        for name, arrange in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                repo = authored_repo(tmp)
+                arrange(repo)
+                before = len(repo.rows())
+
+                r = _defend(repo, "--defend", WHY, "--cite", SPEC_CITE)
+
+                self._assert_refused(repo, r, before)
+
+    def test_a_defence_answers_once(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
+            repo = _disputed(tmp)
+            self.assertEqual(_defend(repo, "--defend", WHY, "--cite", SPEC_CITE).returncode, 0)
+            before = len(repo.rows())
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC, task="1.2")
+            again = _defend(repo, "--defend", "still so", "--cite", SPEC_CITE)
 
-            self._assert_refused(root, r, before)
+            self.assertEqual(again.returncode, 1, again.stdout + again.stderr)
+            self.assertEqual(len(repo.rows()), before)
+            self.assertEqual(len(repo.rows_of("test-defence")), 1)
 
-    def test_a_defect_before_the_latest_handoff_is_already_answered(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            _hold(root, TEST_V2)
-            self.assertEqual(_gates(root, "tests", "handoff", CHANGE, "--task", "1.1").returncode, 0)
-            before = len(_rows(root))
+    def test_the_flags_must_come_together(self):
+        cases = [
+            # (arguments to `gates tests handoff <change>`, the flag the refusal names)
+            (("--defend", WHY, "--cite", SPEC_CITE), "--task"),
+            (("--task", "1.1", "--defend", WHY), "--cite"),
+            (("--task", "1.1", "--cite", SPEC_CITE), "--defend"),
+        ]
+        for args, named in cases:
+            with self.subTest(args=args), tempfile.TemporaryDirectory() as tmp:
+                repo = _disputed(tmp)
+                before = len(repo.rows())
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC)
+                r = repo.handoff(*args)
 
-            self._assert_refused(root, r, before)
-
-    def test_defend_without_a_task(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
-
-            r = _gates(root, "tests", "handoff", CHANGE, "--defend", WHY, "--cite", SPEC)
-
-            self._assert_refused(root, r, before)
-            self.assertIn("--task", r.stderr)
-
-    def test_defend_without_a_citation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
-
-            r = _defend(root, "--defend", WHY)
-
-            self._assert_refused(root, r, before)
-            self.assertIn("--cite", r.stderr)
+                self._assert_refused(repo, r, before)
+                self.assertIn(named, r.stderr)
 
     def test_a_dry_run_cannot_defend(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
+            repo = _disputed(tmp)
+            before = len(repo.rows())
 
-            r = _defend(root, "--defend", WHY, "--cite", SPEC, "--dry-run")
+            r = _defend(repo, "--defend", WHY, "--cite", SPEC_CITE, "--dry-run")
 
-            self._assert_refused(root, r, before)
+            self._assert_refused(repo, r, before)
             self.assertIn("records nothing", r.stderr)
-
-    def test_a_citation_without_a_defence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
-
-            r = _defend(root, "--cite", SPEC)
-
-            self._assert_refused(root, r, before)
 
     def test_an_unresolved_citation_is_named(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = _disputed(tmp)
-            before = len(_rows(root))
+            repo = _disputed(tmp)
+            before = len(repo.rows())
 
-            r = _defend(root, "--defend", WHY, "--cite", "spec:orders#No such scenario",
-                        "--cite", SPEC)
+            r = _defend(repo, "--defend", WHY, "--cite", "src/missing.py", "--cite", SPEC_CITE)
 
-            self._assert_refused(root, r, before)
-            self.assertIn("spec:orders#No such scenario", r.stderr)
+            self._assert_refused(repo, r, before)
+            self.assertIn("src/missing.py", r.stderr)
+
+
+class TestCheckOrder(unittest.TestCase):
+    """Design D6 fixes the order and reports only the first failing check.
+    Regressions guarded: a flag mistake reported as a holding-area problem;
+    changed tests reported as "nothing to answer", hiding that they are a
+    revision; and a citation complaint where the defence answers nothing."""
+
+    def test_the_flag_refusal_comes_before_the_holding_area_is_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _disputed(tmp)
+            shutil.rmtree(repo.lane / HOLDING / "1.1")  # today's handoff would refuse this
+            before = len(repo.rows())
+
+            r = repo.handoff("--task", "1.1", "--cite", SPEC_CITE)
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--defend", r.stderr)
+            self.assertEqual(len(repo.rows()), before)
+
+    def test_changed_tests_are_reported_before_a_missing_defect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+            repo.write(HELD, TEST_V2)
+
+            r = _defend(repo, "--defend", WHY, "--cite", SPEC_CITE)
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("revision", r.stderr)
+
+    def test_a_missing_defect_is_reported_before_an_unresolved_citation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = authored_repo(tmp)
+
+            r = _defend(repo, "--defend", WHY, "--cite", "src/missing.py")
+
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertNotIn("src/missing.py", r.stderr)
+            self.assertEqual(repo.rows_of("test-defence"), [])
 
 
 if __name__ == "__main__":

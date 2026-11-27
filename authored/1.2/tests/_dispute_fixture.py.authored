@@ -1,0 +1,102 @@
+"""A change branch with authored tests, for the tests of change
+`checkable-disputes` (cited defects, green evidence, the recorded defence and
+the exchange in `gates tests show`).
+
+`DisputeRepo` is `_lock_fixture.LockRepo` (change `add-thing`, tasks 1.1 and
+1.2 placing `TEST_REL`, 1.3 behaviour-free) with a `unit` gate a test can
+switch: red unless `.unit-pass` exists, an untracked file the repository
+ignores. So one repository records the red run of a placement and, when a
+test asks, the passing run a `green` defect needs. Its helpers read the
+ledger back and rewrite the handoff rows as a shim from before this change
+wrote them (no `disputes` key), so the governing handoff of a task predates
+the change.
+
+Shared here so no test file copies it (`gatedloop.test-quality` item 8).
+Stdlib only, per `zero-dep-shim`. Not a test module (no `test` prefix).
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+from _lock_fixture import TEST_REL, TEST_V1, LockRepo
+from _merge_fixture import CHANGE, LEDGER_REL, SCENARIO_TITLE, MergeRepo
+
+UNIT_SWITCH = '  unit: "test -f .unit-pass"\n'
+PASS_FLAG = ".unit-pass"
+
+# The fixture change's own delta scenario, and a held copy's full path.
+SPEC_CITE = f"spec:cap#{SCENARIO_TITLE}"
+HOLDING = f".gatedloop/authored/{CHANGE}"
+
+
+def held_rel(task: str, rel: str = TEST_REL) -> str:
+    return f"{HOLDING}/{task}/{rel}.authored"
+
+
+class DisputeRepo(LockRepo):
+    def __init__(self, tmp: Path, manifest_extra: str = ""):
+        MergeRepo.__init__(self, tmp, manifest_extra=UNIT_SWITCH + manifest_extra)
+        exclude = self.primary / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text(PASS_FLAG + "\n")
+
+    # ---- the loop's steps ----------------------------------------------
+
+    def unit(self, task: str, passing: bool) -> subprocess.CompletedProcess:
+        """One run of `unit` for the task, passing or failing as asked."""
+        flag = self.lane / PASS_FLAG
+        if passing:
+            flag.write_text("")
+        elif flag.exists():
+            flag.unlink()
+        r = self.gates("run", "unit", "--task", task, "--attempt", "1", cwd=self.lane)
+        if (r.returncode == 0) != passing:
+            raise AssertionError(f"fixture unit run for {task} was not as asked: {r.stdout}{r.stderr}")
+        if flag.exists():
+            flag.unlink()
+        return r
+
+    def defect(self, task: str, kind: str, detail: str, *cites: str) -> subprocess.CompletedProcess:
+        """`gates tests defect`, one `--cite` per citation given."""
+        args = ["tests", "defect", task, "--kind", kind, "--detail", detail]
+        for c in cites:
+            args += ["--cite", c]
+        return self.gates(*args, cwd=self.lane)
+
+    def handoff(self, *extra: str) -> subprocess.CompletedProcess:
+        return self.gates("tests", "handoff", CHANGE, *extra, cwd=self.lane)
+
+    def restore_held(self, task: str, content: str = TEST_V1) -> None:
+        """Write a task's held copy back after its placement removed it."""
+        self.write(held_rel(task), content)
+
+    def predate_handoffs(self) -> None:
+        """Rewrite every handoff row so far as an older shim wrote it."""
+        rows = self.rows()
+        for r in rows:
+            if r.get("gate") == "tests-handoff":
+                r.pop("disputes", None)
+        (self.lane / LEDGER_REL).write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    # ---- reading ---------------------------------------------------------
+
+    def rows(self) -> list:
+        p = self.lane / LEDGER_REL
+        if not p.exists():
+            return []
+        return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+
+    def rows_of(self, gate: str) -> list:
+        return [r for r in self.rows() if r.get("gate") == gate]
+
+
+def authored_repo(tmp) -> DisputeRepo:
+    """A `DisputeRepo` on its change branch (no lane), every task held and
+    handed off by the real shim, the authoring committed."""
+    repo = DisputeRepo(Path(tmp))
+    repo.start_change(lane=False)
+    repo.author()
+    return repo
