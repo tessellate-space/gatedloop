@@ -146,22 +146,37 @@ For a preserve task in flight, `gates tests check` SHALL fail unless a run of th
 
 ### Requirement: The preserve conditions hold at any commit
 
-`gates tests check --ref <commit>` SHALL apply both preserve conditions to every preserve task that is checked at that commit. It SHALL use the tree of the commit that checks the task in `tasks.md`, the task's latest `task-start` tree before that commit, and the change's ledger as that commit carries it.
+`gates tests check --ref <commit>` SHALL judge, from commits only, every preserve task that is checked at that commit, at the commit C that ticks it in `tasks.md`. The test-path condition SHALL compare C's tree with the tree of the last earlier commit that ticks another task, or the branch's first commit's parent. The green-run condition SHALL accept a passing run of the task's gate for that task, recorded after its latest `task-start` and carried by C's ledger, without comparing trees.
 
 #### Scenario: A test edited past the commit hooks
 
-- **WHEN** the commit that ticks preserve task 2.1 changed a test path from 2.1's `task-start` tree
+- **WHEN** the commit that ticks preserve task 2.1 changed a test path from the last earlier commit that ticks another task
 - **THEN** `gates tests check --ref <head>` fails, naming the path, 2.1 and that commit
 
 #### Scenario: A clean refactor at the head
 
-- **WHEN** every preserve task's ticking commit changed no test path and has its green run on that commit's tree
+- **WHEN** every preserve task's ticking commit changed no test path and carries a passing row of the task's gate after its `task-start`
 - **THEN** the check passes for those tasks
 
 #### Scenario: A later task changes the same test
 
 - **WHEN** preserve task 2.1's ticking commit changed no test path, and the later task 3.1 placed new content at a test path 2.1 kept
 - **THEN** `gates tests check --ref <head>` holds for 2.1, because each preserve task is judged at its own ticking commit
+
+#### Scenario: A green run at the forge
+
+- **WHEN** a fresh clone holds only the branch's commits, and C carries a passing `unit` row for preserve task 2.1 after 2.1's `task-start`
+- **THEN** the green-run condition holds for 2.1 under `--ref`, although no recorded tree can be read there
+
+#### Scenario: No green run at the ticking commit
+
+- **WHEN** C carries no passing `unit` row for preserve task 2.1 after 2.1's `task-start`
+- **THEN** `gates tests check --ref <head>` fails, naming `unit`, 2.1 and C
+
+#### Scenario: A change with no preserve task
+
+- **WHEN** a change's `tasks.md` has no preserve task at the commit
+- **THEN** `gates tests check --ref <commit>` writes the same bytes to stdout and stderr, and exits with the same code, as 0.13.0 does on the same commit, so step 1 of `gates merge` is unchanged for that change
 
 #### Scenario: A preserve task not yet ticked
 

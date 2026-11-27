@@ -12,7 +12,7 @@ See proposal.md, Why. Five facts in the shim at the base shape the approach:
 
 ## Goals / Non-Goals
 
-**Goals:** a refactor task can declare in the plan that it preserves behaviour. The lock then makes that claim checkable at the commit, at the merge head and at the forge. It needs no configuration beyond the tag.
+**Goals:** a refactor task can declare in the plan that it preserves behaviour. The lock then makes that claim checkable at the commit, at the merge head and at the forge, exactly at the commit and by gate and task under `--ref` (D5). It needs no configuration beyond the tag.
 
 **Non-Goals:**
 - locking pre-existing tests for tasks that are not tagged `preserve`. That would change the meaning of every existing tag and is not opt-in;
@@ -24,7 +24,7 @@ See proposal.md, Why. Five facts in the shim at the base shape the approach:
 
 ### D1. `preserve` is a modifier word in the tag
 
-Syntax: `[oracle: <gate> preserve]`. It takes the second-word slot that `characterization` uses, so the two cannot be combined. A refactor that needs green-first guards puts them in an earlier task. `preserve` cannot carry `rewrites:`. The parser reports that combination with its own reason, "a task that preserves every test rewrites none", as it does for `none rewrites:`. `none preserve` is malformed, because `none` takes no second word.
+Syntax: `[oracle: <gate> preserve]`. It takes the second-word slot that `characterization` uses, so the two cannot be combined. A refactor that needs green-first guards puts them in an earlier task. `preserve` cannot carry `rewrites:`. The parser reports that combination with its own reason, "a task that preserves every test rewrites none", as it does for `none rewrites:`. `none preserve` is malformed, because `none` takes no second word. `preserve` is a modifier only in the second slot: a one-word `[oracle: preserve]` still names a gate called `preserve`, as it does today, so no tag that parses today parses differently.
 
 The parsed oracle gains `"preserve": True`, and only when the modifier is present, so a parsed tag without it compares equal to the same tag before this change. `_oracle_label` renders `<gate> preserve`. Because the digest is built from the label, a plan without the modifier hashes exactly as before, and a modifier added or dropped on the target voids `check-implement` until it is re-attested. The drift check compares whole oracles, so a modifier added on the change branch is refused at the handoff, at the commit and under `--ref`. `ORACLE_TAG_SYNTAX` and `NON_ORACLE_GATES` apply unchanged, so a preserve task's gate cannot be `ci`.
 
@@ -69,21 +69,26 @@ A preserve task with no `task-start` row cannot be in flight: `_current_task_aft
 
 Existing conditions are unchanged. A preserve task's placement is empty, so conditions 1 to 3 have nothing of its own to check. Condition 1 still pins every path an earlier task placed.
 
-### D5. `--ref` checks each preserve task at the commit that ticks it
+### D5. `--ref` checks each preserve task at the commit that ticks it, from commits only
 
-**Open question Q1 (raised by plan review, `gatedloop.implementability #1`).** The trees that `task-start` and `gates run` rows record are raw `git write-tree` objects of the index. They are never a commit's tree, so a fresh clone at the forge cannot read them. The `--ref` form below needs an answer on where its trees come from. The options are in the plan PR. The text below and task 2.2 still assume those trees can be read, and will be amended to the maintainer's answer.
+`gates tests check --ref` runs where only commits exist, such as a fresh clone at the forge. The trees that `task-start` and `gates run` rows record are raw `git write-tree` objects of the index, and no commit carries them, so `--ref` never reads them. The maintainer settled this question, raised by `gatedloop.implementability #1`, on #223: both conditions are derived from commits, and no ledger field is added.
 
-`_task_completion` already walks the branch's first-parent commits and records `tick_at[task]`, a walk index. `_Completion` gains `commits`, the walked shas, so a reader can turn the index into a commit. `_lock_completion` walks whenever the evaluated `tasks.md` has a preserve task (today it walks only when a halt or defect row exists).
+`_task_completion` already walks the branch's first-parent commits and records `tick_at[task]`, a walk index. `_Completion` gains `commits`, the walked shas, so a reader can turn an index into a commit. `_lock_completion` walks whenever the evaluated `tasks.md` has a preserve task (today it walks only when a halt or defect row exists).
 
 With `at`, for each preserve task checked at the ref and ticked by a walked commit C:
 
-- the task's latest `task-start` row among the ledger rows C carries gives the start tree;
-- 4a compares C's tree (`_tree_blobs(C)`) with the start tree;
-- 4b looks for the green row among the rows C carries, against `_normalize_tree` of C's tree.
+- **4a, from commits.** The start is S, the last walked commit before C that ticks another task, or the walk's seed when there is none. 4a compares `_tree_blobs(C)` with `_tree_blobs(S)` over the test paths of D3. Every commit between S and C belongs to this task, because done ⟺ committed puts each task's work in the commits up to its tick. A ledger-only commit (a halt or defect row) changes no test path. If git cannot list either tree, the check refuses, naming the task and the commit, as other `--ref` failures do (`_ForgeRefusal`).
+- **4b, by gate and task.** Among the ledger rows C carries, there must be a row after the task's latest `task-start` row for which `_gate_verdict_row(r, task, gate)` holds and `exit == 0`. No tree is compared.
 
-The tick commit carries the green row, because tdd-apply stages only the ledger row after the commit gate, and the normalized trees agree. A task ticked at the walk's seed (index 0, before the branch) is not checked, as D2 of `unblock-authored-lock` already treats it. Problems name the commit's short sha, as the other `--ref` conditions do.
+**The forge weakness, stated.** Under `--ref`, 4b proves that a green run of the gate happened during the task. It does not prove the run was on C's tree. Exactness is enforced locally: the commit hooks run the staged-mode 4b (D4), which compares the normalized trees. This matches what `--ref` already does for the red-before-green and first-run-green checks, which also match a row by gate and task only. Making every one of those checks tree-exact at `--ref` is follow-up issue #231, outside this change.
 
-Alternative considered: compare the ref's whole tree with the start tree. Rejected, because a later task with authored tests legitimately changes test paths after the preserve task is done.
+A change with no preserve task is untouched: `_lock_completion` walks only as it does today, and `gates tests check --ref` writes the same bytes and exits with the same code as 0.13.0, so step 1 of `gates merge` is unchanged for every change in flight. Task 2.2 pins this against the 0.13.0 shim itself.
+
+A task ticked at the walk's seed (index 0, before the branch) is not checked, as D2 of `unblock-authored-lock` already treats it. Problems name C's short sha, as the other `--ref` conditions do.
+
+Alternatives considered:
+- comparing the ref's whole tree with the start tree. Rejected, because a later task with authored tests legitimately changes test paths after the preserve task is done;
+- a ledger field holding the normalized tree, so 4b stays exact at the forge. Not taken: the maintainer kept the ledger unchanged and moved exactness for every oracle check to #231.
 
 ### D6. The brief, the handoff, placement and validate learn the tag
 
@@ -98,7 +103,7 @@ Alternative considered: compare the ref's whole tree with the start tree. Reject
 - `skills/tdd-apply/SKILL.md` 5c, 5e and 5f, and `agents/tdd-implementer.md`'s per-task bullet: for a preserve task, place nothing, never touch a test path, stage the task's changes and its tick, then run `gates run <gate> --task <N.M>` green before the commit gate. 5e gains one sentence: for a preserve task, the green run counts only on the staged tree, so stage the task's changes and its tick before it, as under `loop.ci-at: ready`. If an existing test must change, the task does not preserve behaviour: discard and HALT `weak-spec` with detail `preserve <N.M>: <path> — <why>`. Add that row to the halt table.
 - `rules/plan-lenses.md` `gatedloop.zero-decision` #3: a task tagged `preserve` that changes behaviour, or a refactor task with no `preserve` whose plan states it changes no behaviour. `gatedloop.implementability`: a preserve task whose own work edits, adds or deletes a test path.
 - The `### task-oracle-tags` rule and `templates/rules-doc.template.md` gain the clause: "`[oracle: <gate> preserve]` (a refactor: no tests, every existing test unchanged, green on that gate)". `gates conventions sync` regenerates `openspec/config.yaml`.
-- `adoption/catalog.json` gets an item `preserve-oracle` (`since: 0.14.0`, `decision-only`, applying when `loop.task-oracle` is declared) that prints the amended line, as `test-rewrites` did.
+- `adoption/catalog.json` gets an item `preserve-oracle` (`since: 0.14.0`, `decision-only`, applying when `loop.task-oracle` is declared) that prints the amended line, as `test-rewrites` did. Its confirm detail adds one sentence: "If your own tooling parses `[oracle: …]` tags, `preserve` is a second-word modifier like `characterization`: update any rule that classes a tag as red-first or relaxed." Scripts outside gatedloop that class a tag as red-first when its first word is not `none` and `characterization` is absent would class a `unit` → `unit preserve` retag as red-first, not relaxed. That is a silent gap rather than a halt, so the item names it.
 
 ## Risks / Trade-offs
 
@@ -106,6 +111,7 @@ Alternative considered: compare the ref's whole tree with the start tree. Reject
 - [The heuristic flags a source file] → a loud refusal at the commit. The `gates validate` warning shows it at plan time, and the remedy is a retag through the plan.
 - [A 4b run on a stale tree] → refused, by design. The implementer re-runs the gate after its last staged edit, which tdd-apply's "stage first" order already makes the normal path.
 - [Older shims read `preserve` as malformed] → `gates validate` fails there. This is the same upgrade note `rewrites:` carried, and the docs say so.
+- [Under `--ref`, a green run is matched by gate and task, not by tree] → declared parity with the existing red and first-green checks. The commit hooks enforce the tree locally, and #231 tracks tree-exact rows for every check.
 - [The completion walk now runs for plans with preserve tasks] → two blob reads per branch commit, only for those plans.
 
 ## Migration Plan
