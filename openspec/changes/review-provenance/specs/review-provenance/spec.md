@@ -22,13 +22,25 @@ When the `convention-review` subagent stops, a plugin hook SHALL append a `revie
 - **WHEN** the `convention-review` subagent stops on the merge target or a `plan/*` branch
 - **THEN** no row is written and the hook exits 0
 
+#### Scenario: A failing shim never blocks the host
+- **WHEN** the `convention-review` subagent stops and `gates review provenance` exits non-zero
+- **THEN** the hook exits 0, no row is written, and the failure is reported on stderr
+
 ### Requirement: Provenance input must come from the host
 
-`gates review provenance` SHALL refuse input that does not carry an `agent_type` naming the `convention-review` agent and an `agent_transcript_path` that exists as a file, and SHALL exit non-zero naming what was missing.
+`gates review provenance` SHALL refuse input that does not carry an `agent_type` naming the `convention-review` agent, an `agent_id`, and an `agent_transcript_path` that exists as a file, and SHALL exit non-zero naming what was missing.
 
 #### Scenario: Hand-written provenance is refused
 - **WHEN** `gates review provenance` is given input whose transcript path does not exist
 - **THEN** it exits 1, writes no row, and names the missing transcript
+
+#### Scenario: Input with no agent id is refused
+- **WHEN** `gates review provenance` is given input with no `agent_id`
+- **THEN** it exits 1, writes no row, and names the missing `agent_id`
+
+#### Scenario: Provenance is not a gate run
+- **WHEN** the ledger holds a `review-provenance` row
+- **THEN** `gates stats` does not count it as a gate run
 
 ### Requirement: Every review row states how the review ran
 
@@ -46,6 +58,10 @@ When the `convention-review` subagent stops, a plugin hook SHALL append a `revie
 - **WHEN** `gates review record clean --scope authored` runs on a tree with provenance
 - **THEN** the row carries `via: subagent`
 
+#### Scenario: Staging after the review breaks the join
+- **WHEN** a `review-provenance` row exists for tree T, more is staged so the index is tree U, and `gates review record clean --task 1.2` runs
+- **THEN** the review row carries `via: inline`
+
 ### Requirement: The reviewer cannot run commands outside a read-only set
 
 A `PreToolUse` hook SHALL deny any `Bash` call made from inside the `convention-review` agent unless the command is one of `git diff`, `git show`, `git log`, `git status`, `gates rules` or `gates tests show`, and SHALL name the allowed set when it denies. Calls from any other agent or the main session SHALL be unaffected.
@@ -58,9 +74,21 @@ A `PreToolUse` hook SHALL deny any `Bash` call made from inside the `convention-
 - **WHEN** the `convention-review` agent runs `git commit -m x` or `gates review record clean`
 - **THEN** the call is denied, and the reason lists the allowed commands
 
+#### Scenario: A file-writing flag is denied
+- **WHEN** the `convention-review` agent runs `git diff --output=x`
+- **THEN** the call is denied
+
+#### Scenario: A global option before the subcommand is denied
+- **WHEN** the `convention-review` agent runs `git -C . diff`
+- **THEN** the call is denied
+
 #### Scenario: Other agents are untouched
 - **WHEN** the `tdd-implementer` agent runs `gates review record clean --task 1.2`
 - **THEN** this hook does not deny it
+
+#### Scenario: A compound command with one denied part is denied
+- **WHEN** the `convention-review` agent runs `git diff && git commit -m x`
+- **THEN** the call is denied, and the reason lists the allowed commands
 
 ### Requirement: The reviewer does not load the project's memory files
 
@@ -82,9 +110,25 @@ The manifest SHALL accept `loop.review` with values `recorded` (default) and `is
 - **WHEN** `loop.review: isolated` is declared and task 2.1 has an inline clean review followed by a `via: subagent` clean review
 - **THEN** step 1 does not refuse on task 2.1
 
+#### Scenario: An inline authored-set review is refused
+- **WHEN** `loop.review: isolated` is declared and the latest clean `--scope authored` review row is `via: inline`
+- **THEN** `gates merge` stops at step 1, exits 1, and names the authored set
+
+#### Scenario: A review row from before this change counts as inline
+- **WHEN** `loop.review: isolated` is declared and task 2.1's latest clean review row has no `via`
+- **THEN** `gates merge` stops at step 1, exits 1, and names task 2.1
+
 #### Scenario: The default only reports
 - **WHEN** `loop.review` is absent and two tasks' latest clean reviews are `via: inline`
 - **THEN** step 1 proceeds and prints that 2 reviews ran inline
+
+#### Scenario: No inline reviews, no line
+- **WHEN** `loop.review` is absent and every latest clean review is `via: subagent`
+- **THEN** step 1 proceeds and prints no inline-review line
+
+#### Scenario: Upgrade offers the key
+- **WHEN** a project's manifest has no `loop.review` and `/gatedloop:upgrade` runs
+- **THEN** it offers the `review` item (since 0.14.0) with the choices: leave it unset, `recorded`, or `isolated`
 
 #### Scenario: An unknown value fails validation
 - **WHEN** `loop.review: strict` is declared
