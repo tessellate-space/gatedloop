@@ -16,12 +16,13 @@
 
 ### Requirement: The plans view aggregates across changes with a monthly trend
 
-With `--all`, `gates stats --plans` SHALL add an aggregate: the per-change totals summed across changes, and a per-month trend keyed on each `plan-returned` row's timestamp, giving send-backs by class per month.
+With `--all`, `gates stats --plans` SHALL add an aggregate: the per-change totals summed across changes, and a per-month trend keyed on each `plan-returned` row's timestamp, giving send-backs by class per month: each month with at least one well-formed, dated send-back maps to every class, zeros included.
 
 #### Scenario: The trend is by month of the send-back
 
 - **WHEN** `gates stats --plans --all` runs over send-backs recorded in two different months
 - **THEN** each send-back is counted under its own month and class in the trend
+- **AND** each of the two months maps every class, zeros included, and no other month appears
 
 ### Requirement: The plans view is not combined with the other views
 
