@@ -1,0 +1,245 @@
+"""Tests for change `held-file-diagnostics`: the lock names an unstaged or
+missing held file by its actual cause (D1, D3), and a per-task re-handoff
+restores a behaviour-free task's recorded reason (D2).
+
+Real repositories on purpose, on `_lock_fixture.LockRepo`: the behaviour
+under test is the difference between git's index, its working tree and
+`HEAD`, and the remedy each line names is a git or `gates` command, so no
+cheaper layer can observe it.
+
+Stdlib only, per `zero-dep-shim`.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from _lock_fixture import TEST_EDITED, TEST_REL, TEST_V1, TEST_V2, LockRepo
+from _merge_fixture import CHANGE, LEDGER_REL, clean_env, combined, git
+
+HOLD = f".gatedloop/authored/{CHANGE}"
+
+GUARD_REL = "tests/test_thing_guard.py"
+GUARD_TEST = "def test_thing_is_stable():\n    assert thing() == 1\n"
+GUARD_REASON = "pins the output the refactor must keep"
+
+# Tasks 1.1 and 1.2 hold tests, 1.3 is behaviour-free, 1.4 is a
+# characterization task (tests plus a CHARACTERIZATION declaration).
+TESTS = {"1.1": {TEST_REL: TEST_V1}, "1.2": {TEST_REL: TEST_V2}, "1.4": {GUARD_REL: GUARD_TEST}}
+NO_TESTS = {"1.3": "docs only"}
+CHARACTERIZATION = {"1.4": GUARD_REASON}
+
+ALL_BEHAVIOUR_FREE = {"1.1": "docs only", "1.2": "config rename"}
+
+
+def held(task: str, rel: str) -> str:
+    return f"{HOLD}/{task}/{rel}.authored"
+
+
+def no_tests(task: str) -> str:
+    return f"{HOLD}/{task}/NO-TESTS"
+
+
+def declared(task: str) -> str:
+    return f"{HOLD}/{task}/CHARACTERIZATION"
+
+
+class _HeldFileRepo(unittest.TestCase):
+    """A `LockRepo` with the change branch cut in a lane worktree."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = LockRepo(Path(tmp.name))
+        self.repo.start_change(lane=True)
+        self.lane = self.repo.lane
+
+    # ---- arranging ---------------------------------------------------------
+
+    def hand_off(self, tests=None, reasons=None, declarations=None, commit=True) -> None:
+        """Hold the given tests, NO-TESTS and CHARACTERIZATION files, run a
+        full `gates tests handoff`, and (unless told not to) commit it."""
+        tests = TESTS if tests is None else tests
+        reasons = NO_TESTS if reasons is None else reasons
+        declarations = CHARACTERIZATION if declarations is None else declarations
+        for task, files in tests.items():
+            for rel, content in files.items():
+                self.repo.write(held(task, rel), content)
+        for task, reason in reasons.items():
+            self.repo.write(no_tests(task), reason + "\n")
+        for task, reason in declarations.items():
+            self.repo.write(declared(task), reason + "\n")
+        self.repo.must("tests", "handoff", CHANGE)
+        if commit:
+            self.repo.gated_commit(f"author tests: {CHANGE}")
+
+    def void_by_halt(self, task: str) -> None:
+        """Place `task` (a behaviour-free one: its holding directory goes),
+        then void the placement with a `halt` at it, uncompleted, and commit."""
+        self.repo.place(task)
+        self.repo.must("halt", "record", "stalled", "--task", task)
+        self.repo.gated_commit(f"halt at {task}")
+
+    # ---- reading -----------------------------------------------------------
+
+    def check(self):
+        return self.repo.gates("tests", "check", cwd=self.lane)
+
+    def line_for(self, proc, rel: str) -> str:
+        found = [line for line in combined(proc).splitlines() if rel in line]
+        self.assertTrue(found, f"no line names {rel}:\n{combined(proc)}")
+        return "\n".join(found)
+
+    def objects(self) -> list:
+        r = subprocess.run(
+            ["git", "cat-file", "--batch-all-objects", "--batch-check=%(objectname)"],
+            cwd=self.lane, capture_output=True, text=True, env=clean_env(),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return sorted(r.stdout.split())
+
+
+class TheLockNamesTheCause(_HeldFileRepo):
+    """D1 and D3: a condition-2 mismatch in the staged check is classified
+    against the working tree as not staged, missing, or differing."""
+
+    def test_a_behaviour_free_handoff_left_untracked_is_not_staged_until_added(self):
+        self.hand_off(tests={}, reasons=ALL_BEHAVIOUR_FREE, declarations={}, commit=False)
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        for task in ALL_BEHAVIOUR_FREE:
+            line = self.line_for(r, no_tests(task))
+            self.assertIn("not staged", line)
+            self.assertIn("git add .gatedloop", line)
+        self.assertNotIn("differs", combined(r))
+
+        git(self.lane, "add", ".gatedloop")
+        r = self.check()
+        self.assertEqual(r.returncode, 0, combined(r))
+
+    def test_an_untracked_held_test_matching_the_handoff_is_not_staged(self):
+        self.hand_off()
+        rel = held("1.1", TEST_REL)
+        git(self.lane, "rm", "-q", "--cached", rel)
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        line = self.line_for(r, rel)
+        self.assertIn("not staged", line)
+        self.assertIn("git add .gatedloop", line)
+        self.assertNotIn("differs", line)
+
+    def test_a_declaration_modified_since_staging_but_matching_on_disk_is_not_staged(self):
+        self.hand_off()
+        rel = declared("1.4")
+        self.repo.write(rel, "a reason the handoff never recorded\n")
+        git(self.lane, "add", rel)
+        self.repo.write(rel, GUARD_REASON + "\n")
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        line = self.line_for(r, rel)
+        self.assertIn("not staged", line)
+        self.assertIn("git add .gatedloop", line)
+        self.assertNotIn("differs", line)
+
+    def test_a_held_test_edited_and_staged_still_differs(self):
+        self.hand_off()
+        rel = held("1.1", TEST_REL)
+        self.repo.write(rel, TEST_EDITED)
+        git(self.lane, "add", rel)
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        line = self.line_for(r, rel)
+        self.assertIn("differs from the handoff", line)
+        self.assertNotIn("not staged", line)
+        self.assertNotIn("missing", line)
+
+    def test_a_reason_lost_to_a_voided_placement_names_the_per_task_handoff(self):
+        self.hand_off()
+        self.void_by_halt("1.3")
+        self.assertFalse((self.lane / no_tests("1.3")).exists())
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        line = self.line_for(r, no_tests("1.3"))
+        self.assertIn("missing from the holding area", line)
+        self.assertIn(f"gates tests handoff {CHANGE} --task 1.3", line)
+
+    def test_held_files_missing_but_committed_name_a_checkout_from_head(self):
+        self.hand_off()
+        rels = (held("1.1", TEST_REL), declared("1.4"))
+        for rel in rels:
+            git(self.lane, "rm", "-q", rel)
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        for rel in rels:
+            line = self.line_for(r, rel)
+            self.assertIn("missing from the holding area", line)
+            self.assertIn(f"git checkout HEAD -- {rel}", line)
+
+    def test_held_files_missing_with_no_committed_copy_name_the_authors_re_handoff(self):
+        self.hand_off(commit=False)
+        git(self.lane, "add", ".gatedloop")
+        missing = {"1.1": held("1.1", TEST_REL), "1.4": declared("1.4")}
+        for rel in missing.values():
+            git(self.lane, "rm", "-q", "-f", rel)
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        for task, rel in missing.items():
+            line = self.line_for(r, rel)
+            self.assertIn("missing from the holding area", line)
+            self.assertIn("HEAD has no copy", line)
+            self.assertIn(f"gates tests handoff {CHANGE} --task {task}", line)
+            self.assertNotIn("git checkout", line)
+
+    def test_a_commit_checked_with_ref_keeps_its_wording(self):
+        # The commit holds an edited held test while the working tree holds
+        # the handed-off content: a staged check would call it not staged,
+        # but a commit has no working tree beside it.
+        self.hand_off()
+        rel = held("1.1", TEST_REL)
+        self.repo.write(rel, TEST_EDITED)
+        sha = self.repo.gated_commit("edit a held test")
+        self.repo.write(rel, TEST_V1)
+
+        r = self.repo.check_ref(sha)
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        line = self.line_for(r, rel)
+        self.assertIn("differs from the handoff", line)
+        self.assertNotIn("not staged", line)
+
+    def test_classifying_a_mismatch_writes_no_object(self):
+        # Untracked, and unlike the handoff on disk: its blob is in no store
+        # until something hashes it with `-w`. No task is placed, so
+        # condition 1 hashes nothing.
+        self.hand_off()
+        rel = held("1.1", TEST_REL)
+        git(self.lane, "rm", "-q", "--cached", rel)
+        self.repo.write(rel, "def test_only_on_disk():\n    assert thing() == 3\n")
+        before = self.objects()
+
+        r = self.check()
+
+        self.assertEqual(r.returncode, 1, combined(r))
+        self.assertIn("differs from the handoff", self.line_for(r, rel))
+        self.assertEqual(self.objects(), before)
+
+
+if __name__ == "__main__":
+    unittest.main()
