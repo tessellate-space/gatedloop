@@ -8,7 +8,7 @@ Every time a plan goes back to its author before approval, the change's durable 
 
 ### Requirement: Send-back classes are a closed set held in one place
 
-The shim SHALL define exactly one closed set of send-back classes: `scope` (what the change covers), `approach` (the design is wrong), `spec-gap` (a missing requirement or scenario), `decision` (an open question answered), `collision` (an ADR, number or file clash with another change), `drift` (conflicts with the target), `safety`, `nit`, and `other`, which MUST carry detail. Every writer and reader SHALL resolve a class against it; extending it SHALL be a spec change to this capability.
+The shim SHALL define exactly one closed set of send-back classes: `scope` (what the change covers), `approach` (the design is wrong), `spec-gap` (a missing requirement or scenario), `decision` (an open question answered), `collision` (an ADR, number or file clash with another change), `drift` (conflicts with the target), `safety` (a risk to data, security or a project's work), `nit` (wording or presentation only, no change in behaviour), and `other` (none of these), which MUST carry detail saying what it is. Every writer and reader SHALL resolve a class against it; extending it SHALL be a spec change to this capability.
 
 #### Scenario: A class outside the set is refused
 
