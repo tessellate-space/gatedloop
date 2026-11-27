@@ -334,3 +334,171 @@ turn (undoing a task) into the loop's own vocabulary.
 **Why not now.** No halt cause or acceptance verdict asks for it yet; a rejected
 acceptance today restarts the change. Promote when a `reject` with a named task
 becomes a recorded pattern in `gates stats --outcomes`.
+
+---
+
+## Judging a plan before approval (was: pair with an upstream design reviewer)
+
+**What this entry was.** It proposed pairing gatedloop with an upstream design reviewer
+(Google's elephant-goldfish-model): a SETUP section pointing at that tool before
+`/gatedloop:propose`, record-only plan-review evidence beside the approval, and the
+loop's `weak-spec` and `oracle-conflict` halts fed back into design review. It held
+that judging a design was "not ours", and waited for someone to run the two together.
+
+**The revised boundary.** Judging a plan before it is approved is now ours, because it
+moves the planning phase from `act` to `close` (the rejection test's single question).
+Until then gatedloop closed implementation, and planning ended at "a human read it".
+The evidence is #168, an adopter's report under 0.11.1: most of its plan PRs over two
+days were amendments made after approval, because of handoff
+refusals, failed test-quality reviews, plans wrong about the code, a task order that
+deadlocked, and plans that drifted while they waited for handoff. Authoring a plan
+stays OpenSpec's: the loop judges a plan and authors none of it.
+
+**What shipped.** `plan-preflight` ships the loop (`gates plan check` always, and under
+`loop.plan-preflight: run` rounds of plan review, a preflight test author, its dry run
+and the authored-set review, at a tier the shim computes), the `plan-review` agent and
+its lenses (`rules/plan-lenses.md`), and the record: `plan-round` and `plan-review`
+rows on the plan's own content, committed with the plan and rendered into the PR body
+by `gates plan status --markdown`. That covers the old pieces 1 and 2, in the plugin
+rather than beside it. No shipped prompt names any external reviewer, and none needs
+to: the lenses are ids plus rules, and a team that prefers another reviewer can run it
+alongside without the plugin knowing.
+
+**What remains a candidate: halts as plan-review input.**
+
+*What.* Feed the `weak-spec` and `oracle-conflict` halts that `gates stats --outcomes`
+counts per change back into plan review, for example as a lens input naming the kinds
+of gap this project's past plans left.
+
+*Against the rejection test.* Authors nothing and names no stack command; it makes the
+loop's own evidence act on the next plan, which keeps planning at `close`.
+
+*Why not now.* The loop has not run on enough plans to show which halts it already
+prevents, and a lens input built from halts the loop already catches would add usage
+and no signal.
+
+*Promote when* `gates stats --outcomes` across a few releases shows `weak-spec` or
+`oracle-conflict` halts on plans whose loop ended green: a gap the lenses miss, with a
+pattern a lens input could name.
+
+---
+
+## A preflight red run
+
+**What.** In the plan loop, after a clean dry run, place the preflight store's held
+tests in a scratch worktree at the plan's base and run each task's oracle gate there,
+so a red-first task whose tests already pass is caught by a gate's exit code before
+approval, rather than by a reader's judgement.
+
+**Why it is a good fit.** It is the complete form of the check `plan-preflight` D10 (c)
+bounds: today a green-first task without `characterization` is caught only by the
+zero-decision lens judging the tag and by the preflight author returning `weak-spec`.
+Both are judgements; the run would be an oracle.
+
+**Against the rejection test.** Authors nothing, and names no stack command: it calls
+the task's declared oracle gate through `gates run`. It makes a stated guarantee (the
+red run after placement) checkable earlier.
+
+**Why not now.** D10 (c)'s cost argument: it costs a gate run per task per round, which
+can dwarf the rest of the loop; it needs an oracle gate that can be scoped to one
+task's tests, which not every adopter's `unit` is; and it can misjudge a test that only
+an earlier task's implementation would turn red, so a "pass at the base" is not always
+a wrong tag. The red run after placement still catches such a task later, after
+approval.
+
+**Promote when** field data shows `green` defects (tests that passed on placement) on
+tasks whose plan loop ended green often enough to cost more than the runs would, and
+the oracle gates of those projects can be scoped per task.
+
+---
+
+## Ship an allowlisted runtime, not the whole repository
+
+**What.** Build the installed plugin from an allowlist (commands, skills, agents,
+hooks, `bin/`, schema, templates, adoption catalogue), and keep `tests/`, `evals/`,
+`openspec/`, `scripts/` and the docs site out of adopters' plugin caches. Add a `ci`
+check that the published runtime matches a fresh build byte for byte. EGM does this
+with `scripts/pack_plugin.py` and a checked-in `distributions/claude/`, plus a test
+that refuses drift.
+
+**Against the rejection test.** Makes `self-contained-plugin` and
+`plugin-relative-paths` enforceable at the boundary that matters: what is copied on
+install. Ours.
+
+**Why not now.** Nothing breaks today: the extra files are inert. `prompt-evals` adds
+`evals/` at the root, which makes the gap bigger, not urgent. The marketplace install
+copies the repository as-is, so an allowlist means a second published ref or
+directory. That is a release-process change, and should be weighed with
+`plugin-release`.
+
+**Promote when.** The plugin cache size or an adopter's review of what gets installed
+makes it matter, or the next release-process change opens that area anyway.
+
+---
+
+## Refuse an undeclared overwrite of an existing test (`loop.test-rewrites: required`)
+
+**What.** An opt-in manifest key under which `gates tests handoff` refuses a task that
+hands off a full file at an existing test path without declaring it under `rewrites:`,
+turning today's advisory line into a refusal.
+
+**Why it is a good fit.** Since `test-rewrites` an author that overwrites an existing
+test unseen is visible (one advisory line per path) but not stopped. A project that
+wants every rewrite of an existing test approved in the plan has no way to say so.
+
+**Against the rejection test.** Authors nothing, names no stack command, makes a stated
+guarantee ("the author never reads an existing test it was not shown") enforceable.
+
+**Why not now.** A new adopter-facing refusal must be opt-in, and the advisory line has
+not yet been seen ignored in the field. An approved design that gives a file's full text
+is a legitimate undeclared overwrite, so the refusal would need that route too. Promote
+when a field report shows an undeclared overwrite reaching review unnoticed.
+
+---
+
+## A `removes:` clause for deleting a test whose subject is gone
+
+**What.** A second clause of the oracle tag, `removes: <path>`, declaring an existing
+test file a task deletes, held to the plan like `rewrites:`.
+
+**Why it is a good fit.** It would put a test deletion under the approval sha, beside
+the rewrites, rather than leaving it to the per-task review alone.
+
+**Against the rejection test.** Authors nothing, names no stack command, makes a
+deletion part of the approved plan.
+
+**Why not now.** Deletion is not blocked today: the shim locks no pre-existing,
+unhanded-off file, so a deletion reaches the per-task review and is judged against the
+task. `rewrites:` answers a different problem, content the author cannot see, and a
+deletion has none to author. Promote if adopters report that review alone lets
+unjustified deletions through; the clause can be added without changing the grammar
+(`test-rewrites` design D1).
+
+**Field evidence (#168, unpromoted).** An adopter asked for `gates plan check` to
+refuse a `rewrites:` path that a task deletes. The plan has no way to declare a
+deletion, so the check cannot be mechanical, and `plan-preflight` D10 (a) made it
+implementability check 3, judged by plan review. The report is evidence that a plan
+naming its deletions would be checkable, and a request for it; it is not yet
+the reported pattern of unjustified deletions this entry waits for.
+
+---
+
+## A code-enforced budget for the READY `ci` under `loop.ci-at: ready`
+
+**What.** Count the red unscoped `ci` runs a change records once every task is checked,
+and refuse a further `gates run ci` past a declared cap, as the per-task budget refuses
+`unit` and `ci` for a task today.
+
+**Why it is a good fit.** Under `ready` the full `ci` moves to READY. A red there gets
+"at most 2 focused fixes, then HALT `stalled`", the same stopping rule `verify` and
+`live-check` have, and that rule lives only in the prompt. The ledger already holds
+every row it would count.
+
+**Against the rejection test.** Authors nothing, names no stack command, and makes a
+stated guarantee (the stopping rule) enforceable.
+
+**Why not now.** `ci-at` D5 kept the READY `ci` change-level on purpose: it records no
+task (`budget-ticked-task` D1), so it is nobody's attempt, and a change-level budget is
+a new kind of counter with its own restart story. `verify` and `live-check` have run
+under the prompt-level rule without a field report of a runaway loop. Promote when one
+shows a READY `ci` retried past the rule.

@@ -9,6 +9,100 @@ Sections from 0.5.0 on are drafted by `scripts/release cut` and edited before
 `scripts/release publish`. The three below were backfilled from their release
 commits (`2898ba5`, `9fe73de`, `7abcdb5`); only 0.4.0 is tagged.
 
+## 0.13.0 — 2026-11-12
+
+- **batch-approval-check**: A console that shows whether each change is approved has to call `gates approval check <change>` once per change.
+- **advisory-rewrite-paths**: An adopter's plans rewrite end-to-end assets: Gherkin feature files, step definitions and a fixture.
+- **release-voided-lock**: The authored-test lock pins every path that any placement in a change ever held.
+
+### Other changes
+
+- docs: reconcile with 0.13.0 (#209)
+
+## 0.12.1 — 2026-11-11
+
+Two fixes for lanes that got stuck with no sanctioned way out, short of a hand edit to the ledger or the locked area, or a history rewrite. Both defects date from 0.11.1. Nothing new to configure.
+
+- **lane-unstick** (#183). Fixes #178, #173.
+  - **`gates tests check` no longer reports lost ledger rows that were never lost** (#178). The completion walk compared the lane's ledger with the target's copy. That copy gains `approval-local` rows each time an amended plan is attested on `main`. After the lane synced past such an attestation, any task with a `halt` or `test-defect` row was refused once its `[x]` was staged, and the merge's `tests check --ref` was refused the same way. The walk now reads the lane's own first-parent line. A ledger that really shrinks on the lane is still refused, naming the commit.
+  - **`gates attempt restart` works for tasks placed together** (#173). Every placement of the change that is active, or voided only by a `halt`, now counts as clean while its tests hold their placed content, whichever task it belongs to. That includes the halted task's own placement. The restarted agent places those tests again with `gates tests place` as usual, and a new red run follows. A placed test edited after placement is still refused, and the refusal now names its task. A placement voided by a `test-defect` still counts as dirt.
+  - **Uncommitted bookkeeping rows no longer block a restart.** An append to the change's ledger made only of `usage`, `restart` and `halt` rows counts as clean, so restarts in a row need no ledger commit between them. The refusal for real dirt names the paths and no longer says to discard work.
+
+**Upgrading:** update the plugin and start a new session. A lane that is stuck on either refusal goes through once it runs 0.12.1. Nothing needs undoing by hand.
+
+## 0.12.0 — 2026-11-06
+
+Planning gets a loop of its own: a plan can be checked, reviewed and test-authored before anyone approves it. Two opt-in keys also cut the cost of `ci` per task. Everything new is off unless you turn it on.
+
+**A plan is checked before approval**
+
+- **plan-preflight** (#174). Refs #168.
+  - **`gates plan check <change>`** runs in every propose path, whatever the manifest says, and costs nothing. It reports what the handoff would refuse after approval: oracle-tag problems, untagged tasks under `loop.task-oracle: required`, and `rewrites:` paths absent at the base. With `--against <ref>` it also reports each path the plan names that moved since the plan's base; the planner runs that before `gates handoff`.
+  - **The plan loop**, opt-in with `loop.plan-preflight: run` (default `skip`; it needs `loop.test-author: separate`). One round is `gates plan round`, plan review through each lens, the test author in preflight mode, `gates tests handoff --dry-run` and the authored-set review. The loop ends green, on a question only a human can answer, or stalled once its round budget (default 3) is spent. The planner opens the plan PR as a draft unless the loop ended green.
+  - **Tiers by blast radius.** `gates plan tier` computes a light or full floor in code from six signals: 20 or more tasks, 12 or more named files, 2 or more hot surfaces, a modified, removed or renamed requirement, a hot surface marked `blast-radius: high`, and an oracle gate you list in `full-at.oracles`. A classifier may only raise the tier. A `Plan tier: light — <reason>` line in the plan is the only way down.
+  - **The classifier slot.** Without one, the built-in `gatedloop.blast-radius` lens answers. You may bind your own command with `loop.plan-preflight.classifier`: it reads `{digest, dimensions}` on stdin and prints typed answers validated against `schema/plan-tier.schema.json`. The shim builds the bounded digest (`gates plan digest`), never reads `.env`, and ships no vendor client. Declaring a classifier sends the plan digest to its provider.
+  - **A new agent, `plan-review`** (Opus, read-only), judges a plan through one lens per run: `gatedloop.implementability` and `gatedloop.zero-decision`, shipped in `rules/plan-lenses.md`. Every finding cites `<lens-id> #<n>`.
+  - **The preflight store** is the ignored `.gatedloop/out/preflight/<change>/`. A later round re-authors only the tasks whose inputs changed. `gates plan save` snapshots the store to its own branch, `gatedloop/preflight/<change>`, pushed with the plan branch, and `gates plan restore` rebuilds it on another machine. The plan PR carries no held test.
+  - **A record, never a gate.** `plan-round` and `plan-review` rows go in the change's ledger, and `gates plan status --markdown` renders them for the PR body. Approval, handoff and merge never read them. `gates stats` leaves them out.
+  - **Held tests are never committed off a change branch.** `gates tests check` refuses a staged path under `.gatedloop/authored/` when the branch names no active change.
+  - **Not yet:** the preflight's tests are not the handed-off ones, so the test author runs again after approval, and the snapshot branch is deleted by hand once the change is archived. A later change, `approved-tests`, closes both.
+
+**`ci` costs less per task**
+
+- **ci-at** (#170). Fixes #162.
+  - **`loop.ci-at: ready`** gates each task commit on a green `unit` for its staged tree, plus the convention review, and runs the full `ci` once before READY, where `gates ledger record-ready` refuses without an unscoped green `ci` on the head, and again at the merge. A commit on the merge target, a `plan/*` branch or a detached merge head still needs `ci`. It requires a declared global `unit` gate. Default `task`, which is today's behaviour.
+  - **`loop.ci-scope: union`** runs the hot surfaces' own `ci` overrides instead of the global `ci` when every hot surface declares one. An unmatched path still runs the full gate. Default `single`.
+  - **The commit hook says when it allows a commit on a `unit` marker**, naming the mode. A `ci`-marker commit stays silent, as before.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Run `/gatedloop:upgrade`.** It offers three new settings, each of which you may leave unset: `loop.ci-at`, `loop.ci-scope` and `loop.plan-preflight`.
+3. **If you set `loop.ci-at: ready`, re-run `gates hook install`** when you use the copied git hook, so the git layer accepts a `unit` marker too. A composed install (a hook manager) picks it up with the plugin version.
+4. **If you run an interim plan preflight of your own**, switch to the shipped loop.
+
+## 0.11.1 — 2026-11-04
+
+A plan can now name the existing tests a task rewrites, the commit hook stops leaving the ledger dirty, two loop false-positives are gone, and OpenSpec 1.16 is supported.
+
+**A task may rewrite an existing test**
+
+- **test-rewrites** (#163). Fixes #157.
+  - **A task's oracle tag may end with `rewrites: <path>[, <path>]...`**, as in `[oracle: unit rewrites: tests/toolbar.test.ts]`. The test author reads exactly those files, from its brief, and no other existing test. The handoff must carry each one in full, and once placed it is the task's authored test: the same lock, red-first run and defects. `[oracle: none]` cannot carry the clause.
+  - **`gates validate`** fails on a malformed clause (an absolute path, `..`, a path under `.gatedloop/`, a duplicate) and warns when a declared path doesn't exist.
+  - **`gates tests show`** lists each rewrite against its base, and the new `--diff` flag prints the unified diff, so the review can see what a rewrite dropped.
+  - **Opt-in:** `/gatedloop:upgrade` offers the amended `rules.tasks` oracle-tag line to projects that declare `loop.task-oracle`. A plan without the clause behaves exactly as before.
+
+**The commit hook stages its own usage row**
+
+- **usage-row-staged** (#146). Fixes #140.
+  - **The git-layer pre-commit hook passes `--stage` to its usage record**, as the Claude-layer hook already did, so the row lands in the commit it describes. A copy installed before 0.11.1 left the row unstaged after every commit, and `gates merge` then couldn't detach onto the target.
+  - **Merge step 1 leaves the ledger clean** after its trailing-rows commit, and halts with a message if it can't.
+
+**Fewer false refusals in the loop**
+
+- **taint-preclear** (#139). Fixes #132.
+  - **A commit with no `ci` row of its own is vouched for by the head**, when it is an ancestor of the audited head and a green, unscoped `ci` names the head's tree. The audit records a `vouched` row instead of a taint, so a rebase no longer taints a gated change. A scoped `ci` doesn't vouch.
+- **budget-ticked-task** (#156). Fixes #147.
+  - **A `gates run` with no `--task` after the latest started task is ticked at `HEAD` is unbudgeted**, instead of being charged to that finished task. A run that passes `--task` is budgeted as before.
+
+**OpenSpec 1.16**
+
+- **openspec-1-16** (#155). Fixes #137.
+  - **The supported range is now 1.14.3 to 1.16.0**, so `gates doctor` no longer warns on 1.16. ci runs 1.14.3 on every OS and Python leg and 1.16.0 on one (Ubuntu, Python 3.13).
+
+**Release tooling** (this repository only)
+
+- **release-push** (#133). Fixes #125.
+  - **`scripts/release publish` refuses inside an agent session** and prints the commands to run outside one.
+  - **The push gate counts a change branch only when the push carries its commits in**, and a refused push of a commit no change owns says so.
+
+**Upgrading**
+
+1. **Update the plugin** (`/plugin update gatedloop@gatedloop`) and start a new session, because hooks load at session start.
+2. **Re-run `gates hook install`** if `gates doctor` reports the commit hook as a stale copy. A copy installed before 0.11.1 leaves its usage row unstaged after every commit, and `gates merge` then can't detach onto the target (#140). A composed install (a hook manager) picks the fix up with the plugin version.
+3. **Run `/gatedloop:upgrade`** to decide on `test-rewrites` if you declare `loop.task-oracle`.
+
 ## 0.11.0 — 2026-11-01
 
 Task commits get their scoped `ci` back, the merge checks the plan is still the approved one, a lane can no longer sync main past the hooks, and gatedloop now states which of its surfaces you may build on and checks them in ci.

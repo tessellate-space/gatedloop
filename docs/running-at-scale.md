@@ -256,10 +256,13 @@ between them, and the forge is the checkpoint.
 
 **Roles.**
 
-- **Planners** author and propose, and nothing else. Each one works in its own
-  worktree (`git worktree add ../plans/<change> -b plan/<change> main`), so a planner
-  never shares a checkout or an index with the orchestrator. A planner never
-  dispatches a lane.
+- **Planners** author and propose, and run each plan's loop before it asks for
+  approval. Each one works in its own worktree (`git worktree add ../plans/<change> -b
+  plan/<change> main`), so a planner never shares a checkout or an index with the
+  orchestrator. A planner never dispatches a lane: the only agents it dispatches are
+  the plan loop's checkers (plan review, the test author in preflight mode and the
+  authored-set review), and it records their verdicts with `gates plan record`, never
+  a review verdict, a halt or a real `gates tests handoff`.
 - **The orchestrator** is the only session that dispatches. It runs §1–§7: it selects,
   dispatches the author and the implementers, merges and archives.
 
@@ -271,7 +274,15 @@ a compaction itself, so this is as far as the guarantee goes.
 
 **The flow.**
 
-1. A planner runs `/gatedloop:propose`, which opens the plan PR from `plan/<change>`.
+1. A planner runs `/gatedloop:propose`, which runs `gates plan check <change>` and,
+   under `loop.plan-preflight: run`, the plan loop at the tier `gates plan tier`
+   computes, then commits the plan with its ledger rows and opens the plan PR from
+   `plan/<change>`, with `gates plan status <change> --markdown` in its body. The
+   loop's held tests are saved with `gates plan save <change>` and pushed on
+   `gatedloop/preflight/<change>` beside the plan branch. The PR is a draft unless the
+   loop ended green; a loop that stopped on a question puts the question and its
+   options at the top, and the planner resumes it (`gates plan resume`) only after a
+   person answers.
 2. A person reviews and merges it.
 3. Under `approval.plan: self` in pull-request mode, the record job (§5) runs
    `gates record-merged` on the squash. It sees the `plan/<change>` head and attests the
@@ -279,7 +290,10 @@ a compaction itself, so this is as far as the guarantee goes.
    sha over the plan in the merge commit. That commit lands through the same follow-up
    PR as any record. Without that job, run `gates approval attest <change> --merged <n>`
    on the target. Under `review`, attest from the approving review with `--pr <n>`.
-4. Once the approval is on the target, the planner runs `gates handoff <change> --json`.
+4. Once the approval is on the target, the planner runs `gates plan check <change>
+   --against <target>`: a `drift` finding names a file the plan names that moved since
+   the plan's base, and the planner reads it against the plan, reporting and sending
+   nothing when the plan no longer holds. Then it runs `gates handoff <change> --json`.
    It exits 1 with the reason unless the plan is approved there and unchanged since.
    On success it prints the payload, and the planner's agent sends it to the
    orchestrator with its own messaging tool (for example, a session addressed by a
@@ -304,7 +318,8 @@ from git: the changes §1 calls candidates, which are approved on the target and
 by no lane. A lost or late doorbell delays a change and loses nothing.
 
 **The plan-check job.** It runs on pull requests whose diff is planning-only, meaning
-every changed path is under `openspec/` or is the rules-doc. That is the same set the
+every changed path is under `openspec/` or is the rules-doc, beside the change's
+ledger (`.gatedloop/runs/`, where the plan loop's rows travel). That is the same set the
 shim commits at planning grade, so the job needs none of your `ci` stack. It
 validates each changed change, validates the manifest, and writes the approval sha to
 the job summary, so the content an approval will pin is visible before the merge.
@@ -327,7 +342,7 @@ jobs:
       - name: Validate and pin a planning-only diff
         run: |
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt
-          if grep -qv -e '^openspec/' -e '^docs/conventions.md$' changed.txt; then   # your rules-doc
+          if grep -qv -e '^openspec/' -e '^docs/conventions.md$' -e '^\.gatedloop/runs/' changed.txt; then   # your rules-doc
             echo "not planning-only: gatedloop/ci covers this PR"; exit 0
           fi
           gates validate

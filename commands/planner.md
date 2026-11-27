@@ -1,21 +1,26 @@
 ---
 name: "gatedloop: Planner"
-description: Take the planner role — author and propose changes in your own worktree, hand an approved plan to the orchestrator, and never dispatch, implement, merge or archive
+description: Take the planner role — author and propose changes in your own worktree, run each plan's loop before approval, hand an approved plan to the orchestrator, and never implement, merge, archive or dispatch implementation
 category: Workflow
 tags: [workflow, roles, propose]
 ---
 
 **Role.** Restate this block verbatim whenever you summarize your context:
 
-> I am a **planner**. I author and propose changes, each in its own worktree, and
-> nothing else. I never dispatch, implement, merge or archive. When a plan of mine is
-> approved on the target, I run `gates handoff <change> --json` and send its payload to
-> the orchestrator; a refused handoff I report, never send.
+> I am a **planner**. I author and propose changes, each in its own worktree, and run
+> each plan's loop on its `plan/<change>` branch before it asks for approval. The only
+> agents I dispatch are the loop's checkers: plan review, the test author in preflight
+> mode and the authored-set review, each verdict recorded with `gates plan record`. I
+> never implement, merge or archive, and never dispatch an implementer, a merge runner
+> or a test author outside preflight mode. When a plan of mine is approved on the
+> target, I run `gates plan check <change> --against <target>`, then `gates handoff
+> <change> --json`, and send its payload to the orchestrator; a refused handoff, or a
+> plan that no longer holds, I report, never send.
 > If your context was compacted, or you're unsure of your role, run
 > `/gatedloop:planner` again before acting.
 
-This command is a role over shipped primitives: `/gatedloop:propose`, `gates handoff`
-and the host's messaging tool. It decides nothing in code.
+This command is a role over shipped primitives: `/gatedloop:propose`, `gates plan`,
+`gates handoff` and the host's messaging tool. It decides nothing in code.
 `${CLAUDE_PLUGIN_ROOT}/docs/running-at-scale.md` §8 describes the whole
 contract; the orchestrator's half is `/gatedloop:orchestrator`.
 
@@ -25,8 +30,11 @@ comes from the user; if it hasn't been given, ask for it before the first send.
 
 **Never**
 
-- Dispatch an implementer, a test author or a merge runner, or run
-  `/gatedloop:tdd-apply`.
+- Dispatch an implementer, a merge runner, or a test author outside preflight mode,
+  or run `/gatedloop:tdd-apply`.
+- Run a real `gates tests handoff`, or record a review verdict or a halt for a task
+  (`gates review record`, `gates halt`). The loop's verdicts go through
+  `gates plan record` only.
 - Run `gates merge`, `/gatedloop:merge` or `/gatedloop:archive`, or merge a pull request.
 - Work in the orchestrator's checkout, or on a change branch. You commit only on
   `plan/<change>` branches.
@@ -39,9 +47,27 @@ comes from the user; if it hasn't been given, ask for it before the first send.
    create one from the target: `git worktree add ../plans/<change> -b plan/<change>
    main`, using the project's integration target in place of `main`. Work only there.
 
-2. **Propose.** Run `/gatedloop:propose` with the description. It authors the plan
-   through `/opsx:propose`, commits it on `plan/<change>` and opens the plan PR. Report
-   the PR's URL and stop for review. A person reviews and merges the plan; you never do.
+2. **Propose, and run the plan loop.** Run `/gatedloop:propose` with the description.
+   It authors the plan through `/opsx:propose`, runs `gates plan check <change>`, runs
+   the plan loop under `loop.plan-preflight: run`, commits the plan with the change's
+   ledger on `plan/<change>` and opens the plan PR. The loop is your job, not an
+   exception to the "Never" list: on your own `plan/<change>` branch, in your own
+   worktree, at the tier `gates plan tier <change>` computes, dispatch the `plan-review`
+   agent once per lens per round, and under the full tier the `test-author` agent in
+   preflight mode and the `convention-review` agent in authored-set mode (told it is a
+   preflight). Record each verdict with `gates plan record`, amend the plan on each
+   round's findings, and after each round run `gates plan save <change>` and push
+   `gatedloop/preflight/<change>` with the plan branch.
+   - **green**: the PR opens ready for review. Report its URL and stop for review.
+   - **question**: a checker found what only a human can decide. The PR opens as a
+     draft with the question and its options at the top of its body. Report both and
+     stop. When the human answers, amend the plan as they said, run
+     `gates plan resume <change> --reason "<their answer>"`, run the loop again, and
+     update the PR (marking it ready if the loop ends green). Never resume before the
+     answer.
+   - **stalled**: the round budget is spent. The PR opens as a draft with the status.
+     Report it and stop: a human decides whether to amend and resume.
+   A person reviews and merges the plan; you never do.
 
 3. **Wait for the approval to land.** Under `approval.plan: self` in pull-request mode,
    the project's record job attests the plan from its merge. Under `review`, the
@@ -49,7 +75,12 @@ comes from the user; if it hasn't been given, ask for it before the first send.
    once that commit is. When the user says the plan merged, or when you're re-run, fetch
    the target and go on.
 
-4. **Hand off.** Run `gates handoff <change> --json`:
+4. **Check for drift, then hand off.** First run `gates plan check <change> --against
+   <target>` (the ref the change branch will be cut from, such as `origin/main`). A
+   `drift` finding names a file the plan names that moved since the plan's base: read
+   what moved against the plan. When the plan still holds, go on. When it no longer
+   holds, report the finding and send nothing: the plan needs an amendment, through a
+   new plan PR. Then run `gates handoff <change> --json`:
    - **exit 0**: send its output, exactly as printed, to the orchestrator session with
      the host's messaging tool (in Claude Code, `SendMessage` to the session's name).
      Add one line saying which change it is. The message is a doorbell: the

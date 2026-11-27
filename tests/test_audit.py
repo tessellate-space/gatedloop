@@ -113,7 +113,8 @@ class TestAuditDetectsUngatedCommit(unittest.TestCase):
                  "outcome", "precondition", "precondition_exit", "scope",
                  "cause", "detail", "session", "accepted_by",
                  "author", "tests", "base", "no_behaviour", "note", "restart_available", "characterization", "kind",
-         "tokens", "window", "messages", "source", "v"},
+         "tokens", "window", "messages", "source",
+         "loop", "round", "plan_sha", "tasks_sha", "signals", "floor", "classifier", "override", "tier", "checker", "report", "snapshot", "v"},
             )
 
     def test_second_pass_does_not_re_report(self):

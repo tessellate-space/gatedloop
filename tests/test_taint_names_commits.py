@@ -33,8 +33,10 @@ class TaintRefusalNamesItsCommits(unittest.TestCase):
             git(repo.lane, "fetch", "-q", "origin")
             git(repo.lane, "merge", "-q", "--no-edit", "-m", "sync main into the lane", "origin/main")
             merge_sha = git(repo.lane, "rev-parse", "HEAD")
-            repo.task_commit("feature.txt", "the thing, finished\n", "finish the thing")
-            repo.prove_head()
+            # taint-preclear D1: a green unscoped ci on a later head would
+            # vouch for the merge commit, so the merge commit stays the head
+            # and no ci ever runs on it -- the case that still taints.
+            repo.prove_head(ci=False)
 
             r = repo.merge()
 
