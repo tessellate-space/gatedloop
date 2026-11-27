@@ -24,7 +24,7 @@
 
 #### Scenario: A line range resolves within the file
 - **WHEN** a defect cites `tests/test_orders.py:10-14` and that file has at least 14 lines
-- **THEN** the citation resolves; a range ending past the file's last line, or starting after its end, does not
+- **THEN** the citation resolves; a range ending past the file's last line, a range starting after it, and a range whose start is greater than its end (`tests/test_orders.py:14-10`) do not
 
 #### Scenario: A green defect takes no citation
 - **WHEN** the implementer passes `--cite` with `--kind green`
@@ -78,9 +78,17 @@
 - **WHEN** the author defends task 2.1 citing `.gatedloop/authored/<change>/2.1/tests/test_orders.py.authored:12`, its held copy
 - **THEN** the citation resolves and the defence is recorded
 
+#### Scenario: A placed task is defended from its restored held copy
+- **WHEN** task 2.1's tests are placed, and the author rewrites `.gatedloop/authored/<change>/2.1/tests/test_orders.py.authored` byte-identical to the placed `tests/test_orders.py` and passes `--task 2.1 --defend ... --cite ...`
+- **THEN** the held tests equal the previous handoff entry, and the `test-defence` row is recorded
+
 #### Scenario: A defence citing evidence that does not resolve is refused
 - **WHEN** the author passes `--defend` with `--cite src/missing.py`, and that file does not exist
 - **THEN** the handoff exits 1, records nothing, and names `src/missing.py`
+
+#### Scenario: A defence under an earlier handoff is checked the same way
+- **WHEN** task 2.1's governing handoff row predates this change and the author passes `--defend` with a changed held test for task 2.1
+- **THEN** the handoff exits 1, records nothing, and says changed tests are a revision
 
 #### Scenario: A citation without a defence is refused
 - **WHEN** the author passes `--cite` to `gates tests handoff` without `--defend`
@@ -113,3 +121,15 @@ The citation, passing-run and defence checks SHALL apply to a task only when the
 #### Scenario: A task re-handed off after the upgrade takes the new rules
 - **WHEN** a task of an in-flight change is re-handed off by the upgraded shim and the implementer then records a defect with no `--cite`
 - **THEN** the defect is refused
+
+### Requirement: Citations given under an earlier handoff are still checked
+
+Citations given to `gates tests defect` under an earlier governing handoff SHALL still be resolved, refused when one does not resolve, and stored. `--cite` with `--kind green` SHALL be refused under any handoff.
+
+#### Scenario: Citations under an earlier handoff are still checked and stored
+- **WHEN** a task's governing handoff row predates this change and the implementer records an `assertion` defect citing `src/missing.py`, which does not exist, and then one citing `tests/test_orders.py:12`, which resolves
+- **THEN** the first exits 1, records nothing and names `src/missing.py`; the second is recorded with that citation in `cites`
+
+#### Scenario: A green defect takes no citation under an earlier handoff either
+- **WHEN** a task's governing handoff row predates this change and the implementer passes `--cite` with `--kind green`
+- **THEN** it exits 1 and records nothing
