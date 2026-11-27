@@ -9,6 +9,11 @@ A task line in `tasks.md` MAY end with `[oracle: <gate> preserve]`, where `<gate
 - **WHEN** task 2.1 ends with `[oracle: unit preserve]` and `unit` is declared
 - **THEN** `gates validate` passes, and 2.1's oracle is `unit`, preserving every test
 
+#### Scenario: The accepted forms, as validate prints them
+
+- **WHEN** a task's oracle tag is malformed
+- **THEN** `gates validate`'s message lists `[oracle: <gate> preserve]` among the accepted forms, and says that a preserve tag takes no `rewrites:` clause
+
 #### Scenario: Preserve with characterization
 
 - **WHEN** a task ends with `[oracle: unit characterization preserve]`
@@ -74,7 +79,7 @@ The approval sha and the tag-drift check SHALL cover the `preserve` modifier. A 
 
 ### Requirement: What counts as a test path
 
-A path SHALL count as a test path when the brief's heuristic classes it as a test, when the change's ledger records it as handed off or placed, or when it matches the manifest's `acceptance.match`. A path under gatedloop's state directory or under `openspec/` SHALL never count.
+A path SHALL count as a test path when the brief's heuristic classes it as a test, when the change's ledger records it as handed off or placed, or when it matches the manifest's `acceptance.match`, which the lock SHALL read only when the evaluated `tasks.md` has a preserve task. A path under gatedloop's state directory or under `openspec/` SHALL never count.
 
 #### Scenario: A path the change handed off
 
@@ -91,18 +96,28 @@ A path SHALL count as a test path when the brief's heuristic classes it as a tes
 - **WHEN** a path lies under `openspec/specs/`
 - **THEN** it does not count as a test path
 
+#### Scenario: A malformed acceptance block with no preserve task
+
+- **WHEN** `.gates.yaml` has an `acceptance` block whose `match` the lock could not parse, and the change has no preserve task
+- **THEN** `gates tests check`, staged and under `--ref`, behaves exactly as on 0.13.0, because the block is not read
+
+#### Scenario: A malformed acceptance block on a preserve plan
+
+- **WHEN** `.gates.yaml`'s `acceptance` block is malformed and the evaluated `tasks.md` has preserve task 2.1
+- **THEN** `gates tests check` fails, naming 2.1 and repeating the message `gates validate` gives for that block
+
 ### Requirement: A preserve task changes no test path
 
-While a preserve task is in flight, `gates tests check` SHALL fail for each test path whose staged content differs from the task's latest `task-start` tree, naming the path, the task and whether it was modified, deleted or added. A rename SHALL be refused as a deletion and an addition.
+While a preserve task is in flight, `gates tests check` SHALL fail for each test path the task changed, naming the path, the task and whether it was modified, deleted or added. The task's changes SHALL be those of the commits after the last commit that ticks another task, each against its first parent, and of the staged tree against `HEAD`, leaving out what a sync merge takes from the target. A rename SHALL be refused as a deletion and an addition.
 
 #### Scenario: An existing test edited during a refactor
 
-- **WHEN** task 2.1 is tagged `[oracle: unit preserve]` and the staged tree changes `tests/test_parser.py` from its content at 2.1's `task-start`
+- **WHEN** task 2.1 is tagged `[oracle: unit preserve]` and `tests/test_parser.py` differs between the last commit that ticks another task and the staged tree, by 2.1's own staged edit or an earlier commit of 2.1
 - **THEN** the commit is denied, naming the path, 2.1 and that a preserve task changes no test
 
 #### Scenario: A test deleted during a refactor
 
-- **WHEN** a preserve task's staged tree lacks a test path its `task-start` tree has
+- **WHEN** a preserve task's staged tree deletes a test path
 - **THEN** the commit is denied, naming the path as deleted
 
 #### Scenario: A test added during a refactor
@@ -119,6 +134,26 @@ While a preserve task is in flight, `gates tests check` SHALL fail for each test
 
 - **WHEN** `gates tests check --task 2.1` runs for preserve task 2.1 and no `task-start` row exists for 2.1
 - **THEN** the check fails, saying that `gates task start 2.1` was never recorded
+
+#### Scenario: A sync merge during a refactor
+
+- **WHEN** a merge of the target, committed after preserve task 2.1's `task-start`, changes `tests/test_api.py`, and 2.1 itself changes no test path
+- **THEN** the merge commit is not denied, and the preserve conditions hold for 2.1 at its own commit
+
+#### Scenario: A conflict resolved in a test during a refactor
+
+- **WHEN** that merge resolves a conflict in `tests/test_api.py` to content that matches neither parent
+- **THEN** the commit that ticks 2.1 is denied, naming the path, 2.1 and the merge commit
+
+#### Scenario: A tree that cannot be read
+
+- **WHEN** git cannot list a tree the check must read for preserve task 2.1
+- **THEN** the check fails, naming 2.1 and the commit
+
+#### Scenario: A walk that cannot run during a refactor
+
+- **WHEN** preserve task 2.1 is in flight and the branch's walk cannot run, because no merge target resolves or a shallow clone lacks the merge-base
+- **THEN** the commit is denied, naming 2.1 and `HEAD`, and a commit for a task that is not tagged `preserve` is not affected
 
 #### Scenario: An acceptance file
 
@@ -146,12 +181,27 @@ For a preserve task in flight, `gates tests check` SHALL fail unless a run of th
 
 ### Requirement: The preserve conditions hold at any commit
 
-`gates tests check --ref <commit>` SHALL judge, from commits only, every preserve task that is checked at that commit, at the commit C that ticks it in `tasks.md`. The test-path condition SHALL compare C's tree with the tree of the last earlier commit that ticks another task, or the branch's first commit's parent. The green-run condition SHALL accept a passing run of the task's gate for that task, recorded after its latest `task-start` and carried by C's ledger, without comparing trees.
+`gates tests check --ref <commit>` SHALL judge, from commits only, each preserve task checked at that commit at the commit C that ticks it. The test-path condition SHALL judge the task's commits up to C as staged mode does, with test paths from C's ledger. The green-run condition SHALL accept a passing run of the task's gate for that task, recorded after its latest `task-start` and carried by C's ledger, without comparing trees.
 
 #### Scenario: A test edited past the commit hooks
 
 - **WHEN** the commit that ticks preserve task 2.1 changed a test path from the last earlier commit that ticks another task
 - **THEN** `gates tests check --ref <head>` fails, naming the path, 2.1 and that commit
+
+#### Scenario: A sync merge before the ticking commit
+
+- **WHEN** a sync merge between the last earlier ticking commit and C brings a target edit to `tests/test_api.py`, and preserve task 2.1 changes no test path
+- **THEN** `gates tests check --ref <head>` holds for 2.1
+
+#### Scenario: A walk that cannot run
+
+- **WHEN** preserve task 2.1 is checked at the ref and the branch's walk cannot run, as in a shallow clone that lacks the merge-base
+- **THEN** `gates tests check --ref <head>` fails, naming 2.1 and the ref, instead of skipping 2.1, and with no preserve task checked at the ref it judges no preserve condition
+
+#### Scenario: A checked preserve task that no commit ticks
+
+- **WHEN** preserve task 2.1 is checked at the ref, the walk ran, and no walked commit after the seed ticks 2.1
+- **THEN** `gates tests check --ref <head>` fails, naming 2.1 and the ref
 
 #### Scenario: A clean refactor at the head
 
@@ -182,3 +232,22 @@ For a preserve task in flight, `gates tests check` SHALL fail unless a run of th
 
 - **WHEN** preserve task 2.2 is not checked at the commit
 - **THEN** the `--ref` check applies no preserve condition to 2.2
+
+### Requirement: Each oracle-tag adoption item carries only its own clause
+
+From 0.14.0, the `preserve-oracle` adoption item SHALL be listed for a project that declares `loop.task-oracle`, and its confirm detail SHALL carry only the preserve clause of the oracle-tag line. The `test-rewrites` item's detail SHALL carry no preserve clause, so that confirming one item never opts the adopter into the other's rule text.
+
+#### Scenario: A tagging project upgrades to 0.14.0
+
+- **WHEN** a project declaring `loop.task-oracle` upgrades from 0.13.0 to 0.14.0
+- **THEN** `gates adoption` lists `preserve-oracle` as decision-only, and a project that never tags, or one still before 0.14.0, does not see it
+
+#### Scenario: Confirming the preserve item
+
+- **WHEN** the adopter reads `preserve-oracle`'s confirm detail
+- **THEN** it names the preserve clause as the template words it and no `rewrites:` text, says that `preserve` is a second-word modifier like `characterization` for tooling that classes tags as red-first or relaxed, and says not to tag `preserve` until every session has restarted on 0.14.0
+
+#### Scenario: Confirming the rewrites item
+
+- **WHEN** the adopter reads `test-rewrites`' confirm detail on 0.14.0
+- **THEN** it names the `rewrites: <path>` clause and does not contain `preserve`
